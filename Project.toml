@@ -1,5 +1,5 @@
 name = "SNNBase"
-uuid = "9d8b7fda-1049-58bc-9481-071a9f369938"
+uuid = "5fb03681-66ea-42c3-a459-1265ed30d607"
 version = "1.5.0"
 
 [deps]
