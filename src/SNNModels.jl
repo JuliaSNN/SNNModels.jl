@@ -32,7 +32,7 @@ include("analysis/spikes.jl")
 include("analysis/populations.jl")
 include("analysis/targets.jl")
 include("neuron/neurons.jl")
-include("synapse/synapses.jl")
+include("connection/synapses.jl")
 include("stimulus/stimuli.jl")
 
 end
