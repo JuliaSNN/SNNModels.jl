@@ -535,3 +535,4 @@ export Time,
     clear_monitor!,
     record,
     reset_time!
+    interpolated_record

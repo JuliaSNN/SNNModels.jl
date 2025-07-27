@@ -742,6 +742,7 @@ function resample_spikes(X, Y)
     return X, Y
 end
 
+
 function rolling_mean(a, n::Int)
     @assert 1 <= n <= length(a)
     out = similar(a, length(a) - n + 1)
@@ -908,4 +909,6 @@ export spiketimes,
     st_order,
     isi_cv,
     CV_isi2
-sample_spikes, sample_inputs
+    sample_spikes, 
+    sample_inputs
+    resample_spikes
