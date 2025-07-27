@@ -51,7 +51,7 @@ function is_attractor_state(
     ratio::Real = 0.3,
     σ::Real = 10.0f0,
     false_value = 10,
-) where {T<:SNN.AbstractPopulation}
+) where {T<:AbstractPopulation}
     # Calculate the firing rate over the last N seconds
 
     rates, r = firing_rate(pop; interval, interpolate = true)

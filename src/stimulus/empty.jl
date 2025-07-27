@@ -4,3 +4,5 @@
 end
 
 function stimulate!(p::EmptyStimulus, param::EmptyParam, T::Time, dt::Float32) end
+
+export EmptyStimulus

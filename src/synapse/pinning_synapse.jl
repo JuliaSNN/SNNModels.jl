@@ -54,3 +54,5 @@ function plasticity!(
     BLAS.ger!(C, f - g, q, W)
     BLAS.ger!(-C, q, q, P)
 end
+
+export PINningSynapse

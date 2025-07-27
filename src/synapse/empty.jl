@@ -6,3 +6,5 @@
 end
 
 function forward!(p::EmptySynapse, param::EmptyParam) end
+
+export EmptySynapse

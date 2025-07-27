@@ -61,3 +61,5 @@ function plasticity!(c::FLSynapse, param::FLSynapseParameter, dt::Float32, T::Ti
     axpy!(C * (f - z), q, w)
     BLAS.ger!(-C, q, q, P)
 end
+
+export FLSynapse

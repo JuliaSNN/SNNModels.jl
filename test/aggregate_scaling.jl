@@ -1,5 +1,5 @@
 using SpikingNeuralNetworks
-SNN.@load_units;
+@load_units;
 
 E = AdExNeuron(N = 100, param = AdExSynapseParameter(), name = "E")
 P = Poisson(N = 100, param = PoissonParameter(3Hz))
@@ -14,9 +14,9 @@ param = AggregateScalingParameter(
 A = AggregateScaling(E, [S], param = param)
 
 model = merge_models(E = E, P = P, S = S, A = A)
-SNN.monitor!(E, [:fire])
-SNN.monitor!(A, [:Y], sr = 100Hz)
-SNN.monitor!(S, [:W], sr = 100Hz)
+monitor!(E, [:fire])
+monitor!(A, [:Y], sr = 100Hz)
+monitor!(S, [:W], sr = 100Hz)
 
 for n = 1:10_000
     model.syn.S.W .+= randn(size(model.syn.S.W))

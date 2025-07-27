@@ -261,7 +261,7 @@ The function displays a graph representation of the model, followed by detailed 
 Prints the graph of the model, along with the name, key, type, and parameters of each component in the populations, synapses, and stimuli.
 
 # Exception
-Raises an assertion error if any component in the populations is not a subtype of `SNN.AbstractPopulation`, if any component in the synapses is not a subtype of `SNN.AbstractConnection`, or if any component in the stimuli is not a subtype of `SNN.AbstractStimulus`.
+Raises an assertion error if any component in the populations is not a subtype of `AbstractPopulation`, if any component in the synapses is not a subtype of `AbstractConnection`, or if any component in the stimuli is not a subtype of `AbstractStimulus`.
 
 """
 function print_model(model, get_keys = false)
@@ -272,7 +272,7 @@ function print_model(model, get_keys = false)
         v = filter_first_vertex(model_graph, (g, v) -> get_prop(model_graph, v, :key) == k)
         name = props(model_graph, v)[:name]
         _k = get_keys ? "($k)" : ""
-        @assert typeof(getfield(pop, k)) <: SNN.AbstractPopulation "Expected neuron, got $(typeof(getfield(network.pop,k)))"
+        @assert typeof(getfield(pop, k)) <: AbstractPopulation "Expected neuron, got $(typeof(getfield(network.pop,k)))"
         push!(
             populations,
             "$(f2l(name)): $(f2l(nameof(typeof(getfield(pop,k))))):  $(f2l(getfield(pop,k).N)) $(f2l((nameof(typeof(getfield(pop,k).param)))))",
@@ -291,7 +291,7 @@ function print_model(model, get_keys = false)
                 props(model_graph, e)[:norm][i] !== :none ?
                 "($(props(model_graph, e)[:norm][i]))" : ""
             # @info "$name $(_k) $norm: \n $(nameof(typeof(getfield(syn,k)))): $(nameof(typeof(getfield(syn,k).param)))"
-            @assert typeof(getfield(syn, k)) <: SNN.AbstractConnection "Expected synapse, got $(typeof(getfield(network.syn,k)))"
+            @assert typeof(getfield(syn, k)) <: AbstractConnection "Expected synapse, got $(typeof(getfield(network.syn,k)))"
             push!(synapses, "$(f2l(name, 18)) : $(f2l(syn_pop, 30)):$(f2l(norm)): $(f2l(nameof(typeof(getfield(syn,k).LTPParam)))) : $(f2l(nameof(typeof(getfield(syn,k).STPParam))))")
         end
     end
@@ -303,7 +303,7 @@ function print_model(model, get_keys = false)
             syn_pop = props(model_graph, e)[:pop][i]
             _k = get_keys ? "($k)" : ""
             # @info "$name $(_k): $(nameof(typeof(getfield(stim,k)))): $(nameof(typeof(getfield(stim,k).param)))"
-            @assert typeof(getfield(stim, k)) <: SNN.AbstractStimulus "Expected stimulus, got $(typeof(getfield(network.stim,k)))"
+            @assert typeof(getfield(stim, k)) <: AbstractStimulus "Expected stimulus, got $(typeof(getfield(network.stim,k)))"
             push!(stimuli, "$(f2l(name)) $(_k): $(f2l(syn_pop, 30)) $(nameof(typeof(getfield(stim,k))))")
         end
     end

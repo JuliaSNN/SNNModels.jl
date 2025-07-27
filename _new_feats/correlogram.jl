@@ -1,6 +1,6 @@
 using SNNPlots
 using SpikingNeuralNetworks
-SNN.@load_units
+@load_units
 import SpikingNeuralNetworks: AdExParameter
 using Statistics, Random
 

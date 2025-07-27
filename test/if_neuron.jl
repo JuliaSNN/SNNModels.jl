@@ -1,5 +1,5 @@
-E = SNN.IF(; N = 1)
+E = IF(; N = 1)
 E.I = [11]
-SNN.monitor!(E, [:v, :fire])
+monitor!(E, [:v, :fire])
 
-SNN.sim!([E]; duration = 300ms)
+sim!([E]; duration = 300ms)

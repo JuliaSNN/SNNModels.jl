@@ -30,16 +30,16 @@ A `MetaGraphs.MetaDiGraph` object representing the graph.
 `AbstractPopulation` items are added as vertices.
 
 For each connection it checks the type of the synapse and adds an edge between the pre-synaptic population and the post-synaptic population. 
-    - `SNN.SpikingSynapse`: the edge represents a connection from the firing population to the receiving population.   
-    - `SNN.SynapseNormalization`: the edge represents a normalization of synapses between populations.
-    - `SNN.PoissonStimulus`: the edge represents a stimulus from the pre-synaptic population to the post-synaptic population.
+    - `SpikingSynapse`: the edge represents a connection from the firing population to the receiving population.   
+    - `SynapseNormalization`: the edge represents a normalization of synapses between populations.
+    - `PoissonStimulus`: the edge represents a stimulus from the pre-synaptic population to the post-synaptic population.
 
 For each stimulus, it adds a vertex to the graph representing an implicit pre-synaptic population [:fire] an edge between it and the post-synaptic population [:post].
 
 Returns a MetaGraphs.MetaDiGraph where:
 
 # Errors
-Throws ArgumentError when the synapse type is neither SNN.SpikingSynapse nor SNN.SynapseNormalization.
+Throws ArgumentError when the synapse type is neither SpikingSynapse nor SynapseNormalization.
 """
 function graph(model)
     graph = MetaGraphs.MetaDiGraph()

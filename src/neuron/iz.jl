@@ -36,3 +36,6 @@ function integrate!(p::IZ, param::IZParameter, dt::Float32)
         u[i] += ifelse(fire[i], d, 0.0f0)
     end
 end
+
+
+export IZ, IZParameter

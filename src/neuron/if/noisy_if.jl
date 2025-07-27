@@ -29,3 +29,5 @@ function integrate!(p::NoisyIF, param::NoisyIFParameter, dt::Float32)
         v[i] = ifelse(fire[i], Vr, v[i])
     end
 end
+
+export NoisyIF

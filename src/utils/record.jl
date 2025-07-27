@@ -298,7 +298,7 @@ function interpolated_record(p, sym)
         return firing_rate(p, τ = 20ms)
     end
     sr = p.records[:sr][sym]
-    v_dt = SNN.getvariable(p, sym)
+    v_dt = getvariable(p, sym)
 
     # ! adjust the end time to account for the added first element 
     _end = (size(v_dt)[end] - 1) / sr

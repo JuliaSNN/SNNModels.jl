@@ -64,3 +64,5 @@ function plasticity!(c::RateSynapse, param::RateSynapseParameter, dt::Float32, T
         end
     end
 end
+
+export RateSynapse

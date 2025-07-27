@@ -1,6 +1,6 @@
-using SpikingNeuralNetworks
+using SNNBase
 using Test
-SNN.@load_units
+@load_units
 
 if VERSION > v"1.1"
     include("ctors.jl")

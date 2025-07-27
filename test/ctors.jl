@@ -36,19 +36,20 @@ end
 @testset "Constructors" begin
     @testset "Type parameters" begin
         for Model in (
-            SNN.HH,
-            SNN.IF,
-            SNN.IZ,
-            SNN.NoisyIF,
-            SNN.Poisson,
-            SNN.Rate,
-            SNN.AdEx,
-            SNN.Tripod,
+            HH,
+            IF,
+            IZ,
+            NoisyIF,
+            Poisson,
+            Rate,
+            AdEx,
+            Tripod,
         )
             test_typeparams(Model)
         end
-        test_typeparams(SNN.RateSynapse; args = (SNN.Rate(), SNN.Rate()))
-        test_typeparams(SNN.PINningSynapse; args = (SNN.Rate(), SNN.Rate()))
-        test_typeparams(SNN.FLSynapse; args = (SNN.Rate(), SNN.Rate()))
+        test_typeparams(RateSynapse; args = (Rate(), Rate()))
+        test_typeparams(PINningSynapse; args = (Rate(), Rate()))
+        test_typeparams(FLSynapse; args = (Rate(), Rate()))
     end # Type parameters
 end # Constructors
+

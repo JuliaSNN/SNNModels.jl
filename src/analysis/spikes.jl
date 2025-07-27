@@ -104,7 +104,7 @@ export spikecount
 # spikecount(x::Spiketimes) = length.(x)
 
 # function alpha_function(t::T; t0::T, τ::T) where {T<:Float32}
-#     return SNN.exp64(- (t - t0) / τ) * Θ((t - t0))
+#     return exp64(- (t - t0) / τ) * Θ((t - t0))
 # end
 
 # """
@@ -302,7 +302,7 @@ function firing_rate(
     population::T;
     kwargs...,
 ) where {T<:Union{AbstractPopulation,AbstractStimulus}}
-    return firing_rate(SNN.spiketimes(population); kwargs...)
+    return firing_rate(spiketimes(population); kwargs...)
 end
 
 function firing_rate(populations; mean_pop = false, kwargs...)
@@ -340,7 +340,7 @@ function average_firing_rate(
 end
 
 function average_firing_rate(populations; interval)
-    spiketimes = SNN.spiketimes(populations)
+    spiketimes = spiketimes(populations)
     return sort(vcat(spiketimes...)) |> x -> fit(Histogram, x, interval).weights,
     interval[1:(end-1)]
 end
@@ -472,7 +472,7 @@ function bin_spiketimes(
         end
     end
     if do_sparse
-        return SNN.sparse(spike_train), interval
+        return sparse(spike_train), interval
     else
         return spike_train, interval
     end
@@ -785,7 +785,7 @@ This function takes in the records of a neural population `P` and time constant 
 - `dt`: The time step used for the simulation, defaults to 0.1 milliseconds.
 
 # Returns
-- `spiketimes`: An object of type `SNN.Spiketimes` which contains the calculated spike times of each neuron.
+- `spiketimes`: An object of type `Spiketimes` which contains the calculated spike times of each neuron.
 
 # Examples
 ```
@@ -799,7 +799,7 @@ function spiketimes_from_bool(P; dt = 0.1ms)
     for (n, z) in enumerate(eachrow(spikes))
         push!(_spiketimes, findall(z) * dt)
     end
-    return SNN.Spiketimes(_spiketimes)
+    return Spiketimes(_spiketimes)
 end
 
 """

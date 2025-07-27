@@ -1,57 +1,57 @@
 network = let
     NE = 400
     NI = 100
-    E = SNN.Tripod()
-    I1 = SNN.IF(; N = NI ÷ 2, param = SNN.IFParameter(τm = 7ms, El = -55mV))
-    I2 = SNN.IF(; N = NI ÷ 2, param = SNN.IFParameter(τm = 20ms, El = -55mV))
-    E_to_I1 = SNN.SpikingSynapse(E, I1, :ge, p = 0.2, μ = 15.0)
-    E_to_I2 = SNN.SpikingSynapse(E, I2, :ge, p = 0.2, μ = 15.0)
-    I2_to_E = SNN.CompartmentSynapse(
+    E = Tripod()
+    I1 = IF(; N = NI ÷ 2, param = IFParameter(τm = 7ms, El = -55mV))
+    I2 = IF(; N = NI ÷ 2, param = IFParameter(τm = 20ms, El = -55mV))
+    E_to_I1 = SpikingSynapse(E, I1, :ge, p = 0.2, μ = 15.0)
+    E_to_I2 = SpikingSynapse(E, I2, :ge, p = 0.2, μ = 15.0)
+    I2_to_E = CompartmentSynapse(
         I2,
         E,
         :d1,
         :hi,
         p = 0.2,
         μ = 5.0,
-        param = SNN.iSTDPPotential(v0 = -50mV),
+        param = iSTDPPotential(v0 = -50mV),
     )
-    I1_to_E = SNN.CompartmentSynapse(
+    I1_to_E = CompartmentSynapse(
         I1,
         E,
         :s,
         :hi,
         p = 0.2,
         μ = 5.0,
-        param = SNN.iSTDPRate(r = 10Hz),
+        param = iSTDPRate(r = 10Hz),
     )
-    E_to_E_d1 = SNN.CompartmentSynapse(
+    E_to_E_d1 = CompartmentSynapse(
         E,
         E,
         :d1,
         :he,
         p = 0.2,
         μ = 30,
-        param = SNN.vSTDPParameter(),
+        param = vSTDPParameter(),
     )
-    E_to_E_d2 = SNN.CompartmentSynapse(
+    E_to_E_d2 = CompartmentSynapse(
         E,
         E,
         :d2,
         :he,
         p = 0.2,
         μ = 30,
-        param = SNN.vSTDPParameter(),
+        param = vSTDPParameter(),
     )
     pop = dict2ntuple(@strdict E I1 I2)
-    recurrent_norm_d1 = SNN.SynapseNormalization(
+    recurrent_norm_d1 = SynapseNormalization(
         E,
         [E_to_E_d1],
-        param = SNN.MultiplicativeNorm(τ = 100ms),
+        param = MultiplicativeNorm(τ = 100ms),
     )
-    recurrent_norm_d2 = SNN.SynapseNormalization(
+    recurrent_norm_d2 = SynapseNormalization(
         E,
         [E_to_E_d2],
-        param = SNN.MultiplicativeNorm(τ = 100ms),
+        param = MultiplicativeNorm(τ = 100ms),
     )
     norm1 = recurrent_norm_d1
     norm2 = recurrent_norm_d2
@@ -64,5 +64,5 @@ end
 # background
 
 #
-SNN.clear_records!([network.pop...])
-SNN.train!([network.pop...], [network.syn...], duration = 5000ms)
+clear_records!([network.pop...])
+train!([network.pop...], [network.syn...], duration = 5000ms)

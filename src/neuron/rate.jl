@@ -24,3 +24,6 @@ function integrate!(p::Rate, param::RateParameter, dt::Float32)
         r[i] = tanh(x[i]) #max(0, x[i])
     end
 end
+
+
+export Rate

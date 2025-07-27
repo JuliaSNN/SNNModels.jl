@@ -1,7 +1,7 @@
 using DrWatson
 using Revise
 using SpikingNeuralNetworks
-SNN.@load_units;
+@load_units;
 using SNNUtils
 using SNNPlots
 using Statistics
@@ -22,7 +22,7 @@ E_params = quaresima2022
 
 E = let
     @unpack dends, NMDA, param, soma_syn, dend_syn = E_params
-    E = SNN.Tripod(
+    E = Tripod(
         dends...;
         N = NE,
         soma_syn = soma_syn,
@@ -37,24 +37,24 @@ end
 # Background noise
 stimuli = Dict(
     :noise_e =>
-        SNN.PoissonStimulus(E, :he_s, param = 4.0kHz, neurons = :ALL, μ = 2.7f0),
+        PoissonStimulus(E, :he_s, param = 4.0kHz, neurons = :ALL, μ = 2.7f0),
     :noise_i =>
-        SNN.PoissonStimulus(E, :hi_s, param = 1.0kHz, neurons = :ALL, μ = 3.0f0),
+        PoissonStimulus(E, :hi_s, param = 1.0kHz, neurons = :ALL, μ = 3.0f0),
 )
 model = merge_models(stimuli, E = E)
 
 
 # %%
-SNN.monitor!(
+monitor!(
     model.pop.E,
     [:fire, :v_d1, :v_s, :v_d1, :v_d2, :h_s, :h_d1, :h_d2, :g_d1, :g_d2],
 )
-SNN.train!(model = model, duration = 5s, pbar = true, dt = 0.125)
-SNN.raster(model.pop, (4000, 5000))
+train!(model = model, duration = 5s, pbar = true, dt = 0.125)
+raster(model.pop, (4000, 5000))
 
 ## Target activation with stimuli
 p = plot()
-SNN.vecplot!(
+vecplot!(
     p,
     model.pop.E,
     :v_d1,
@@ -65,7 +65,7 @@ SNN.vecplot!(
     ylims = :auto,
     ribbon = false,
 )
-SNN.vecplot!(
+vecplot!(
     p,
     model.pop.E,
     :v_d2,
@@ -76,7 +76,7 @@ SNN.vecplot!(
     ylims = :auto,
     ribbon = false,
 )
-SNN.vecplot!(
+vecplot!(
     p,
     model.pop.E,
     :v_s,

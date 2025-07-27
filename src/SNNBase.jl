@@ -1,6 +1,5 @@
 module SNNBase
 
-
 using DrWatson
 import Dates: now
 using JLD2

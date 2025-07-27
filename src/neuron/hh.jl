@@ -73,6 +73,8 @@ function integrate!(p::HH, param::HHParameter, dt::Float32)
     end
 end
 
+export HH
+
 # function HH_spike_count(p::HH, dt = 0.01)
 #     neurons = hcat(p.records[:fire]...)
 #     spike_count = zeros(size(neurons, 1))
