@@ -1,6 +1,6 @@
 # SNNModels
 
-The package contains model types for the SpikingNeuralNetworks.jl ecosystem.
+The package contains model types and core functionalities for the SpikingNeuralNetworks.jl ecosystem.
 
 ## Documentation
 
