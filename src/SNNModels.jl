@@ -31,8 +31,8 @@ include("utils/spatial.jl")
 include("analysis/spikes.jl")
 include("analysis/populations.jl")
 include("analysis/targets.jl")
-include("neuron/neurons.jl")
-include("connection/synapses.jl")
-include("stimulus/stimuli.jl")
+include("populations/populations.jl")
+include("connections/connections.jl")
+include("stimuli/stimuli.jl")
 
 end
