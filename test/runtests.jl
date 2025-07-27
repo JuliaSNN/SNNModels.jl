@@ -1,4 +1,4 @@
-using SNNBase
+using SNNModels
 using Test
 @load_units
 

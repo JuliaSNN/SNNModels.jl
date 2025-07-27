@@ -1,4 +1,4 @@
-module SNNBase
+module SNNModels
 
 using DrWatson
 import Dates: now
