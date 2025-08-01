@@ -13,7 +13,7 @@
     V2::FT = 15mV
     V3::FT = 0mV
     V4::FT = 30mV
-    ϕ::FT  = 1Hz
+    ϕ::FT  = 25Hz
     Ee::FT = 0mV
     Ei::FT = -75mV
 end
@@ -24,7 +24,7 @@ end
     id::String = randstring(12)
     param::MorrisLecarParameter = MorrisLecarParameter()
     N::Int32 = 100
-    v::VFT = param.El .+ zeros(N)
+    v::VFT = -52.14 .+ zeros(N)
     w::VFT = 0.2 .+ zeros(N)
     ge::VFT = zeros(N)
     gi::VFT = zeros(N)
@@ -46,19 +46,23 @@ function integrate!(p::MorrisLecar, param::MorrisLecarParameter, dt::Float32)
         m_ss = 0.5*(1+tanh((v[i]-V1)/V2))
         n_ss = 0.5*(1+tanh((v[i]-V3)/V4))
         τ = 1 / (ϕ  * cosh((v[i]-V3)/(2V4)))
-        @show n_ss, m_ss, τ
 
-        v[i] += dt / Cm * (
-                I[i] +
-                gl  * (El  - v[i]) +
-                gCa * (ECa - v[i]) * m_ss +
-                gK  * (EK  - v[i]) * w[i] +
-                # ge[i] * (Ee - v[i]) +
-                # gi[i] * (Ei - v[i]) +
-                0
-            )
+        # v[i] += dt / Cm * (
+        #         I[i] +
+        #         gl  * (El  - v[i]) +
+        #         gCa * (ECa - v[i]) * m_ss +
+        #         gK  * (EK  - v[i]) * w[i] +
+        #         0
+        #     )
+        # w[i]  += dt * (n_ss - w[i])/τ
 
-        w[i]  += dt * (n_ss - w[i])/τ
+        v[i] += dt / Cm * MorrisLecar_dv(v[i], w[i], I[i], param)
+        w[i] += dt * MorrisLecar_dw(v[i], w[i], param)
+
+        v[i] += dt/Cm * (
+                ge[i] * (Ee - v[i]) +
+                gi[i] * (Ei - v[i]) 
+        )
         ge[i] += dt * -ge[i] / τe
         gi[i] += dt * -gi[i] / τi
     end
@@ -66,6 +70,43 @@ function integrate!(p::MorrisLecar, param::MorrisLecarParameter, dt::Float32)
         fire[i] = v[i] > 20.0f0
 
     end
+end
+
+
+function MorrisLecar_dv(v::Float32, w::Float32, I::Float32, param::MorrisLecarParameter)
+    @unpack Cm, El, EK, ECa, gl, gK, gCa, τe, τi, V1, V2, V3, V4, ϕ = param
+    m_ss = 0.5*(1+tanh((v-V1)/V2))
+    return  I +
+            gl  * (El  - v) +
+            gCa * (ECa - v) * m_ss +
+            gK  * (EK  - v) * w
+    return dv
+end
+
+
+function MorrisLecar_dw(v::Float32, w::Float32, param::MorrisLecarParameter)  
+    @unpack Cm, El, EK, ECa, gl, gK, gCa, τe, τi, V1, V2, V3, V4, ϕ = param
+    n_ss = 0.5*(1+tanh((v-V3)/V4))
+    τ = 1 / (ϕ * cosh((v-V3)/(2V4)))
+    return (n_ss - w)/τ
+end
+
+
+function MorrisLecar_w_nullcline(v::Float32, param::MorrisLecarParameter)  
+    @unpack Cm, El, EK, ECa, gl, gK, gCa, τe, τi, V1, V2, V3, V4, ϕ = param
+    n_ss = 0.5*(1+tanh((v-V3)/V4))
+    return -n_ss
+end
+
+
+function MorrisLecar_v_nullcline(v::Float32, I::Float32, param::MorrisLecarParameter)
+    @unpack Cm, El, EK, ECa, gl, gK, gCa, τe, τi, V1, V2, V3, V4, ϕ = param
+    m_ss = 0.5*(1+tanh((v-V1)/V2))
+    return  -(I +
+            gl  * (El  - v) +
+            gCa * (ECa - v) * m_ss)/(
+            gK  * (EK  - v))
+    return dv
 end
 
 function plasticity!(p::MorrisLecar, param::MorrisLecarParameter, dt::Float32, T::Time )
