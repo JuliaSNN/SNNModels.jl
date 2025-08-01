@@ -183,7 +183,6 @@ function train!(
     end
     for c in C
         forward!(c, c.param)
-        ## I moved the control in the plasticity function for the sake of cleaner code
         plasticity!(c, c.param, dt, T)
         record!(c, T)
     end
