@@ -16,6 +16,7 @@ include("synapse_parameters.jl")
 include("poisson.jl")
 include("iz.jl")
 include("hh.jl")
+include("morrislecar.jl")
 include("rate.jl")
 include("identity.jl")
 
