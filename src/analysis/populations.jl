@@ -92,10 +92,11 @@ function average_conn_strength(M::Matrix, neurons::Vector{Vector{Int}})
     ave_conn = zeros(length(neurons), length(neurons))
     for i in eachindex(neurons)
         for j in eachindex(neurons)
-            ave_conn[i,j] = mean(M[neurons[i], neurons[j]]) / 0.20
+            ave_conn[i, j] = mean(M[neurons[i], neurons[j]]) / 0.20
         end
     end
     return ave_conn
 end
 
-export population_indices, filter_populations, subpopulations, filter_items, average_conn_strength
+export population_indices,
+    filter_populations, subpopulations, filter_items, average_conn_strength

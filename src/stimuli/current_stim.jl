@@ -12,8 +12,8 @@ end
 end
 
 function CurrentNoiseParameter(
-    N::Union{Number, AbstractPopulation};
-    I_base::Number=0,
+    N::Union{Number,AbstractPopulation};
+    I_base::Number = 0,
     I_dist::Distribution = Normal(0.0, 0.0),
     α::Number = 0.0,
 )
@@ -49,8 +49,8 @@ end
 
 
 function CurrentStimulus(
-    post::T, 
-    sym::Symbol=:I;
+    post::T,
+    sym::Symbol = :I;
     neurons = :ALL,
     param,
     kwargs...,
@@ -80,7 +80,7 @@ function stimulate!(p, param::CurrentNoiseParameter, time::Time, dt::Float32)
     @unpack I_base, I_dist, α = param
     rand!(I_dist, randcache)
     @inbounds @simd for i in p.neurons
-        I[i] = (I_base[i]+ randcache[i])*(1-α[i]) + I[i]* (α[i])
+        I[i] = (I_base[i] + randcache[i])*(1-α[i]) + I[i] * (α[i])
     end
 end
 

@@ -12,19 +12,14 @@ N = 1
 dendrites = [200um, 300um]
 E = Multipod(dendrites, N = N)# dend_syn=SNNUtils.quaresima2022_nar(1.0, 35ms).dend_syn)
 stimE = Dict(
-    Symbol("stimE_$n") => PoissonStimulus(
-        E,
-        :he,
-        n,
-        neurons = :ALL,
-        param = 3.5kHz,
-        name = "stimE_$n",
-    ) for n = 1:length(dendrites)
+    Symbol("stimE_$n") =>
+        PoissonStimulus(E, :he, n, neurons = :ALL, param = 3.5kHz, name = "stimE_$n")
+    for n = 1:length(dendrites)
 )
 stimI = Dict(
     Symbol("stimI_$n") =>
-        PoissonStimulus(E, :hi, n, neurons = :ALL, param = 3kHz, name = "stimI_$n")
-    for n = 1:length(dendrites)
+        PoissonStimulus(E, :hi, n, neurons = :ALL, param = 3kHz, name = "stimI_$n") for
+    n = 1:length(dendrites)
 )
 
 model = merge_models(E = E, stimE, stimI)

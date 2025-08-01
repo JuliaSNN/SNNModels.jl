@@ -38,15 +38,17 @@ Calculate the periodic distance between two points in a 2D grid.
 - `distance::Float64`: The periodic distance between the two points.
 """
 function periodic_distance(point1, point2, grid_size)
-    isa(grid_size, Vector) && @assert length(grid_size) == length(point1) "grid_size must match the dimension of points: $(point1), $(length(grid_size))"
+    isa(grid_size, Vector) &&
+        @assert length(grid_size) == length(point1) "grid_size must match the dimension of points: $(point1), $(length(grid_size))"
     typeof(grid_size) <: Real && (grid_size = repeat([grid_size], length(point1)))
-    @assert length(point1) == length(point2) "point1 and point2 must have the same dimension" 
+    @assert length(point1) == length(point2) "point1 and point2 must have the same dimension"
     return sqrt(
-            sum(
-                map(eachindex(point1)) do n
-                    min(abs(point1[n] - point2[n]), grid_size[n] - abs(point1[n] - point2[n]))
-            end).^2
-            )
+        sum(
+            map(eachindex(point1)) do n
+                min(abs(point1[n] - point2[n]), grid_size[n] - abs(point1[n] - point2[n]))
+            end,
+        ) .^ 2,
+    )
 end
 
 """
@@ -67,8 +69,7 @@ function neurons_within_circle(points, center, distance, grid_size)
     map(x->periodic_distance(x, center, grid_size) <= distance, points)
 end
 
-function neurons_within(func::Function, kwargs...)
-end
+function neurons_within(func::Function, kwargs...) end
 
 """
     neurons_outside_area(points, center, distance, grid_size)
@@ -150,31 +151,44 @@ function compute_connections(pre::Symbol, post::Symbol, points; conn, spatial)
         return P, W
     end
     if spatial.type == :gaussian
-        function gaussian_weight(pre, post=[0f0,0.0f0]; σx::Float32, σy::Float32, grid_size::Vector{Float32})
+        function gaussian_weight(
+            pre,
+            post = [0.0f0, 0.0f0];
+            σx::Float32,
+            σy::Float32,
+            grid_size::Vector{Float32},
+        )
             # @fastmath @inbounds 
             begin
                 x = periodic_distance(post[1], pre[1], grid_size[1])
                 y = periodic_distance(post[2], pre[2], grid_size[2])
-                return exp64(-(x/σx)^2 -(y/σy)^2)
+                return exp64(-(x/σx)^2 - (y/σy)^2)
             end
         end
         @unpack σs, grid_size, ϵ = spatial
-        X, Y  = grid_size
-        x = range(-X/2, stop=X/2, length=200) |> collect
-        y = range(-Y/2, stop=Y/2, length=200) |> collect
+        X, Y = grid_size
+        x = range(-X/2, stop = X/2, length = 200) |> collect
+        y = range(-Y/2, stop = Y/2, length = 200) |> collect
         σx, σy = Float32.(getfield(σs, pre))
         γ = 1/mean(map(Iterators.product(x, y)) do point
-            gaussian_weight(point;  σx, σy, grid_size)
+            gaussian_weight(point; σx, σy, grid_size)
         end)
-        p =Float32(conn.p * ϵ * γ)
+        p = Float32(conn.p * ϵ * γ)
         randcache = rand(N_post, N_pre)
         for j = 1:N_pre
             for i = 1:N_post
                 pre == post && i == j && continue
                 p == 0 && continue
                 randcache[i, j] > p && continue
-                if randcache[i, j] <= p * gaussian_weight(pre_points[j], post_points[i]; σx=σx, σy=σy, grid_size)
-                    P[i, j] =true
+                if randcache[i, j] <=
+                   p * gaussian_weight(
+                    pre_points[j],
+                    post_points[i];
+                    σx = σx,
+                    σy = σy,
+                    grid_size,
+                )
+                    P[i, j] = true
                     W[i, j] = conn.μ
                 end
             end
@@ -257,33 +271,33 @@ grid_size = (x=0.4, y=0.4)
 spatial_avg, x_range, y_range = spatial_activity(points, activity; N, L, grid_size)
 ```
 """
-function spatial_activity(points, activity; N, L, grid_size=(x= [0,0.1], y= [0,0.1]))
+function spatial_activity(points, activity; N, L, grid_size = (x = [0, 0.1], y = [0, 0.1]))
     xs, ys = points
     _, num_values = size(activity)
     num_matrices = num_values ÷ N
 
     # Define the grid size
     @unpack x, y = grid_size
-    x_range = ceil(Int,diff(collect(x))[1] / L)
-    y_range = ceil(Int,diff(collect(y))[1] / L)
+    x_range = ceil(Int, diff(collect(x))[1] / L)
+    y_range = ceil(Int, diff(collect(y))[1] / L)
 
     spatial_avg = Array{Any,3}(undef, x_range, y_range, num_matrices)
     spatial_avg[:].=0
-    for t in 1:num_matrices
-        time_index = (1+(t-1) * N) : (t * N - 1)
-        for j  in 1:x_range
-            for k in 1:y_range
+    for t = 1:num_matrices
+        time_index = (1+(t-1)*N):(t*N-1)
+        for j = 1:x_range
+            for k = 1:y_range
                 # Find points within the current grid cell
-                indices_x = findall(_x-> ((j-1)*L <= _x-x[1] < j*L), xs) |> Set
-                indices_y = findall(_y-> ((k-1)*L <= _y-y[1] < k*L), ys) |> Set
+                indices_x = findall(_x -> ((j-1)*L <= _x-x[1] < j*L), xs) |> Set
+                indices_y = findall(_y -> ((k-1)*L <= _y-y[1] < k*L), ys) |> Set
                 indices = intersect(indices_x, indices_y) |> collect
                 isempty(indices) && continue
                 spatial_avg[j, k, t] = mean(activity[indices, time_index])
             end
         end
     end
-    x_range  = range(x[1], stop=x[end], length=x_range)
-    y_range  = range(y[1], stop=y[end], length=y_range)
+    x_range = range(x[1], stop = x[end], length = x_range)
+    y_range = range(y[1], stop = y[end], length = y_range)
     return spatial_avg, x_range, y_range
 end
 

@@ -281,8 +281,8 @@ function update_multipod!(
                 @unpack gsyn, E_rev, nmda = dend_syn[r]
                 if nmda > 0.0f0
                     is[d+1] +=
-                        gsyn * g_d[i, d, r] * (v_d[d][i] + Δv[d+1] * dt - E_rev) / (1.0f0 + (mg / b) * exp256(k * (v_d[d][i] + Δv[d+1] * dt))
-                        )
+                        gsyn * g_d[i, d, r] * (v_d[d][i] + Δv[d+1] * dt - E_rev) /
+                        (1.0f0 + (mg / b) * exp256(k * (v_d[d][i] + Δv[d+1] * dt)))
                 else
                     is[d+1] += gsyn * g_d[i, d, r] * (v_d[d][i] + Δv[d+1] * dt - E_rev)
                 end

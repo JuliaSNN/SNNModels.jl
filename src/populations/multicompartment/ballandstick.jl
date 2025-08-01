@@ -273,9 +273,9 @@ function update_ballandstick!(
                 gl * (
                     (-v_s[i] + Δv[1] * dt + Er) +
                     ΔT * exp64(1 / ΔT * (v_s[i] + Δv[1] * dt - θ[i]))
-                ) - w_s[i] - is[1] - cs[1] + I[i] 
+                ) - w_s[i] - is[1] - cs[1] + I[i]
             ) / C
-        Δv[2] = ((-(v_d[i] + Δv[2] * dt) + Er) * d.gm[i] - is[2] + cs[1] +I_d[i]) / d.C[i]
+        Δv[2] = ((-(v_d[i] + Δv[2] * dt) + Er) * d.gm[i] - is[2] + cs[1] + I_d[i]) / d.C[i]
     end
 
 end

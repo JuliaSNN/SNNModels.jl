@@ -227,7 +227,7 @@ function firing_rate(
     pop_average = false,
     time_average = false,
     neurons = :ALL,
-    kwargs...
+    kwargs...,
 )
     # Check if the interval is empty and create an interval
     interval = _retrieve_interval(interval; kwargs...)
@@ -269,11 +269,7 @@ function firing_rate(
     return rates, interval
 end
 
-function _retrieve_interval(interval;
-    sampling = 20ms,
-    ttf = -1,
-    tt0 = -1,
-    kwargs...)
+function _retrieve_interval(interval; sampling = 20ms, ttf = -1, tt0 = -1, kwargs...)
     if isempty(interval)
         max_time =
             all(isempty.(spiketimes)) ? 1.0f0 : maximum(Iterators.flatten(spiketimes))
@@ -285,7 +281,7 @@ function _retrieve_interval(interval;
 end
 
 function time_average_fr(spiketimes, interval, pop_average)
-    rates = sum.(length.(spiketimes))./(interval[end] - interval[1])./Hz
+    rates = sum.(length.(spiketimes)) ./ (interval[end] - interval[1]) ./ Hz
     if pop_average
         rates = mean(rates)
         isnan(rates) && (rates = 0.0f0)
@@ -489,11 +485,12 @@ end
 
 bin_spiketimes(P::AbstractPopulation; kwargs...) = bin_spiketimes(spiketimes(P); kwargs...)
 bin_spiketimes(P::AbstractStimulus; kwargs...) = bin_spiketimes(spiketimes(P); kwargs...)
-bin_spiketimes(P, interval::T; kwargs...) where {T<:AbstractRange} = bin_spiketimes(P; interval, kwargs...)
+bin_spiketimes(P, interval::T; kwargs...) where {T<:AbstractRange} =
+    bin_spiketimes(P; interval, kwargs...)
 
 function bin_spiketimes(populations; interval, kwargs...)
     st_pops, names_pop = spiketimes_split(populations)
-    ss = map(st->bin_spiketimes(st; interval, kwargs...)[1],eachindex(st_pops)) 
+    ss = map(st->bin_spiketimes(st; interval, kwargs...)[1], eachindex(st_pops))
     return ss, interval, names_pop
 end
 
@@ -852,7 +849,7 @@ function sample_inputs(
     dt = 0.125f0,
     rate_factor = 1.0f0,
     seed = nothing,
-) where {R<:AbstractRange, F<:Real}
+) where {R<:AbstractRange,F<:Real}
     !isnothing(seed) && (Random.seed!(seed))
     inputs = Vector{Float32}[]
     for i = 1:size(rate, 1)
@@ -909,6 +906,5 @@ export spiketimes,
     st_order,
     isi_cv,
     CV_isi2
-    sample_spikes, 
-    sample_inputs
-    resample_spikes
+sample_spikes, sample_inputs
+resample_spikes

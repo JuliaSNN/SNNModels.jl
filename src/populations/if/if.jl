@@ -126,14 +126,17 @@ function update_neuron!(p::IF, param::T, dt::Float32) where {T<:AbstractIFParame
         end
         # Membrane potential
         v[i] +=
-            dt/τm *
-            ( -(v[i] - El) # leakage
-                +R *(
-                -ge[i] * (v[i] - E_e) * gsyn_e +
-                -gi[i] * (v[i] - E_i) * gsyn_i +
-                -w[i] # adaptation
-                +I[i] #synaptic term
-            ))
+            dt/τm * (
+                -(v[i] - El) # leakage
+                +
+                R * (
+                    -ge[i] * (v[i] - E_e) * gsyn_e +
+                    -gi[i] * (v[i] - E_i) * gsyn_i +
+                    -w[i] # adaptation
+                    +
+                    I[i] #synaptic term
+                )
+            )
     end
     # Adaptation current
     # if the adaptation timescale is zero, return

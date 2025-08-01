@@ -1,13 +1,6 @@
 E1 = IF(; N = 1, param = IFParameter(; El = -65mV, Vr = -55mV))
 E2 = IF(; N = 1, param = IFParameter(; El = -65mV, Vr = -55mV))
-EE = SpikingSynapse(
-    E1,
-    E2,
-    :ge;
-    μ = 60 * 0.27 / 10,
-    p = 1,
-    delay_dist = Uniform(1ms, 5ms),
-)
+EE = SpikingSynapse(E1, E2, :ge; μ = 60 * 0.27 / 10, p = 1, delay_dist = Uniform(1ms, 5ms))
 # PositiveUniform(10ms/0.125, 0.1ms./0.125))
 
 # monitor!([E, I], [:fire])

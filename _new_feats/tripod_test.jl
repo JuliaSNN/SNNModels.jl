@@ -36,19 +36,14 @@ end
 ## Stimulus
 # Background noise
 stimuli = Dict(
-    :noise_e =>
-        PoissonStimulus(E, :he_s, param = 4.0kHz, neurons = :ALL, μ = 2.7f0),
-    :noise_i =>
-        PoissonStimulus(E, :hi_s, param = 1.0kHz, neurons = :ALL, μ = 3.0f0),
+    :noise_e => PoissonStimulus(E, :he_s, param = 4.0kHz, neurons = :ALL, μ = 2.7f0),
+    :noise_i => PoissonStimulus(E, :hi_s, param = 1.0kHz, neurons = :ALL, μ = 3.0f0),
 )
 model = merge_models(stimuli, E = E)
 
 
 # %%
-monitor!(
-    model.pop.E,
-    [:fire, :v_d1, :v_s, :v_d1, :v_d2, :h_s, :h_d1, :h_d2, :g_d1, :g_d2],
-)
+monitor!(model.pop.E, [:fire, :v_d1, :v_s, :v_d1, :v_d2, :h_s, :h_d1, :h_d2, :g_d1, :g_d2])
 train!(model = model, duration = 5s, pbar = true, dt = 0.125)
 raster(model.pop, (4000, 5000))
 

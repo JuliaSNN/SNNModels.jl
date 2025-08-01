@@ -58,7 +58,7 @@ Gaba_CANAHP = GABAergic(
 )
 Synapse_CANAHP = Synapse(Glu_CANAHP, Gaba_CANAHP)
 αs_CANAHP = [1.0, 0.275/ms, 1.0, 0.015/ms]
-NMDA_CANAHP  = let
+NMDA_CANAHP = let
     Mg_mM = 1.5mM
     nmda_b = 3.57
     nmda_k = -0.063

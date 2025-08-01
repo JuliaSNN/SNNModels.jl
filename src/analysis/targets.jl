@@ -13,7 +13,7 @@ Calculate the inter-spike intervals (ISIs) for a given set of spike times.
 # Returns
 - `isis`: A vector of inter-spike intervals.
 """
-function asynchronous_state(model, interval=nothing, pop=:Exc)
+function asynchronous_state(model, interval = nothing, pop = :Exc)
     population = getfield(model.pop, pop)
     interval = interval === nothing ? (0s:0.5s:get_time(model)) : interval
     bins, _ = bin_spiketimes(population; interval, do_sparse = false)
@@ -27,7 +27,7 @@ function asynchronous_state(model, interval=nothing, pop=:Exc)
     ff = var(bins) / mean(bins)  # Fano Factor
 
     ## Calculate the Synchrony Index (SI)
-    si = mean(cov(bins, dims=2))
+    si = mean(cov(bins, dims = 2))
 
     return cv, ff, si
 end
@@ -120,10 +120,7 @@ end
 
 
 export is_unimodal,
-    get_maxima,
-    gaussian_kernel_estimate,
-    gaussian_kernel,
-    asynchronous_state
+    get_maxima, gaussian_kernel_estimate, gaussian_kernel, asynchronous_state
 
 # #Trash spurious values (below 30% of the true maximum)
 # function count_maxima(kernel, ratio)
@@ -224,8 +221,7 @@ end
 
 
 
-export gaussian_kernel_estimate,
-    gaussian_kernel
+export gaussian_kernel_estimate, gaussian_kernel
 
 
 

@@ -47,7 +47,8 @@ function synaptic_target(
     v = zeros(Float32, post.N)
     return g, v
 end
-synaptic_target(post::T, sym::Symbol, target) where {T<:AbstractPopulation} =  synaptic_target(Dict(), post, sym, target) 
+synaptic_target(post::T, sym::Symbol, target) where {T<:AbstractPopulation} =
+    synaptic_target(Dict(), post, sym, target)
 
 include("empty.jl")
 include("normalization.jl")

@@ -185,8 +185,4 @@ function plasticity!(
 end
 
 export iSTDPRate,
-    iSTDPTime,
-    iSTDPPotential,
-    iSTDPVariables,
-    plasticityvariables,
-    plasticity!
+    iSTDPTime, iSTDPPotential, iSTDPVariables, plasticityvariables, plasticity!

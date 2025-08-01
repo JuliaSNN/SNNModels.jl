@@ -177,9 +177,11 @@ end
     return x
 end
 
-name(pre, post, k=nothing) = isnothing(k) ? Symbol("$(pre)_to_$(post)") : Symbol("$(pre)_to_$(post)_$(k)")
-str_name(pre, post, k=nothing) = isnothing(k) ? "$(pre)_to_$(post)" : "$(pre)_to_$(post)_$(k)"
-str_name(pre::String, k=nothing) = isnothing(k) ? "$pre" : "$(pre)_$(k)"
+name(pre, post, k = nothing) =
+    isnothing(k) ? Symbol("$(pre)_to_$(post)") : Symbol("$(pre)_to_$(post)_$(k)")
+str_name(pre, post, k = nothing) =
+    isnothing(k) ? "$(pre)_to_$(post)" : "$(pre)_to_$(post)_$(k)"
+str_name(pre::String, k = nothing) = isnothing(k) ? "$pre" : "$(pre)_$(k)"
 
 
 
@@ -292,7 +294,10 @@ function print_model(model, get_keys = false)
                 "($(props(model_graph, e)[:norm][i]))" : ""
             # @info "$name $(_k) $norm: \n $(nameof(typeof(getfield(syn,k)))): $(nameof(typeof(getfield(syn,k).param)))"
             @assert typeof(getfield(syn, k)) <: AbstractConnection "Expected synapse, got $(typeof(getfield(network.syn,k)))"
-            push!(synapses, "$(f2l(name, 18)) : $(f2l(syn_pop, 30)):$(f2l(norm)): $(f2l(nameof(typeof(getfield(syn,k).LTPParam)))) : $(f2l(nameof(typeof(getfield(syn,k).STPParam))))")
+            push!(
+                synapses,
+                "$(f2l(name, 18)) : $(f2l(syn_pop, 30)):$(f2l(norm)): $(f2l(nameof(typeof(getfield(syn,k).LTPParam)))) : $(f2l(nameof(typeof(getfield(syn,k).STPParam))))",
+            )
         end
     end
     stimuli = Vector{String}()
@@ -304,7 +309,10 @@ function print_model(model, get_keys = false)
             _k = get_keys ? "($k)" : ""
             # @info "$name $(_k): $(nameof(typeof(getfield(stim,k)))): $(nameof(typeof(getfield(stim,k).param)))"
             @assert typeof(getfield(stim, k)) <: AbstractStimulus "Expected stimulus, got $(typeof(getfield(network.stim,k)))"
-            push!(stimuli, "$(f2l(name)) $(_k): $(f2l(syn_pop, 30)) $(nameof(typeof(getfield(stim,k))))")
+            push!(
+                stimuli,
+                "$(f2l(name)) $(_k): $(f2l(syn_pop, 30)) $(nameof(typeof(getfield(stim,k))))",
+            )
         end
     end
     sort!(stimuli)

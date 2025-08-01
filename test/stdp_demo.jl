@@ -7,7 +7,7 @@ for n = 1:E1.N
 end
 monitor!([E1, E2], [:fire])
 monitor!(EE, [:W])
-monitor!(EE, [(:x, [20, 10])], variables=:LTPVars)
+monitor!(EE, [(:x, [20, 10])], variables = :LTPVars)
 
 for t = 1:N
     E1.v[t] = -40

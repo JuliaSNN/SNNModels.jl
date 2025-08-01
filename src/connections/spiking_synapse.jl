@@ -111,8 +111,8 @@ function SpikingSynapse(
             g = g,
             targets = targets,
             @symdict(rowptr, colptr, I, J, index, W, fireI, fireJ, v_post)...,
-            LTPVars, 
-            STPVars, 
+            LTPVars,
+            STPVars,
             LTPParam,
             STPParam,
             kwargs...,
@@ -120,7 +120,7 @@ function SpikingSynapse(
 
     else
         delayspikes = fill(-1, length(W))
-        delaytime = round.(Int, rand(delay_dist, length(W))/dt )
+        delaytime = round.(Int, rand(delay_dist, length(W))/dt)
 
         return SpikingSynapseDelay(;
             ρ = ρ,
@@ -129,8 +129,8 @@ function SpikingSynapse(
             g = g,
             targets = targets,
             @symdict(rowptr, colptr, I, J, index, W, fireI, fireJ, v_post)...,
-            LTPVars, 
-            STPVars, 
+            LTPVars,
+            STPVars,
             LTPParam,
             STPParam,
             kwargs...,
@@ -138,7 +138,7 @@ function SpikingSynapse(
     end
 end
 
-function update_plasticity!(c::SpikingSynapse; LTP=nothing, STP=nothing)
+function update_plasticity!(c::SpikingSynapse; LTP = nothing, STP = nothing)
     if !isnothing(LTP)
         c.LTPParam = LTP
         c.LTPVars = plasticityvariables(c.LTPParam, length(c.fireJ), length(c.fireI))
@@ -185,4 +185,4 @@ function forward!(c::SpikingSynapseDelay, param::SpikingSynapseParameter)
     end
 end
 
-export SpikingSynapse, SpikingSynapseDelay,  update_plasticity!
+export SpikingSynapse, SpikingSynapseDelay, update_plasticity!

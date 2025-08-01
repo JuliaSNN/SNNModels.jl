@@ -114,7 +114,7 @@ A mutable struct representing time.
 """
 Time
 
-@snn_kw mutable struct Time{VFT = Vector{Float32}, VIT = Vector{Int32}, FT = Float32}
+@snn_kw mutable struct Time{VFT = Vector{Float32},VIT = Vector{Int32},FT = Float32}
     t::VFT = [0.0f0]
     tt::VIT = Int32[0]
     dt::FT = 0.125f0

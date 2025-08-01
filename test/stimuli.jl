@@ -3,20 +3,11 @@
 E_rate = 200Hz
 I_rate = 400Hz
 
-E_BallStick = BallAndStick(
-    300um,
-    N = 1,
-    NMDA = EyalNMDA,
-    param = AdExSoma(Vr = -55mV, Vt = -50mV),
-)
+E_BallStick =
+    BallAndStick(300um, N = 1, NMDA = EyalNMDA, param = AdExSoma(Vr = -55mV, Vt = -50mV))
 
-E_Tripod = Tripod(
-    300um,
-    300um,
-    N = 1,
-    NMDA = EyalNMDA,
-    param = AdExSoma(Vr = -55mV, Vt = -50mV),
-)
+E_Tripod =
+    Tripod(300um, 300um, N = 1, NMDA = EyalNMDA, param = AdExSoma(Vr = -55mV, Vt = -50mV))
 
 ##        
 stim = Dict{Symbol,Any}()
@@ -71,15 +62,7 @@ vecplot!(
     dt = 0.125,
     pop_average = true,
 )
-vecplot!(
-    q,
-    model.pop.Tripod,
-    :v_s,
-    r = 0.5s:4s,
-    sym_id = 1,
-    dt = 0.125,
-    pop_average = true,
-)
+vecplot!(q, model.pop.Tripod, :v_s, r = 0.5s:4s, sym_id = 1, dt = 0.125, pop_average = true)
 plot!(title = "Tripod")
 
 plot(p, q, layout = (2, 1), ylims = :auto)

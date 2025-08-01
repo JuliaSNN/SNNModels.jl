@@ -23,10 +23,7 @@ end
 function PoissonStimulusLayer(rate::R; kwargs...) where {R<:Real}
     N = kwargs[:N]
     rate = fill(Float32.(rate), N)
-    return PoissonStimulusLayer(;
-        kwargs...,
-        rate = rate,
-    )
+    return PoissonStimulusLayer(; kwargs..., rate = rate)
 end
 
 

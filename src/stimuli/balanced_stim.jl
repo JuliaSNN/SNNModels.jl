@@ -71,7 +71,7 @@ function BalancedStimulus(
     kwargs...,
 ) where {T<:AbstractPopulation,R<:Real}
 
-    neurons = neurons ==:ALL ? (1:post.N) : neurons
+    neurons = neurons == :ALL ? (1:post.N) : neurons
     w = zeros(Float32, length(neurons), length(neurons))
     w = μ * sparse(w)
     rowptr, colptr, I, J, index, W = dsparse(w)

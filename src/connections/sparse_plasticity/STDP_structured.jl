@@ -49,11 +49,7 @@ end
     tr_y::VFT = zeros(Npre)         # Post-synaptic spike trace
 end
 
-function plasticityvariables(
-    param::T,
-    Npre,
-    Npost,
-) where {T<:STDPStructuredParameter}
+function plasticityvariables(param::T, Npre, Npost) where {T<:STDPStructuredParameter}
     return STDPStructuredVariables(Npre = Npre, Npost = Npost)
 end
 

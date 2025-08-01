@@ -5,22 +5,22 @@ abstract type LTPParameter <: PlasticityParameter end
 abstract type STPVariables <: PlasticityVariables end
 abstract type STPParameter <: PlasticityParameter end
 
-@snn_kw struct NoLTP{VB = Vector{Bool}} <: LTPParameter 
+@snn_kw struct NoLTP{VB = Vector{Bool}} <: LTPParameter
     active::VB = [false]
 end
-@snn_kw struct NoSTP{VB = Vector{Bool}} <: STPParameter 
+@snn_kw struct NoSTP{VB = Vector{Bool}} <: STPParameter
     active::VB = [false]
 end
-@snn_kw struct NoVariables{VB = Vector{Bool}} <: PlasticityVariables 
+@snn_kw struct NoVariables{VB = Vector{Bool}} <: PlasticityVariables
     active::VB = [false]
 end
 
-struct LTP <:LTPParameter end
-struct STP <:STPParameter end
+struct LTP <: LTPParameter end
+struct STP <: STPParameter end
 
 
-plasticityvariables(param::NoLTP, Npre, Npost) =  NoVariables()
-plasticityvariables(param::NoSTP, Npre, Npost) =  NoVariables()
+plasticityvariables(param::NoLTP, Npre, Npost) = NoVariables()
+plasticityvariables(param::NoSTP, Npre, Npost) = NoVariables()
 
 function plasticity!(
     c::PT,
@@ -47,8 +47,7 @@ function plasticity!(
     variables::NoVariables,
     dt::Float32,
     T::Time,
-) where{PT<:PlasticityParameter}
-end
+) where {PT<:PlasticityParameter} end
 
 
 ## STP
@@ -63,7 +62,7 @@ include("sparse_plasticity/iSTDP.jl")
 include("sparse_plasticity/STDP_traces.jl")
 include("sparse_plasticity/STDP_structured.jl")
 
-function change_plasticity!(syn; LTP=nothing, STP=nothing)
+function change_plasticity!(syn; LTP = nothing, STP = nothing)
     @unpack fireI, fireJ = syn
     Npre, Npost = length(fireJ), length(fireI)
     if !isnothing(LTP)
@@ -83,6 +82,6 @@ export SpikingSynapse,
     no_PlasticityVariables,
     plasticityvariables,
     plasticity!
-    change_plasticity!
+change_plasticity!
 
 export LTP, STP, NoLTP, NoSTP

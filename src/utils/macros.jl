@@ -179,7 +179,7 @@ macro update(base, update_expr)
             # if isa(lhs, Symbol)
             #     pushfirst!(fields, lhs)  # Add the first part
             # else
-                # @assert lhs.head == Symbol(".")
+            # @assert lhs.head == Symbol(".")
             fields = []
             while !isa(lhs, Symbol)
                 pushfirst!(fields, lhs.args[2].value)  # Collect the field names

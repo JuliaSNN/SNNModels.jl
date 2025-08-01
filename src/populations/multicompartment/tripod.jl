@@ -155,7 +155,7 @@ function integrate!(p::Tripod, param::AdExSoma, dt::Float32)
 
     # update the neurons
     @fastmath @inbounds begin
-    # Update all synaptic conductance
+        # Update all synaptic conductance
         update_synapses!(p, dend_syn, soma_syn, dt)
         # parts = collect(Iterators.partition(1:N, Threads.nthreads()))
         # Threads.@threads :static for part in eachindex(parts)
@@ -187,7 +187,7 @@ function integrate!(p::Tripod, param::AdExSoma, dt::Float32)
                     Δv_temp[_i] = Δv[_i]
                 end
                 update_tripod!(p, Δv, i, param, dt)
-                v_s[i] += 0.5 * dt * (Δv_temp[1] + Δv[1]) 
+                v_s[i] += 0.5 * dt * (Δv_temp[1] + Δv[1])
                 v_d1[i] += 0.5 * dt * (Δv_temp[2] + Δv[2])
                 v_d2[i] += 0.5 * dt * (Δv_temp[3] + Δv[3])
                 w_s[i] += dt * (param.a * (v_s[i] - param.Er) - w_s[i]) / param.τw
@@ -311,16 +311,19 @@ function update_tripod!(
 
         # update membrane potential
         @unpack C, gl, Er, ΔT = param
-        Δv[1] = 1/C * (
-                        + gl * (-v_s[i] + Δv[1] * dt + Er) + ΔT * exp64(1 / ΔT * (v_s[i] + Δv[1] * dt - θ[i]))
-                        - w_s[i]  # adaptation
-                        - is[1]   # synapses
-                        - sum(cs) # axial currents
-                        + I[i]  # external current
-                        ) 
+        Δv[1] =
+            1/C * (
+                + gl * (-v_s[i] + Δv[1] * dt + Er) +
+                ΔT * exp64(1 / ΔT * (v_s[i] + Δv[1] * dt - θ[i])) - w_s[i]  # adaptation
+                - is[1]   # synapses
+                - sum(cs) # axial currents
+                + I[i]  # external current
+            )
 
-        Δv[2] = ((-(v_d1[i] + Δv[2] * dt) + Er) * d1.gm[i] - is[2] + cs[1] + I_d[i]) / d1.C[i]
-        Δv[3] = ((-(v_d2[i] + Δv[3] * dt) + Er) * d2.gm[i] - is[3] + cs[2] + I_d[i]) / d2.C[i]
+        Δv[2] =
+            ((-(v_d1[i] + Δv[2] * dt) + Er) * d1.gm[i] - is[2] + cs[1] + I_d[i]) / d1.C[i]
+        Δv[3] =
+            ((-(v_d2[i] + Δv[3] * dt) + Er) * d2.gm[i] - is[3] + cs[2] + I_d[i]) / d2.C[i]
     end
 end
 

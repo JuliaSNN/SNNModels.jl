@@ -45,15 +45,8 @@ inh_d2 = CompartmentSynapse(
     μ = 1,
     param = iSTDPPotential(v0 = v0_d2),
 )
-inh_s = CompartmentSynapse(
-    I,
-    Tripod_pop,
-    :s,
-    :hi,
-    p = 0.1,
-    μ = 1,
-    param = iSTDPRate(r = r0),
-)
+inh_s =
+    CompartmentSynapse(I, Tripod_pop, :s, :hi, p = 0.1, μ = 1, param = iSTDPRate(r = r0))
 exc_d1 = CompartmentSynapse(E, Tripod_pop, :d1, :he, p = 0.2, μ = 15.0)
 exc_d2 = CompartmentSynapse(E, Tripod_pop, :d2, :he, p = 0.2, μ = 15.0)
 exc_s = CompartmentSynapse(E, Tripod_pop, :s, :he, p = 0.2, μ = μ_s)

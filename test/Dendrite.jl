@@ -3,7 +3,7 @@ using Test
 # Test the G_axial function
 @testset "G_axial function" begin
     @test G_axial(Ri = 200 * Ω * cm, d = 4um, l = 100um) > 0
-    @test G_axial(Ri = 200 * Ω * cm, d = 4um, l = 200um)  > 0
+    @test G_axial(Ri = 200 * Ω * cm, d = 4um, l = 200um) > 0
     @test G_axial(Ri = 200 * Ω * cm, d = 6um, l = 150um) > 0
 end
 

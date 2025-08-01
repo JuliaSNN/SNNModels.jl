@@ -82,7 +82,7 @@ function plasticity!(
     # R(x::Float32) = x < 0.0f0 ? 0.0f0 : x
 
     # update pre-synaptic spike trace
-   @fastmath @inbounds begin 
+    @fastmath @inbounds begin
         @turbo for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
             x[j] += dt * (-x[j] + fireJ[j]) / τx
         end

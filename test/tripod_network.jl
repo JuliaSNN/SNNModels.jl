@@ -24,35 +24,15 @@ network = let
         μ = 5.0,
         param = iSTDPRate(r = 10Hz),
     )
-    E_to_E_d1 = CompartmentSynapse(
-        E,
-        E,
-        :d1,
-        :he,
-        p = 0.2,
-        μ = 30,
-        param = vSTDPParameter(),
-    )
-    E_to_E_d2 = CompartmentSynapse(
-        E,
-        E,
-        :d2,
-        :he,
-        p = 0.2,
-        μ = 30,
-        param = vSTDPParameter(),
-    )
+    E_to_E_d1 =
+        CompartmentSynapse(E, E, :d1, :he, p = 0.2, μ = 30, param = vSTDPParameter())
+    E_to_E_d2 =
+        CompartmentSynapse(E, E, :d2, :he, p = 0.2, μ = 30, param = vSTDPParameter())
     pop = dict2ntuple(@strdict E I1 I2)
-    recurrent_norm_d1 = SynapseNormalization(
-        E,
-        [E_to_E_d1],
-        param = MultiplicativeNorm(τ = 100ms),
-    )
-    recurrent_norm_d2 = SynapseNormalization(
-        E,
-        [E_to_E_d2],
-        param = MultiplicativeNorm(τ = 100ms),
-    )
+    recurrent_norm_d1 =
+        SynapseNormalization(E, [E_to_E_d1], param = MultiplicativeNorm(τ = 100ms))
+    recurrent_norm_d2 =
+        SynapseNormalization(E, [E_to_E_d2], param = MultiplicativeNorm(τ = 100ms))
     norm1 = recurrent_norm_d1
     norm2 = recurrent_norm_d2
     syn = dict2ntuple(

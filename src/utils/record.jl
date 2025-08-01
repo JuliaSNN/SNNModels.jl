@@ -183,7 +183,7 @@ end
 end
 
 
-function record!(obj, T::Time) 
+function record!(obj, T::Time)
     @unpack records = obj
     for key::Symbol in keys(records)
         if key == :fire
@@ -192,11 +192,25 @@ function record!(obj, T::Time)
         end
         for v in records[:variables]
             if startswith(string(key), string(v))
-                sym = string(key)[length(string(v))+2:end] |> Symbol
-                record_sym!(getfield(getfield(obj,v), sym), obj, key, T, records[:indices], records[:sr][key])
+                sym = string(key)[(length(string(v))+2):end] |> Symbol
+                record_sym!(
+                    getfield(getfield(obj, v), sym),
+                    obj,
+                    key,
+                    T,
+                    records[:indices],
+                    records[:sr][key],
+                )
             end
         end
-        hasfield(typeof(obj), key) && record_sym!(getfield(obj, key), obj, key, T, records[:indices], records[:sr][key])
+        hasfield(typeof(obj), key) && record_sym!(
+            getfield(obj, key),
+            obj,
+            key,
+            T,
+            records[:indices],
+            records[:sr][key],
+        )
     end
 end
 
@@ -251,9 +265,10 @@ function monitor!(
                 continue
             end
         else
-            if hasfield(typeof(obj), variables) && hasfield(typeof(getfield(obj,variables)), sym)
-                typ = typeof(getfield(getfield(obj,variables), sym))
-                key = Symbol(variables,"_", sym)
+            if hasfield(typeof(obj), variables) &&
+               hasfield(typeof(getfield(obj, variables)), sym)
+                typ = typeof(getfield(getfield(obj, variables), sym))
+                key = Symbol(variables, "_", sym)
                 variables ∈ obj.records[:variables] && continue
                 push!(obj.records[:variables], variables)
             else
@@ -338,7 +353,7 @@ function _record(p, sym; interpolate = true, kwargs...)
     end
 end
 
-function record(p, sym::Symbol; range=false, interval = nothing, kwargs...)
+function record(p, sym::Symbol; range = false, interval = nothing, kwargs...)
     if sym == :fire
         @assert !isnothing(interval) "Range must be provided for firing rate recording"
         v, r = firing_rate(p, interval; kwargs...)
@@ -535,4 +550,4 @@ export Time,
     clear_monitor!,
     record,
     reset_time!
-    interpolated_record
+interpolated_record
