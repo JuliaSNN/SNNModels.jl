@@ -19,8 +19,8 @@
     ## Synapses
     τr::VFT = [1ms, 0.5ms] # Rise time for excitatory synapses
     τd::VFT = [6ms, 2ms] # Decay time for excitatory synapses
-    exc_receptors::VIT = [1] # it indices which timescale corresponds to excitatory synapses
-    inh_receptors::VIT = [2] # it indices which timescale corresponds to inhibitory synapses
+    glu_receptors::VIT = [1] # it indices which timescale corresponds to excitatory synapses
+    gaba_receptors::VIT = [2] # it indices which timescale corresponds to inhibitory synapses
 
     E_i::FT = -75mV # Reversal potential excitatory synapses 
     E_e::FT = 0mV #Reversal potential excitatory synapses
@@ -73,7 +73,7 @@ end
 
 function AdExMultiTimescale(N::Int; param::AdExMultiTimescaleParameter, kwargs...)
     @assert length(param.τr) == length(param.τd) "Excitatory synapse parameters must have the same length"
-    @assert length(param.τr) == length(param.exc_receptors) + length(param.inh_receptors) "There must be the same number of timescale parameters as receptors"
+    @assert length(param.τr) == length(param.glu_receptors) + length(param.gaba_receptors) "There must be the same number of timescale parameters as receptors"
     # Create a new AdExMultiTimescale neuron model with the given parameters.
     return AdExMultiTimescale(
         N = N,
@@ -127,7 +127,7 @@ end
 
     fill!(syn_curr, 0.0f0)
     @inbounds for n in eachindex(τr)
-        if n ∈ param.exc_receptors
+        if n ∈ param.glu_receptors
             E_rev = param.E_e
             gsyn = param.gsyn_e
         else

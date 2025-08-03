@@ -37,8 +37,8 @@
 
     ## Synapses
     NMDA::NMDAT = NMDA_CANAHP
-    exc_receptors::VIT = [1, 2]
-    inh_receptors::VIT = [3, 4]
+    glu_receptors::VIT = [1, 2]
+    gaba_receptors::VIT = [3, 4]
     α::VFT = αs_CANAHP
     syn::ST = synapsearray(Synapse_CANAHP)
 end
@@ -164,7 +164,7 @@ end
 
 function update_synapses!(p::IF_CANAHP, param::IF_CANAHPParameter, dt::Float32)
     @unpack N, g, h, hi, he = p
-    @unpack exc_receptors, inh_receptors, α, syn = param
+    @unpack glu_receptors, gaba_receptors, α, syn = param
 
     # Update the rise_conductance from the input spikes (he, hi)
     # @turbo 

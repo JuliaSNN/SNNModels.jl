@@ -43,8 +43,8 @@
     he_d::VST = Vector{Vector{Float32}}([zeros(N) for n = 1:Nd])   #! target
 
     # Receptors properties
-    exc_receptors::VIT = [1, 2]
-    inh_receptors::VIT = [3, 4]
+    glu_receptors::VIT = [1, 2]
+    gaba_receptors::VIT = [3, 4]
     α::VFT = [1.0, 1.0, 1.0, 1.0]
 
     # Synapses soma
@@ -201,16 +201,16 @@ function update_synapses!(
     dt::Float32,
 )
     @unpack N, Nd, ge_s, g_d, he_s, v_d, h_d, hi_s, gi_s = p
-    @unpack he_d, hi_d, exc_receptors, inh_receptors, α = p
+    @unpack he_d, hi_d, glu_receptors, gaba_receptors, α = p
 
-    @inbounds for n in exc_receptors
+    @inbounds for n in glu_receptors
         for d in eachindex(v_d)
             @turbo for i ∈ 1:N
                 h_d[i, d, n] += he_d[d][i] * α[n]
             end
         end
     end
-    @inbounds for n in inh_receptors
+    @inbounds for n in gaba_receptors
         for d in eachindex(v_d)
             @turbo for i ∈ 1:N
                 h_d[i, d, n] += hi_d[d][i] * α[n]

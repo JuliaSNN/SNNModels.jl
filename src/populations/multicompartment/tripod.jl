@@ -70,8 +70,8 @@ Tripod
     he_d1::VFT = zeros(N) #! target
     he_d2::VFT = zeros(N) #! target
     # Receptors properties
-    exc_receptors::VIT = [1, 2]
-    inh_receptors::VIT = [3, 4]
+    glu_receptors::VIT = [1, 2]
+    gaba_receptors::VIT = [3, 4]
     α::VFT = [1.0, 1.0, 1.0, 1.0]
 
     # Synapses soma
@@ -220,16 +220,16 @@ function update_synapses!(
     dt::Float32,
 )
     @unpack N, ge_s, g_d1, g_d2, he_s, h_d1, h_d2, hi_s, gi_s = p
-    @unpack he_d1, he_d2, hi_d1, hi_d2, exc_receptors, inh_receptors, α = p
+    @unpack he_d1, he_d2, hi_d1, hi_d2, glu_receptors, gaba_receptors, α = p
 
     @inbounds @fastmath begin
-        for n in exc_receptors
+        for n in glu_receptors
             @turbo for i ∈ 1:N
                 h_d1[i, n] += he_d1[i] * α[n]
                 h_d2[i, n] += he_d2[i] * α[n]
             end
         end
-        for n in inh_receptors
+        for n in gaba_receptors
             @turbo for i ∈ 1:N
                 h_d1[i, n] += hi_d1[i] * α[n]
                 h_d2[i, n] += hi_d2[i] * α[n]

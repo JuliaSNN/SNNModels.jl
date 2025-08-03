@@ -181,7 +181,7 @@ function synaptic_current!(
     p::IF,
     param::T,
     dt::Float32,
-) where {T<:Union{IFCurrent,IFCurrentDeltaParameter}}
+) where {T<:Union{IFCurrentParameter,IFCurrentDeltaParameter}}
     @unpack E_i, E_e, gsyn_e, gsyn_i, v, R, τm = param
     @unpack ge, gi = p
     @inbounds for i = 1:N

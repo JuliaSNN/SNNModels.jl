@@ -294,9 +294,16 @@ function print_model(model, get_keys = false)
                 "($(props(model_graph, e)[:norm][i]))" : ""
             # @info "$name $(_k) $norm: \n $(nameof(typeof(getfield(syn,k)))): $(nameof(typeof(getfield(syn,k).param)))"
             @assert typeof(getfield(syn, k)) <: AbstractConnection "Expected synapse, got $(typeof(getfield(network.syn,k)))"
+            if hasfield(typeof(getfield(syn, k)), :LTPParam)
+                ltp_name = nameof(typeof(getfield(syn, k).LTPParam))
+                stp_name = nameof(typeof(getfield(syn, k).STPParam))
+            else
+                ltp_name = nothing
+                stp_name = nothing
+            end
             push!(
                 synapses,
-                "$(f2l(name, 18)) : $(f2l(syn_pop, 30)):$(f2l(norm)): $(f2l(nameof(typeof(getfield(syn,k).LTPParam)))) : $(f2l(nameof(typeof(getfield(syn,k).STPParam))))",
+                "$(f2l(name, 18)) : $(f2l(syn_pop, 30)):$(f2l(norm)) : $(f2l(ltp_name)) : $(f2l(stp_name))",
             )
         end
     end

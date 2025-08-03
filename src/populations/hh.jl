@@ -73,7 +73,7 @@ function integrate!(p::HH, param::HHParameter, dt::Float32)
     end
 end
 
-export HH
+export HH, HHParameter
 
 # function HH_spike_count(p::HH, dt = 0.01)
 #     neurons = hcat(p.records[:fire]...)

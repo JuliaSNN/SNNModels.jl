@@ -94,8 +94,8 @@ end
 
     ## Synapses
     NMDA::NMDAT = SomaNMDA
-    exc_receptors::VIT = [1, 2]
-    inh_receptors::VIT = [3, 4]
+    glu_receptors::VIT = [1, 2]
+    gaba_receptors::VIT = [3, 4]
     α::VFT = [syn.α for syn in synapsearray(SomaSynapse)]
     syn::ST = synapsearray(SomaSynapse)
 end

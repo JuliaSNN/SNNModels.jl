@@ -111,15 +111,15 @@ end
 
 function update_synapses!(p::AdExSynapse, param::AdExSynapseParameter, dt::Float32)
     @unpack N, g, h, hi, he = p
-    @unpack exc_receptors, inh_receptors, α, syn = param
+    @unpack glu_receptors, gaba_receptors, α, syn = param
 
     # Update the rise_conductance from the input spikes (he, hi)
-    @inbounds for n in exc_receptors
+    @inbounds for n in glu_receptors
         @turbo for i ∈ 1:N
             h[i, n] += he[i] * α[n]
         end
     end
-    @inbounds for n in inh_receptors
+    @inbounds for n in gaba_receptors
         @turbo for i ∈ 1:N
             h[i, n] += hi[i] * α[n]
         end
