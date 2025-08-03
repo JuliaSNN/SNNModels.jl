@@ -34,6 +34,8 @@ end
     Δv_temp::VFT = zeros(Float32, N)
 end
 
+ExtendedIF
+
 function integrate!(p::ExtendedIF, param::T, dt::Float32) where {T<:AbstractIFParameter}
     update_synapses!(p, param, dt)
     update_neuron!(p, param, dt)

@@ -17,6 +17,7 @@ Receptor struct represents a synaptic receptor with parameters for reversal pote
 Receptor
 
 @snn_kw struct Receptor{T = Float32}
+    name::String = "Receptor"
     E_rev::T = 0.0
     τr::T = -1.0f0
     τd::T = -1.0f0

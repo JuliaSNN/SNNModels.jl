@@ -82,9 +82,11 @@ end
 
 
 """
-    [Integrate-And-Fire Neuron](https://neuronaldynamics.epfl.ch/online/Ch1.S3.html)
+    [CAN-AHP Intergrate-and-Fire Neuron](https://www.biorxiv.org/content/10.1101/2022.07.26.501548v1)
+
+    IF neuron with non-specific cationic (CAN) and after-hyperpolarization potassium (AHP) currents.
 """
-IF
+CANAHP
 
 function integrate!(p::IF_CANAHP, param::IF_CANAHPParameter, dt::Float32)
     update_synapses!(p, param, dt)

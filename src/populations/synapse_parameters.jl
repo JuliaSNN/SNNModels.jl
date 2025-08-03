@@ -36,12 +36,19 @@ SomaNMDA = let
     NMDAVoltageDependency(mg = Mg_mM/mM, b = nmda_b, k = nmda_k)
 end
 SomaGlu = Glutamatergic(
-    Receptor(E_rev = 0.0, τr = 1ms, τd = 6.0ms, g0 = 0.7),
-    ReceptorVoltage(E_rev = 0.0, τr = 1ms, τd = 100.0, g0 = 0.15, nmda = 1.0f0),
+    Receptor(name = "AMPA", E_rev = 0.0, τr = 1ms, τd = 6.0ms, g0 = 0.7),
+    ReceptorVoltage(
+        name = "NMDA",
+        E_rev = 0.0,
+        τr = 1ms,
+        τd = 100.0,
+        g0 = 0.15,
+        nmda = 1.0f0,
+    ),
 )
 SomaGABA = GABAergic(
-    Receptor(E_rev = -70.0, τr = 0.5, τd = 10.0, g0 = 2.0),
-    Receptor(E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.006), # τd = 100.0
+    Receptor(name = "GABAa", E_rev = -70.0, τr = 0.5, τd = 10.0, g0 = 2.0),
+    Receptor(name = "GABAb", E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.006), # τd = 100.0
 )
 SomaNMDA = NMDAVoltageDependency()
 SomaSynapse = Synapse(SomaGlu, SomaGABA)

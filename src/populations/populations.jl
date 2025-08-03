@@ -22,17 +22,15 @@ include("identity.jl")
 
 ## IF
 abstract type AbstractIFParameter <: AbstractGeneralizedIFParameter end
-include("if/noisy_if.jl")
 include("if/if.jl")
-include("if/if_current.jl")
-include("if/extendedLIF.jl")
 include("if/if_CANAHP.jl")
+include("if/if_extended.jl")
 
 ## AdEx
 abstract type AbstractAdExParameter <: AbstractGeneralizedIFParameter end
-include("adex/adExParameter.jl")
-include("adex/adEx.jl")
-include("adex/adExMultiTimescale.jl")
+include("adex/adex_parameter.jl")
+include("adex/adex.jl")
+include("adex/adex_multitimescale.jl")
 
 function AdExNeuron(; param::T, kwargs...) where {T<:AbstractAdExParameter}
     if isa(param, AdExSynapseParameter)
