@@ -27,11 +27,12 @@ function integrate!(p::Identity, param::IdentityParam, dt::Float32)
         g[i] = 0
     end
 end
+
 function synaptic_target(targets::Dict, post::Identity, sym::Symbol, target::Nothing)
     v = :spikecount
-    g = getfield(post, :g)
+    g = getfield(post, sym)
     v_post = getfield(post, v)
-    push!(targets, :sym => :g)
+    push!(targets, :sym => sym)
     return g, v_post
 end
 
