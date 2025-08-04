@@ -54,10 +54,11 @@ end
     records::Dict = Dict()
 end
 
+"""
+    SpikingSynapse to connect neuronal populations
+"""
+SpikingSynapse
 
-function CompartmentSynapse(pre, post, target::Symbol, sym::Symbol; kwargs...)
-    SpikingSynapse(pre, post, sym, target; kwargs...)
-end
 
 function SpikingSynapse(
     pre,

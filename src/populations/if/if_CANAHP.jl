@@ -86,7 +86,7 @@ end
 
     IF neuron with non-specific cationic (CAN) and after-hyperpolarization potassium (AHP) currents.
 """
-CANAHP
+IF_CANAHP
 
 function integrate!(p::IF_CANAHP, param::IF_CANAHPParameter, dt::Float32)
     update_synapses!(p, param, dt)
