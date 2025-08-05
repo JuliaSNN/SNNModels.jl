@@ -47,11 +47,11 @@ end
 
 ## Multicompartment
 abstract type AbstractDendriteIF <: AbstractGeneralizedIF end
-include("multicompartment/adex_soma.jl")
 include("multicompartment/dendrite.jl")
+include("multicompartment/dendneuron_parameter.jl")
 include("multicompartment/tripod.jl")
 include("multicompartment/ballandstick.jl")
-include("multicompartment/multipod.jl")
+# include("multicompartment/multipod.jl")
 
 
 export AbstractDendriteIF, AbstractGeneralizedIF, AbstractGeneralizedIFParameter

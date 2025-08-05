@@ -6,15 +6,14 @@ This is a struct representing a spiking neural network model that include two de
 - `t::VIT` : tracker of simulation index [0] 
 - `param::AdExSoma` : Parameters for the AdEx model.
 - `N::Int32` : The number of neurons in the network.
-- `soma_syn::ST` : Synapses connected to the soma.
-- `dend_syn::ST` : Synapses connected to the dendrites.
-- `d::VDT`, `d2::VDT` : Dendrite structures.
-- `NMDA::NMDAT` : Specifies the properties of NMDA (N-methyl-D-aspartate) receptors.
+- `d::VDT`: Dendritic compartment parameters.
+
 - `v_s::VFT` : Somatic membrane potential.
 - `w_s::VFT` : Adaptation variables for each soma.
-- `v_d::VFT` , `v_d::VFT` : Dendritic membrane potential for dendrite 1 and 2.
-- `g_s::MFT` , `g_d::MFT`, `g_d2::MFT` : Conductance of somatic and dendritic synapses.
-- `h_s::MFT`, `h_d::MFT`, `h_d2::MFT` : Synaptic gating variables.
+- `v_d::VFT`: Dendritic membrane potential for dendrite.
+- `g_s::MFT` , `g_d::MFT` : Conductance of somatic and dendritic synapses.
+- `h_s::MFT`, `h_d::MFT`  : Synaptic gating variables.
+
 - `fire::VBT` : Boolean array indicating which neurons have fired.
 - `after_spike::VFT` : Post-spike timing.
 - `postspike::PST` : Model for post-spike behavior.
@@ -30,23 +29,18 @@ BallAndStick
     VFT = Vector{Float32},
     VBT = Vector{Bool},
     VDT = Dendrite{Vector{Float32}},
-    ST = SynapseArray,
-    NMDAT = NMDAVoltageDependency{Float32},
-    PST = PostSpike{Float32},
     IT = Int32,
     FT = Float32,
-    AdExType = AdExSoma,
+    ST = SynapseArray,
 } <: AbstractDendriteIF     ## These are compulsory parameters
     name::String = "BallAndStick"
     id::String = randstring(12)
     N::IT = 100
-    soma_syn::ST
-    dend_syn::ST
-    d::VDT
-    NMDA::NMDAT = NMDAVoltageDependency(mg = Mg_mM, b = nmda_b, k = nmda_k)
-    ##
-    t::VIT = [0]
-    param::AdExType = AdExSoma()
+    param::DendNeuronParameter = BallAndStickParameter()
+    d::VDT = create_dendrite(N, param.ds[1])
+    soma_syn::ST = synapsearray(param.soma_syn)
+    dend_syn::ST = synapsearray(param.dend_syn)
+
     # Membrane potential and adaptation
     v_s::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
     w_s::VFT = zeros(N)
@@ -54,8 +48,9 @@ BallAndStick
     # Synapses
     g_d::MFT = zeros(N, 4)
     h_d::MFT = zeros(N, 4)
-    hi_d::VFT = zeros(N) #! target
-    he_d::VFT = zeros(N) #! target
+    # Synapses soma
+    g_s::MFT = zeros(N, 4)
+    h_s::MFT = zeros(N, 4)
 
     ## Ext input
     Is::VFT = zeros(N)
@@ -64,20 +59,17 @@ BallAndStick
     # Receptors properties
     glu_receptors::VIT = [1, 2]
     gaba_receptors::VIT = [3, 4]
-    α::VFT = [1.0, 1.0, 1.0, 1.0]
+    gaba_d::VFT = zeros(N) #! target
+    glu_d::VFT = zeros(N) #! target
+    gaba_s::VFT = zeros(N) #! target
+    glu_s::VFT = zeros(N) #! target
 
-    # Synapses soma
-    ge_s::VFT = zeros(N)
-    gi_s::VFT = zeros(N)
-    he_s::VFT = zeros(N) #! target
-    hi_s::VFT = zeros(N) #! target
+    records::Dict = Dict()
 
     # Spike model and threshold
     fire::VBT = zeros(Bool, N)
     after_spike::VFT = zeros(Int, N)
-    postspike::PST = PostSpike(A = 10, τA = 30ms)
     θ::VFT = ones(N) * param.Vt
-    records::Dict = Dict()
     Δv::VFT = zeros(3)
     Δv_temp::VFT = zeros(3)
     cs::VFT = zeros(2)
@@ -93,46 +85,16 @@ function synaptic_target(targets::Dict, post::BallAndStick, sym::Symbol, target)
     return g, v_post
 end
 
-function BallAndStick(
-    d::Union{Real,Tuple};
-    N::Int,
-    soma_syn = TripodSomaSynapse,
-    dend_syn = TripodDendSynapse,
-    NMDA::NMDAVoltageDependency = NMDAVoltageDependency(mg = Mg_mM, b = nmda_b, k = nmda_k),
-    param = AdExSoma(),
-    kwargs...,
-)
-    soma_syn = synapsearray(soma_syn)
-    dend_syn = synapsearray(dend_syn)
-    BallAndStick(;
-        N = N,
-        d = create_dendrite(N, d),
-        soma_syn = soma_syn,
-        dend_syn = dend_syn,
-        NMDA = NMDA,
-        param = param,
-        α = [syn.α for syn in dend_syn],
-        kwargs...,
-    )
-end
 
-function BallAndStickHet(; kwargs...)
-    BallAndStick((150um, 400um); kwargs...)
-end
-
-
-
-#const dend_receptors::SVector{Symbol,3} = [:AMPA, :NMDA, :GABAa, :GABAb]
-# const soma_receptors::Vector{Symbol} = [:AMPA, :GABAa]
-function integrate!(p::BallAndStick, param::AdExSoma, dt::Float32)
+function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
     @unpack N, v_s, w_s, v_d = p
-    @unpack fire, θ, after_spike, postspike, Δv, Δv_temp = p
-    @unpack Er, up, τabs, BAP, AP_membrane, Vr, Vt, τw, a, b = param
-    @unpack dend_syn, soma_syn = p
-    @unpack d = p
+    @unpack fire, θ, after_spike,  Δv, Δv_temp = p
+    @unpack Er, up, τabs, BAP, AP_membrane, Vr, Vt, τw, a, b, postspike = param
+    @unpack d, soma_syn, dend_syn = p
+    @unpack NMDA = param
 
-    update_synapses!(p, dend_syn, soma_syn, dt)
 
+    update_synapses!(p, dt)
     # update the neurons
     @inbounds for i ∈ 1:N
         if after_spike[i] > τabs
@@ -152,7 +114,7 @@ function integrate!(p::BallAndStick, param::AdExSoma, dt::Float32)
                 Δv_temp[_i] = 0.0f0
                 Δv[_i] = 0.0f0
             end
-            update_ballandstick!(p, Δv, i, param, 0.0f0)
+            update_ballandstick!(p, Δv, i, param, 0.f0)
             for _i ∈ 1:2
                 Δv_temp[_i] = Δv[_i]
             end
@@ -184,44 +146,53 @@ end
 
 function update_synapses!(
     p::BallAndStick,
-    dend_syn::SynapseArray,
-    soma_syn::SynapseArray,
     dt::Float32,
 )
-    @unpack N, ge_s, g_d, he_s, h_d, hi_s, gi_s = p
-    @unpack he_d, hi_d, glu_receptors, gaba_receptors, α = p
+    @unpack N, g_s, g_d, h_s, h_d = p
+    @unpack glu_d, glu_s, gaba_d, gaba_s, glu_receptors, gaba_receptors, = p
+    @unpack soma_syn, dend_syn = p
 
     @inbounds for n in glu_receptors
+        @unpack τr⁻, τd⁻, α = dend_syn[n]
         @turbo for i ∈ 1:N
-            h_d[i, n] += he_d[i] * α[n]
+            h_d[i, n] += glu_d[i] * α
         end
-    end
-    @inbounds for n in gaba_receptors
+        @unpack τr⁻, τd⁻, α = soma_syn[n]
         @turbo for i ∈ 1:N
-            h_d[i, n] += hi_d[i] * α[n]
+            h_s[i, n] += glu_s[i] * α
         end
     end
 
-    fill!(he_d, 0.0f0)
-    fill!(hi_d, 0.0f0)
-    for n in eachindex(dend_syn)
-        @unpack τr⁻, τd⁻ = dend_syn[n]
-        @fastmath @turbo for i ∈ 1:N
+    @inbounds for n in gaba_receptors
+        @unpack τr⁻, τd⁻, α = dend_syn[n]
+        @turbo for i ∈ 1:N
+            h_d[i, n] += gaba_d[i] * α
+        end
+        @unpack τr⁻, τd⁻, α = soma_syn[n]
+        @turbo for i ∈ 1:N
+            h_s[i, n] += gaba_s[i] * α
+        end
+    end
+
+    @inbounds for n in eachindex(dend_syn)
+        @unpack τr⁻, τd⁻, α = dend_syn[n]
+        @turbo for i ∈ 1:N
             g_d[i, n] = exp64(-dt * τd⁻) * (g_d[i, n] + dt * h_d[i, n])
             h_d[i, n] = exp64(-dt * τr⁻) * (h_d[i, n])
         end
     end
+    @inbounds for n in eachindex(soma_syn)
+        @unpack τr⁻, τd⁻, α = soma_syn[n]
+        @turbo for i ∈ 1:N
+            g_s[i, n] = exp64(-dt * τd⁻) * (g_s[i, n] + dt * h_s[i, n])
+            h_s[i, n] = exp64(-dt * τr⁻) * (h_s[i, n])
+        end
+    end
 
-    @unpack τr⁻, τd⁻ = soma_syn[1]
-    @fastmath @turbo for i ∈ 1:N
-        ge_s[i] = exp64(-dt * τd⁻) * (ge_s[i] + dt * he_s[i])
-        he_s[i] = exp64(-dt * τr⁻) * (he_s[i])
-    end
-    @unpack τr⁻, τd⁻ = soma_syn[2]
-    @fastmath @turbo for i ∈ 1:N
-        gi_s[i] = exp64(-dt * τd⁻) * (gi_s[i] + dt * hi_s[i])
-        hi_s[i] = exp64(-dt * τr⁻) * (hi_s[i])
-    end
+    fill!(glu_s, 0.0f0)
+    fill!(glu_d, 0.0f0)
+    fill!(gaba_s, 0.0f0)
+    fill!(gaba_d, 0.0f0)
 
 end
 
@@ -230,15 +201,15 @@ function update_ballandstick!(
     p::BallAndStick,
     Δv::Vector{Float32},
     i::Int64,
-    param::AdExSoma,
+    param::DendNeuronParameter,
     dt::Float32,
 )
 
     @fastmath @inbounds begin
-        @unpack v_d, v_s, w_s, ge_s, gi_s, g_d, θ, d, I, I_d = p
-        @unpack soma_syn, dend_syn, NMDA = p
+        @unpack v_d, v_s, w_s, g_s, g_d, θ, d, Is, Id = p
         @unpack is, cs = p
-        @unpack mg, b, k = NMDA
+        @unpack soma_syn, dend_syn = p
+        @unpack mg, b, k = param.NMDA
 
         #compute axial currents
         cs[1] = -((v_d[i] + Δv[2] * dt) - (v_s[i] + Δv[1] * dt)) * d.gax[i]
@@ -247,10 +218,16 @@ function update_ballandstick!(
             is[_i] = 0.0f0
         end
         ## update synaptic currents soma
-        @unpack gsyn, E_rev = soma_syn[1]
-        is[1] += gsyn * ge_s[i] * (v_s[i] + Δv[1] * dt - E_rev)
-        @unpack gsyn, E_rev = soma_syn[2]
-        is[1] += gsyn * gi_s[i] * (v_s[i] + Δv[1] * dt - E_rev)
+        for r in eachindex(soma_syn)
+            @unpack gsyn, E_rev, nmda = soma_syn[1]
+            if nmda > 0.0f0
+                is[1] +=
+                    gsyn * g_s[i, r] * (v_s[i] + Δv[1] * dt - E_rev) /
+                    (1.0f0 + (mg / b) * exp256(k * (v_s[i] + Δv[1] * dt)))
+            else
+                is[1] += gsyn * g_s[i, r] * (v_s[i] + Δv[1] * dt - E_rev)
+            end
+        end
         ## update synaptic currents dendrites
         for r in eachindex(dend_syn)
             @unpack gsyn, E_rev, nmda = dend_syn[r]
@@ -273,9 +250,9 @@ function update_ballandstick!(
                 gl * (
                     (-v_s[i] + Δv[1] * dt + Er) +
                     ΔT * exp64(1 / ΔT * (v_s[i] + Δv[1] * dt - θ[i]))
-                ) - w_s[i] - is[1] - cs[1] + I[i]
+                ) - w_s[i] - is[1] - cs[1] + Is[i]
             ) / C
-        Δv[2] = ((-(v_d[i] + Δv[2] * dt) + Er) * d.gm[i] - is[2] + cs[1] + I_d[i]) / d.C[i]
+        Δv[2] = ((-(v_d[i] + Δv[2] * dt) + Er) * d.gm[i] - is[2] + cs[1] + Id[i]) / d.C[i]
     end
 
 end
