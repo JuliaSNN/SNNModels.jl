@@ -204,4 +204,5 @@ export norm_synapse,
     GABAergic,
     Glutamatergic,
     SynapseArray,
+    synapsearray,
     NMDAVoltageDependency

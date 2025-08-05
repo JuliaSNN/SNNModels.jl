@@ -905,6 +905,7 @@ export spiketimes,
     relative_time!,
     st_order,
     isi_cv,
-    CV_isi2
-sample_spikes, sample_inputs
-resample_spikes
+    CV_isi2,
+    sample_spikes, 
+    sample_inputs,
+    resample_spikes

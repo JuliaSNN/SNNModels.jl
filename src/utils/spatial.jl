@@ -193,8 +193,8 @@ function compute_connections(pre::Symbol, post::Symbol, points; conn, spatial)
                 end
             end
         end
-        @info "$pre => $post average conn weight: $(mean(W))"
-        @info "$pre => $post average conn probability: $(mean(P))"
+        # @info "$pre => $post average conn weight: $(mean(W))"
+        # @info "$pre => $post average conn probability: $(mean(P))"
         return P, W
     end
 end

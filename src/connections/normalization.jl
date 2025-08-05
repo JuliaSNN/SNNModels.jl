@@ -145,3 +145,5 @@ function plasticity!(c::SynapseNormalization, param::NormParam)
         end
     end
 end
+
+export SynapseNormalization, MultiplicativeNorm, AdditiveNorm, NormParam
