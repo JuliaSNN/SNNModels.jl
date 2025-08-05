@@ -16,7 +16,9 @@ Receptor struct represents a synaptic receptor with parameters for reversal pote
 """
 Receptor
 
-@snn_kw struct Receptor{T = Float32}
+abstract type AbstractReceptor end
+
+@snn_kw struct Receptor{T = Float32} <: AbstractReceptor
     name::String = "Receptor"
     E_rev::T = 0.0
     τr::T = -1.0f0
@@ -29,29 +31,25 @@ Receptor
     nmda::T = 0.0f0
 end
 
-ReceptorVoltage = Receptor
 SynapseArray = Vector{Receptor{Float32}}
+ReceptorVoltage = Receptor
 
 """
 Synapse struct represents a synaptic connection with different types of receptors.
 
 # Fields
 - `AMPA::T`: AMPA receptor
-- `NMDA::T`: NMDA receptor
+- `NMDA::T`: NMDA receptor (with voltage dependency)
 - `GABAa::T`: GABAa receptor
 - `GABAb::T`: GABAb receptor
 """
 Synapse
 
-struct Synapse{T<:Receptor}
-    AMPA::T
-    NMDA::T
-    GABAa::T
-    GABAb::T
-end
-
-function Synapse(; AMPA, NMDA, GABAa, GABAb)
-    return Synapse(AMPA, NMDA, GABAa, GABAb)
+@kwdef struct Synapse
+    AMPA::Receptor = Receptor()
+    NMDA::ReceptorVoltage = ReceptorVoltage()
+    GABAa::Receptor = Receptor()
+    GABAb::Receptor = Receptor()
 end
 
 """
@@ -63,9 +61,9 @@ Glutamatergic struct represents a group of glutamatergic receptors.
 """
 Glutamatergic
 
-struct Glutamatergic{T<:Receptor}
-    AMPA::T
-    NMDA::T
+@kwdef struct Glutamatergic
+    AMPA::Receptor = Receptor()
+    NMDA::ReceptorVoltage = ReceptorVoltage()
 end
 
 """
@@ -77,9 +75,9 @@ GABAergic struct represents a group of GABAergic receptors.
 """
 GABAergic
 
-struct GABAergic{T<:Receptor}
-    GABAa::T
-    GABAb::T
+@kwdef struct GABAergic
+    GABAa::Receptor = Receptor()
+    GABAb::Receptor = Receptor()
 end
 
 """
@@ -96,8 +94,7 @@ function Synapse(glu::Glutamatergic, gaba::GABAergic)
     return Synapse(glu.AMPA, glu.NMDA, gaba.GABAa, gaba.GABAb)
 end
 
-export Receptor,
-    Synapse, ReceptorVoltage, GABAergic, Glutamatergic, SynapseArray, NMDAVoltageDependency
+export Receptor, Synapse, ReceptorVoltage, GABAergic, Glutamatergic, SynapseArray, NMDAVoltageDependency
 
 """
 Calculate the normalization factor for a synapse.
@@ -157,9 +154,9 @@ function synapsearray(syn::Synapse, indices::Vector = [])::SynapseArray
     names = isempty(indices) ? fieldnames(Synapse) : fieldnames(Synapse)[indices]
     for name in names
         receptor = getfield(syn, name)
-        if !(receptor.τr < 0)
+        # if !(receptor.τr < 0)
             push!(container, receptor)
-        end
+        # end
     end
     return container
 end
@@ -204,4 +201,5 @@ export norm_synapse,
     GABAergic,
     Glutamatergic,
     SynapseArray,
+    synapsearray,
     NMDAVoltageDependency

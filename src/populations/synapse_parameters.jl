@@ -10,13 +10,15 @@ end
 ## Tripod
 MilesGabaSoma =
     GABAergic(Receptor(E_rev = -70.0, τr = 0.1, τd = 15.0, g0 = 0.38), Receptor())
+
 DuarteGluSoma = Glutamatergic(
-    Receptor(E_rev = 0.0, τr = 0.26, τd = 2.0, g0 = 0.73),
-    ReceptorVoltage(E_rev = 0.0, nmda = 0.0f0),
+    AMPA = Receptor(E_rev = 0.0, τr = 0.26, τd = 2.0, g0 = 0.73),
+    NMDA = ReceptorVoltage(),
 )
+
 EyalGluDend = Glutamatergic(
-    Receptor(E_rev = 0.0, τr = 0.26, τd = 2.0, g0 = 0.73),
-    ReceptorVoltage(E_rev = 0.0, τr = 8, τd = 35.0, g0 = 1.31, nmda = 1.0f0),
+    AMPA = Receptor(E_rev = 0.0, τr = 0.26, τd = 2.0, g0 = 0.73),
+    NMDA = ReceptorVoltage(E_rev = 0.0, τr = 8, τd = 35.0, g0 = 1.31, nmda = 1.0f0),
 )
 MilesGabaDend = GABAergic(
     Receptor(E_rev = -70.0, τr = 4.8, τd = 29.0, g0 = 0.27),
@@ -36,9 +38,9 @@ SomaNMDA = let
     NMDAVoltageDependency(mg = Mg_mM/mM, b = nmda_b, k = nmda_k)
 end
 SomaGlu = Glutamatergic(
-    Receptor(name = "AMPA", E_rev = 0.0, τr = 1ms, τd = 6.0ms, g0 = 0.7),
+    Receptor(E_rev = 0.0, τr = 1ms, τd = 6.0ms, g0 = 0.7),
     ReceptorVoltage(
-        name = "NMDA",
+        # name = "NMDA",
         E_rev = 0.0,
         τr = 1ms,
         τd = 100.0,
@@ -47,8 +49,8 @@ SomaGlu = Glutamatergic(
     ),
 )
 SomaGABA = GABAergic(
-    Receptor(name = "GABAa", E_rev = -70.0, τr = 0.5, τd = 10.0, g0 = 2.0),
-    Receptor(name = "GABAb", E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.006), # τd = 100.0
+    Receptor( E_rev = -70.0, τr = 0.5, τd = 10.0, g0 = 2.0),
+    Receptor( E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.006), # τd = 100.0
 )
 SomaNMDA = NMDAVoltageDependency()
 SomaSynapse = Synapse(SomaGlu, SomaGABA)
