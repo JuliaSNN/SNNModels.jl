@@ -1,34 +1,51 @@
-
 """
-	DendNeuronParameter
+    DendNeuronParameter{FT, IT, DT, ST, NMDAT, PST, PT}
 
-An implementation of the Adaptive Exponential Integrate-and-Fire (AdEx) model, adapted for a Tripod neuron.
+A parameter struct for the Tripod neuron model, implementing an Adaptive Exponential Integrate-and-Fire (AdEx) model with dendritic compartments.
 
 # Fields
-- `C::FT = 281pF`: Membrane capacitance.
-- `gl::FT = 40nS`: Leak conductance.
-- `R::FT = nS / gl * GΩ`: Total membrane resistance.
-- `τm::FT = C / gl`: Membrane time constant.
-- `Er::FT = -70.6mV`: Resting potential.
-- `Vr::FT = -55.6mV`: Reset potential.
-- `Vt::FT = -50.4mV`: Rheobase threshold.
-- `ΔT::FT = 2mV`: Slope factor.
-- `τw::FT = 144ms`: Adaptation current time constant.
-- `a::FT = 4nS`: Subthreshold adaptation conductance.
-- `b::FT = 80.5pA`: Spike-triggered adaptation increment.
-- `AP_membrane::FT = 10.0f0mV`: After-potential membrane parameter .
-- `BAP::FT = 1.0f0mV`: Backpropagating action potential parameter.
-- `up::IT = 1ms`, `τabs::IT = 2ms`: Parameters related to spikes.
-- `ds::DT = [200um , (200um, 400um)]`: Dendritic segment lengths.
-- `physiology`: Dendritic physiology, defaults to `human_dend`.
-- `soma_syn::ST = TripodSomaSynapse |> synapsearray`: Soma synapse type.
-- `dend_syn::ST = TripodDendSynapse |> synapsearray`: Dendritic synapse type.
-- `NMDA::NMDAT = NMDAVoltageDependency(mg = Mg_mM, b = nmda_b, k = nmda_k)`: NMDA voltage dependency.
-#
+- `C::FT`: Membrane capacitance (default: 281pF)
+- `gl::FT`: Leak conductance (default: 40nS)
+- `R::FT`: Total membrane resistance (default: nS/gl * GΩ)
+- `τm::FT`: Membrane time constant (default: C/gl)
+- `Er::FT`: Resting potential (default: -70.6mV)
+- `Vr::FT`: Reset potential (default: -55.6mV)
+- `Vt::FT`: Rheobase threshold (default: -50.4mV)
+- `ΔT::FT`: Slope factor (default: 2mV)
+- `τw::FT`: Adaptation current time constant (default: 144ms)
+- `a::FT`: Subthreshold adaptation conductance (default: 4nS)
+- `b::FT`: Spike-triggered adaptation increment (default: 80.5pA)
+- `AP_membrane::FT`: After-potential membrane parameter (default: 10.0f0mV)
+- `BAP::FT`: Backpropagating action potential parameter (default: 1.0f0mV)
+- `up::FT`: Spike upstroke duration (default: 1ms)
+- `τabs::FT`: Absolute refractory period (default: 2ms)
+- `postspike::PST`: Post-spike dynamics (default: PostSpike(A=10, τA=30ms))
+- `ds::DT`: Dendritic segment lengths (default: [200um, (200um, 400um)])
+- `physiology::PT`: Dendritic physiology (default: human_dend)
+- `soma_syn::ST`: Soma synapse type (default: TripodSomaSynapse)
+- `dend_syn::ST`: Dendritic synapse type (default: TripodDendSynapse)
+- `NMDA::NMDAT`: NMDA voltage dependency parameters (default: NMDAVoltageDependency(mg=Mg_mM, b=nmda_b, k=nmda_k))
 
-The types `FT` and `IT`, and `DT` represent `Float32`, `Int64`, and `Vector{Union{Tuple, Float32}}` respectively.
+# Type Parameters
+- `FT`: Floating-point type for membrane parameters (default: Float32)
+- `IT`: Integer type for time-related parameters (default: Int64)
+- `DT`: Type for dendritic segment lengths (default: Vector{DendLength})
+- `ST`: Synapse type (default: Synapse)
+- `NMDAT`: NMDA voltage dependency type (default: NMDAVoltageDependency{Float32})
+- `PST`: Post-spike dynamics type (default: PostSpike{Float32})
+- `PT`: Physiology type (default: Physiology)
+
+# Examples
+```jldoctest
+julia> TripodParameter = DendNeuronParameter(ds = [200um, (200um, 400um)])
+DendNeuronParameter{Float32, Int64, Vector{DendLength}, Synapse, NMDAVoltageDependency{Float32}, PostSpike{Float32}, Physiology}(281.0, 40.0, 25.0, 7.03125, -70.6, -55.6, -50.4, 2.0, 144.0, 4.0, 80.5, 10.0, 1.0, 1, 2, PostSpike{Float32}(10, 30.0), [200.0, (200.0, 400.0)], human_dend, TripodSomaSynapse, TripodDendSynapse, NMDAVoltageDependency{Float32}(0.001, 0.062, 3.57))
+
+julia> BallAndStickParameter = DendNeuronParameter(ds = [(150um, 400um)])
+DendNeuronParameter{Float32, Int64, Vector{DendLength}, Synapse, NMDAVoltageDependency{Float32}, PostSpike{Float32}, Physiology}(281.0, 40.0, 25.0, 7.03125, -70.6, -55.6, -50.4, 2.0, 144.0, 4.0, 80.5, 10.0, 1.0, 1, 2, PostSpike{Float32}(10, 30.0), [(150.0, 400.0)], human_dend, TripodSomaSynapse, TripodDendSynapse, NMDAVoltageDependency{Float32}(0.001, 0.062, 3.57))
+```
 """
-DendNeuronParam
+DendNeuronParameter
+
 DendLength = Union{Float32, Tuple}
 
 @snn_kw struct DendNeuronParameter{FT = Float32, 
