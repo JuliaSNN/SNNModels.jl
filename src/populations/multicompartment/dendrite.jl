@@ -6,8 +6,10 @@ struct Physiology
     Cd::Float32 ## in pF/cm^2
 end
 
-HUMAN = Physiology(200 * Ω * cm, 38907 * Ω * cm^2, 0.5μF / cm^2)
-MOUSE = Physiology(200 * Ω * cm, 1700Ω * cm^2, 1μF / cm^2)
+human_dend = Physiology(200 * Ω * cm, 38907 * Ω * cm^2, 0.5μF / cm^2)
+mouse_dend = Physiology(200 * Ω * cm, 1700Ω * cm^2, 1μF / cm^2)
+
+export human_dend, mouse_dend
 
 """
     G_axial(;Ri=Ri,d=d,l=l)
@@ -78,14 +80,14 @@ function create_dendrite(N::Int, l; kwargs...)
     return dendrites
 end
 
-function create_dendrite(l; d::Real = 4um, s = :human)
+function create_dendrite(l; d::Real = 4um, physiology = human_dend)
     if isa(l, Tuple)
         l = rand(l[1]:1um:l[2])
     else
         l = l
     end
     l > 500um && error("Dendrite length must be less than 500um")
-    @unpack Ri, Rd, Cd = s == :mouse ? MOUSE : HUMAN
+    @unpack Ri, Rd, Cd = physiology
     if l <= 0
         return (gm = 1.0f0, gax = 0.0f0, C = 1.0f0, l = -1, d = d)
     else
