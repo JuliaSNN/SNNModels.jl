@@ -90,4 +90,49 @@ end
 TripodParameter = DendNeuronParameter(ds = [200um, (200um, 400um)])
 BallAndStickParameter = DendNeuronParameter(ds = [(150um, 400um)])
 
-export DendNeuronParameter, TripodParameter, BallAndStickParameter
+function MulticompartmentNeuron(;
+    N::Int = 100,
+    name::String = "TripodExc",
+    dend = [(150um, 400um), (150um, 400um)],  # dendritic lengths
+    NMDA::NMDAVoltageDependency = NMDAVoltageDependency(
+        b = 3.36,  # NMDA voltage dependency parameter
+        k = -0.077,  # NMDA voltage dependency parameter
+        mg = 1.0f0,  # NMDA voltage dependency parameter
+    ),
+        # After spike timescales and membrane
+    adex_param = (
+        C = 281pF,  # membrane capacitance
+        gl = 40nS,  # leak conductance
+        R = (1 / 40)GΩ,  # membrane resistance
+        τm = 281pF / 40nS,  # membrane time constant
+        Er = -70.6mV,  # reset potential
+        Vr = -55.6mV,  # resting potential
+        Vt = -50.4mV,  # threshold potential
+        ΔT = 2mV,  # slope factor
+        τw = 144ms,  # adaptation time constant
+        a = 4nS,  # subthreshold adaptation conductance
+        b = 80.5pA,  # spike-triggered adaptation current
+        AP_membrane = 2.0f0mV,  # action potential membrane potential
+        BAP = 1.0f0mV,  # burst afterpotential
+        up = 1ms,  # refractory period
+        τabs = 2ms,  # absolute refractory period
+    ),
+    dend_syn::Synapse = Synapse(EyalGluDend, MilesGabaDend), # defines glutamaterbic and gabaergic receptors in the dendrites
+    soma_syn::Synapse=  Synapse(DuarteGluSoma, MilesGabaSoma),  # connect EyalGluDend to MilesGabaDend
+    postspike = PostSpike(A = 10.0, τA = 30.0), # post-spike adaptation
+)
+    param = DendNeuronParameter(;adex_param..., 
+        ds = dend, 
+        soma_syn = soma_syn, 
+        dend_syn = dend_syn, 
+        NMDA = NMDA,
+    )
+    if length(dend) == 2
+        return Tripod(N = N, param = param, d1 = create_dendrite(N, dend[1]), d2 = create_dendrite(N, dend[2]), name= name)
+    end
+    if length(dend) == 1
+        return BallAndStick(N = N, param = param, d = create_dendrite(N, dend[1]), name= name)
+    end
+end
+
+export DendNeuronParameter, TripodParameter, BallAndStickParameter, MulticompartmentNeuron
