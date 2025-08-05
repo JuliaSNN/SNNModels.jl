@@ -34,9 +34,9 @@ DendLength = Union{Float32, Tuple}
 @snn_kw struct DendNeuronParameter{FT = Float32, 
                                     IT = Int64, 
                                     DT=Vector{DendLength},
-                                    PST = PostSpike,
                                     ST = Synapse,
-                                    NMDAT = NMDAVoltageDependency,
+                                    NMDAT = NMDAVoltageDependency{Float32},
+                                    PST = PostSpike{Float32},
                                     PT = Physiology} <: AbstractAdExParameter
     #Membrane parameters
     C::FT = 281pF           # (pF) membrane timescale

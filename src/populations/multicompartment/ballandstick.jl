@@ -32,7 +32,6 @@ BallAndStick
     IT = Int32,
     FT = Float32,
     ST = SynapseArray,
-    NMDAT = NMDAVoltageDependency,
 } <: AbstractDendriteIF     ## These are compulsory parameters
     name::String = "BallAndStick"
     id::String = randstring(12)
@@ -41,7 +40,6 @@ BallAndStick
     d::VDT = create_dendrite(N, param.ds[1])
     soma_syn::ST = synapsearray(param.soma_syn)
     dend_syn::ST = synapsearray(param.dend_syn)
-    NMDA::NMDAT = param.NMDA
 
     # Membrane potential and adaptation
     v_s::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
@@ -92,7 +90,8 @@ function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
     @unpack N, v_s, w_s, v_d = p
     @unpack fire, θ, after_spike,  Δv, Δv_temp = p
     @unpack Er, up, τabs, BAP, AP_membrane, Vr, Vt, τw, a, b, postspike = param
-    @unpack d, NMDA, soma_syn, dend_syn = p
+    @unpack d, soma_syn, dend_syn = p
+    @unpack NMDA = param
 
 
     update_synapses!(p, dt)
@@ -157,14 +156,10 @@ function update_synapses!(
         @unpack τr⁻, τd⁻, α = dend_syn[n]
         @turbo for i ∈ 1:N
             h_d[i, n] += glu_d[i] * α
-            g_d[i, n] = exp64(-dt * τd⁻) * (g_d[i, n] + dt * h_d[i, n])
-            h_d[i, n] = exp64(-dt * τr⁻) * (h_d[i, n])
         end
         @unpack τr⁻, τd⁻, α = soma_syn[n]
         @turbo for i ∈ 1:N
             h_s[i, n] += glu_s[i] * α
-            g_s[i, n] = exp64(-dt * τd⁻) * (g_s[i, n] + dt * h_s[i, n])
-            h_s[i, n] = exp64(-dt * τr⁻) * (h_s[i, n])
         end
     end
 
@@ -172,12 +167,23 @@ function update_synapses!(
         @unpack τr⁻, τd⁻, α = dend_syn[n]
         @turbo for i ∈ 1:N
             h_d[i, n] += gaba_d[i] * α
-            g_d[i, n] = exp64(-dt * τd⁻) * (g_d[i, n] + dt * h_d[i, n])
-            h_d[i, n] = exp64(-dt * τr⁻) * (h_d[i, n])
         end
         @unpack τr⁻, τd⁻, α = soma_syn[n]
         @turbo for i ∈ 1:N
             h_s[i, n] += gaba_s[i] * α
+        end
+    end
+
+    @inbounds for n in eachindex(dend_syn)
+        @unpack τr⁻, τd⁻, α = dend_syn[n]
+        @turbo for i ∈ 1:N
+            g_d[i, n] = exp64(-dt * τd⁻) * (g_d[i, n] + dt * h_d[i, n])
+            h_d[i, n] = exp64(-dt * τr⁻) * (h_d[i, n])
+        end
+    end
+    @inbounds for n in eachindex(soma_syn)
+        @unpack τr⁻, τd⁻, α = soma_syn[n]
+        @turbo for i ∈ 1:N
             g_s[i, n] = exp64(-dt * τd⁻) * (g_s[i, n] + dt * h_s[i, n])
             h_s[i, n] = exp64(-dt * τr⁻) * (h_s[i, n])
         end
@@ -202,8 +208,8 @@ function update_ballandstick!(
     @fastmath @inbounds begin
         @unpack v_d, v_s, w_s, g_s, g_d, θ, d, Is, Id = p
         @unpack is, cs = p
-        @unpack soma_syn, dend_syn, NMDA = p
-        @unpack mg, b, k = NMDA
+        @unpack soma_syn, dend_syn = p
+        @unpack mg, b, k = param.NMDA
 
         #compute axial currents
         cs[1] = -((v_d[i] + Δv[2] * dt) - (v_s[i] + Δv[1] * dt)) * d.gax[i]

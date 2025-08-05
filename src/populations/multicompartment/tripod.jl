@@ -36,7 +36,8 @@ Tripod
     IT = Int32,
     FT = Float32,
     ST = SynapseArray,
-    NMDAT = NMDAVoltageDependency,
+    NMDAT = NMDAVoltageDependency{Float32},
+    PST = PostSpike{Float32},
 } <: AbstractDendriteIF
     id::String = randstring(12)
     name::String = "Tripod"
@@ -48,6 +49,7 @@ Tripod
     soma_syn::ST = synapsearray(param.soma_syn)
     dend_syn::ST = synapsearray(param.dend_syn)
     NMDA::NMDAT = param.NMDA
+    postspike::PST = param.postspike
 
     # Membrane potential and adaptation
     v_s::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
@@ -107,7 +109,9 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     @unpack N, v_s, w_s, v_d1, v_d2 = p
     @unpack fire, θ, after_spike, Δv, Δv_temp = p
     @unpack Er, up, τabs, BAP, AP_membrane, Vr, Vt, τw, a, b = param
-    @unpack d1, d2, NMDA, soma_syn, dend_syn = p
+    @unpack d1, d2 = p
+    @unpack soma_syn, dend_syn = p
+
 
     # update the neurons
     @fastmath @inbounds begin
@@ -173,8 +177,6 @@ end
 
 function update_synapses!(
     p::Tripod,
-    # soma_syn::SynapseArray,
-    # dend_syn::SynapseArray,
     dt::Float32,
 )
     @unpack N, g_d1, g_d2, h_d1, h_d2, g_s, h_s = p
