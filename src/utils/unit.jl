@@ -1,53 +1,45 @@
-const metre = 1e2
-const meter = metre
-const cm = metre / 1e2
-const mm = metre / 1e3
-const um = metre / 1e6
-const nm = metre / 1e9
-
-const cm2 = cm * cm
-const m2 = metre * metre
-const um2 = um * um
-const nm2 = nm * nm
-
-const second = 1e3
-const s = second
-const ms = second / 1e3
-const Hz = 1 / second
-const kHz = Hz * 1e3
-
-const voltage = 1e3
-const mV = voltage / 1e3
-
-const ampere = 1e12
-const mA = ampere / 1e3
-const uA = ampere / 1e6
-const μA = ampere / 1e6
-const nA = ampere / 1e9
-const pA = ampere / 1e12
-
-const farad = 1e12
-const mF = farad / 1e3
-const uF = farad / 1e6
-const μF = farad / 1e6
-const nF = farad / 1e9
-const pF = farad / 1e12
-const ufarad = uF
-
-const siemens = 1e9
-const mS = siemens / 1e3
-const msiemens = mS
-const nS = siemens / 1e9
-const nsiemens = nS
-
-const Ω = 1 / siemens
-const MΩ = Ω * 1e6
-const GΩ = Ω * 1e9
-
-const M = 1e6
-const mM = M / 1e3
-const uM = M*1e-6
-const nM = M*1e-9
+const metre = 1e2 |> Float32
+const meter = metre |> Float32
+const cm = metre / 1e2 |> Float32
+const mm = metre / 1e3 |> Float32
+const um = metre / 1e6 |> Float32
+const nm = metre / 1e9 |> Float32
+const cm2 = cm * cm |> Float32
+const m2 = metre * metre |> Float32
+const um2 = um * um |> Float32
+const nm2 = nm * nm |> Float32
+const second = 1e3 |> Float32
+const s = second |> Float32
+const ms = second / 1e3 |> Float32
+const Hz = 1 / second |> Float32
+const kHz = Hz * 1e3 |> Float32
+const voltage = 1e3 |> Float32
+const mV = voltage / 1e3 |> Float32
+const ampere = 1e12 |> Float32
+const mA = ampere / 1e3 |> Float32
+const uA = ampere / 1e6 |> Float32
+const μA = ampere / 1e6 |> Float32
+const nA = ampere / 1e9 |> Float32
+const pA = ampere / 1e12 |> Float32
+const farad = 1e12 |> Float32
+const mF = farad / 1e3 |> Float32
+const uF = farad / 1e6 |> Float32
+const μF = farad / 1e6 |> Float32
+const nF = farad / 1e9 |> Float32
+const pF = farad / 1e12 |> Float32
+const ufarad = uF |> Float32
+const siemens = 1e9 |> Float32
+const mS = siemens / 1e3 |> Float32
+const msiemens = mS |> Float32
+const nS = siemens / 1e9 |> Float32
+const nsiemens = nS |> Float32
+const Ω = 1 / siemens |> Float32
+const MΩ = Ω * 1e6 |> Float32
+const GΩ = Ω * 1e9 |> Float32
+const M = 1e6 |> Float32
+const mM = M / 1e3 |> Float32
+const uM = M*1e-6 |> Float32
+const nM = M*1e-9 |> Float32
 
 second / Ω ≈ farad
 dt = 0.125ms

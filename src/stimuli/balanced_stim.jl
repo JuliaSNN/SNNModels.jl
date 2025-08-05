@@ -176,4 +176,4 @@ function stimulate!(
 
 end
 
-export BalancedStimuli, stimulate!, BSParam, BalancedStimulusParameter
+export BalancedStimulus, stimulate!, BSParam, BalancedStimulusParameter
