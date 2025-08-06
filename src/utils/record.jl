@@ -251,6 +251,7 @@ function monitor!(
                 :time => Vector{Float32}(),
                 :neurons => Vector{Vector{Int}}(),
             )
+            @debug "Monitoring :fire in $(obj.name)"
             continue
         end
         if variables == :none
@@ -265,16 +266,18 @@ function monitor!(
                 continue
             end
         else
-            if hasfield(typeof(obj), variables) &&
-               hasfield(typeof(getfield(obj, variables)), sym)
+            if hasproperty(obj, variables) && hasproperty(getfield(obj, variables), sym)
                 typ = typeof(getfield(getfield(obj, variables), sym))
                 key = Symbol(variables, "_", sym)
-                variables ∈ obj.records[:variables] && continue
-                push!(obj.records[:variables], variables)
+                if !(variables ∈ obj.records[:variables])
+                    @debug "Monitoring $(variables)"
+                    push!(obj.records[:variables], variables)
+                end
             else
                 @warn "Field $variables not found in $(nameof(typeof(obj)))"
             end
         end
+        @debug "Monitoring :$(key) in $(obj.name)"
         !isempty(ind) && (obj.records[:indices][key] = ind)
         obj.records[:sr][key] = sr
         obj.records[key] = Vector{typ}()
