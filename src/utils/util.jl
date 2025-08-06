@@ -437,8 +437,10 @@ function remove_element(model, key)
 end
 
 
-
-
+function merge_models(args...;kwargs...) 
+    @warn "merge_models is deprecated, use `compose` instead"
+    compose(args...; kwargs...)
+end
 
 export connect!,
     model,
@@ -449,6 +451,7 @@ export connect!,
     clear_records!,
     clear_monitor!,
     compose,
+    merge_models, # compose
     remove_element,
     graph,
     matrix,
