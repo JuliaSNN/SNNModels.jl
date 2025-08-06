@@ -9,7 +9,7 @@ inputs.neurons
 st = Identity(N = max_neuron(inputs))
 stim = SpikeTimeStimulusIdentity(st, :g, param = inputs)
 syn = SpikingSynapse(st, st, :g, w = w, LTPParam = STDPGerstner())
-model = merge_models(pop = st, stim = stim, syn = syn, silent = true)
+model = compose(pop = st, stim = stim, syn = syn, silent = true)
 monitor!(model.pop..., [:fire])
 monitor!(model.syn..., [:tpre, :tpost, :W])
 train!(model = model, duration = 3000ms, dt = 0.1ms)

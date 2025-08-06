@@ -22,7 +22,7 @@ stimI = Dict(
     n = 1:length(dendrites)
 )
 
-model = merge_models(E = E, stimE, stimI)
+model = compose(E = E, stimE, stimI)
 
 monitor!(E, [:v_d, :v_s, :g_d])
 sim!(model = model, duration = 7s, pbar = true)
@@ -68,7 +68,7 @@ stimI = Dict(
 monitor!(E, [:g_d1, :v_d1, :v_s, :g_d1])
 monitor!(E, [:fire])
 
-model = merge_models(E = E, stimE, stimI)
+model = compose(E = E, stimE, stimI)
 sim!(model = model, duration = 10s, pbar = true)
 p2 = plot()
 vecplot!(p2, model.pop.E, :v_d1, neurons = 1, r = 1s:0.1:7s, sym_id = 1)

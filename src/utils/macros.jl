@@ -232,7 +232,7 @@ function update_with_merge(base_config::NamedTuple, path::Vector{Symbol}, value)
     end
 end
 
-# macro merge_models(args...)
+# macro compose(args...)
 #     # Separate non-keyworded and keyworded arguments
 #     _non_kw_args = []
 #     kw_args = []
@@ -269,7 +269,7 @@ end
 #     end
 
 
-#     # Construct the call to merge_models
+#     # Construct the call to compose
 
 #     isnothing(name_arg) && (name_arg = randstring(10))
 #     isnothing(time_arg) && (time_arg = Time())
@@ -277,9 +277,9 @@ end
 #     @show kw_args
 #     named_tuple_expr = :(; $(kw_args...))
 #     # return Expr(:(named_tuple_expr))
-#     return :(merge_models($named_tuple_expr, name=$name_arg, time=$time_arg))
+#     return :(compose($named_tuple_expr, name=$name_arg, time=$time_arg))
 
 # end
 
 export @symdict, @snn_kw, @update
-#, @merge_models
+#, @compose

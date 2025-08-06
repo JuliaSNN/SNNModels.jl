@@ -24,7 +24,7 @@ S = SpikingSynapse(
     param = vSTDPParameter(; Wmax = 1.0),
 )
 
-model = merge_models(; inputs, neurons, S)
+model = compose(; inputs, neurons, S)
 # histogram(S.W / S.param.Wmax; nbins = 20)
 # monitor!(S, [(:W, [1, 2])])
 @time train!(; model, duration = 100second)

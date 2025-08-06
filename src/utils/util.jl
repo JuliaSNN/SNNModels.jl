@@ -187,7 +187,7 @@ str_name(pre::String, k = nothing) = isnothing(k) ? "$pre" : "$(pre)_$(k)"
 
 """
 
-    merge_models(kwargs...; syn=nothing, pop=nothing)
+    compose(kwargs...; syn=nothing, pop=nothing)
 
 Merge multiple models into a single model.
 
@@ -211,7 +211,7 @@ If `syn` and/or `pop` and/or `stim` arguments are provided, they are merged into
 
 ## Example
 """
-function merge_models(args...; name = randstring(10), silent = false, time=Time(), kwargs...)
+function compose(args...; name = randstring(10), silent = false, time=Time(), kwargs...)
     pop = Dict{Symbol,Any}()
     syn = Dict{Symbol,Any}()
     stim = Dict{Symbol,Any}()
@@ -433,7 +433,7 @@ function remove_element(model, key)
     else
         throw(ArgumentError("Element not found"))
     end
-    merge_models(pop, syn, stim)
+    compose(pop, syn, stim)
 end
 
 
@@ -448,7 +448,7 @@ export connect!,
     getrecord,
     clear_records!,
     clear_monitor!,
-    merge_models,
+    compose,
     remove_element,
     graph,
     matrix,

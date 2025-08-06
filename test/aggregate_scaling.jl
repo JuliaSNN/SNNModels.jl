@@ -13,7 +13,7 @@ param = AggregateScalingParameter(
 )
 A = AggregateScaling(E, [S], param = param)
 
-model = merge_models(E = E, P = P, S = S, A = A)
+model = compose(E = E, P = P, S = S, A = A)
 monitor!(E, [:fire])
 monitor!(A, [:Y], sr = 100Hz)
 monitor!(S, [:W], sr = 100Hz)

@@ -18,7 +18,7 @@ for (E, d) in zip([E_BallStick, E_Tripod], [:d, :d1])
     push!(stim, d => my_stim)
 end
 
-model = merge_models(BallStick = E_BallStick, Tripod = E_Tripod, stim)
+model = compose(BallStick = E_BallStick, Tripod = E_Tripod, stim)
 
 monitor!([model.pop...], [:fire, :h_d, :v_d, :v_s, :v_d1, :v_d2])
 sim!(model = model, duration = 10s, pbar = true, dt = 0.125ms)
