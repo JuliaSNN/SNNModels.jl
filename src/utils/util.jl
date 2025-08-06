@@ -211,11 +211,10 @@ If `syn` and/or `pop` and/or `stim` arguments are provided, they are merged into
 
 ## Example
 """
-function merge_models(args...; name = randstring(10), silent = false, kwargs...)
+function merge_models(args...; name = randstring(10), silent = false, time=Time(), kwargs...)
     pop = Dict{Symbol,Any}()
     syn = Dict{Symbol,Any}()
     stim = Dict{Symbol,Any}()
-    time = Time()
     for v in args
         v isa String && continue
         v isa Time && continue
@@ -328,6 +327,7 @@ function print_model(model, get_keys = false)
 
     @info "================"
     @info "Model: $(model.name)"
+    @info "Time: $(get_time(model.time)/1000) s"
     @info "----------------"
     @info "Populations ($(length(populations))):"
     for p in populations
@@ -390,7 +390,7 @@ function extract_items(
         @assert !haskey(stim, root) "Stimulus $(root) already exists"
         push!(stim, root => v)
     elseif typeof(v) <: Time
-        update_time!(time, v)
+        # update_time!(time, v)
     else
         for k in keys(container)
             k == :name && continue

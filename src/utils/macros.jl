@@ -232,5 +232,54 @@ function update_with_merge(base_config::NamedTuple, path::Vector{Symbol}, value)
     end
 end
 
+# macro merge_models(args...)
+#     # Separate non-keyworded and keyworded arguments
+#     _non_kw_args = []
+#     kw_args = []
+#     for arg in args
+#         if arg isa Expr && arg.head == :(=)
+#             # if arg.args
+#             push!(kw_args, :($(esc(arg))))
+#         else
+#             push!(_non_kw_args, arg)
+#         end
+#     end
 
-export @symdict, @snn_kw, @update#, update_with_merge
+#     # Convert non-keyworded arguments to keyworded arguments
+#     non_kw_args = []
+#     for arg in _non_kw_args
+#         if arg isa Symbol
+#             push!(kw_args, :($arg = $arg))
+#         else
+#             push!(non_kw_args, :($arg))
+#             # error("Non-keyworded argument $arg is not a symbol")
+#         end
+#     end
+
+#     # Extract name and time from keyworded arguments
+#     name_arg = nothing
+#     time_arg = nothing
+
+#     for (n, arg) in enumerate(non_kw_args)
+#         if arg isa Symbol || arg isa String
+#             name_arg = arg
+#         elseif arg == :time 
+#             time_arg = arg
+#         end
+#     end
+
+
+#     # Construct the call to merge_models
+
+#     isnothing(name_arg) && (name_arg = randstring(10))
+#     isnothing(time_arg) && (time_arg = Time())
+
+#     @show kw_args
+#     named_tuple_expr = :(; $(kw_args...))
+#     # return Expr(:(named_tuple_expr))
+#     return :(merge_models($named_tuple_expr, name=$name_arg, time=$time_arg))
+
+# end
+
+export @symdict, @snn_kw, @update
+#, @merge_models
