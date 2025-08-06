@@ -12,7 +12,7 @@ It includes a timescale τ (default 0.0) and an operator (default multiplication
 MultiplicativeNorm
 
 @snn_kw struct MultiplicativeNorm{FT = Int32} <: NormParam
-    τ::Float32 = 0.0f0
+    τ::Float32
     operator::Function = *
 end
 
@@ -25,7 +25,7 @@ It includes a timescale τ (default 0.0) and an operator (default addition).
 AdditiveNorm
 
 @snn_kw struct AdditiveNorm{FT = Float32} <: NormParam
-    τ::Float32 = 0.0f0
+    τ::Float32
     operator::Function = +
 end
 
@@ -145,3 +145,10 @@ function plasticity!(c::SynapseNormalization, param::NormParam)
         end
     end
 end
+
+export 
+    MultiplicativeNorm,
+    AdditiveNorm,
+    SynapseNormalization,
+    SynapseNormalization,
+    NormParam
