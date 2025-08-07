@@ -20,7 +20,7 @@ NMDA = let
     Mg_mM = 1.0mM
     nmda_b = 3.36   # voltage dependence of nmda channels
     nmda_k = -0.077     # Eyal 2018
-    SNN.NMDAVoltageDependency(mg = Mg_mM/mM, b = nmda_b, k = nmda_k)
+    NMDAVoltageDependency(mg = Mg_mM/mM, b = nmda_b, k = nmda_k)
 end
 
 dend_neuron = DendNeuronParameter(
@@ -38,7 +38,7 @@ dend_neuron = DendNeuronParameter(
     τabs = 0.1ms,
 
     # post-spike adaptation
-    postspike = SNN.PostSpike(A= 10.0, τA= 30.0), 
+    postspike = PostSpike(A= 10.0, τA= 30.0), 
 
     # synaptic properties
     soma_syn = SomaSynapse,
@@ -47,19 +47,19 @@ dend_neuron = DendNeuronParameter(
 
     # dendrite
     ds = [160um],
-    physiology = SNN.human_dend,
+    physiology = human_dend,
 )
 
-E = SNN.SNNModels.BallAndStick(N=1, param = dend_neuron)
+E = SNNModels.BallAndStick(N=1, param = dend_neuron)
 
-poisson_exc = SNN.PoissonStimulusLayer(
+poisson_exc = PoissonStimulusLayer(
     10.2Hz,    # Mean firing rate (Hz) 
     p = 1f0,  # Probability of connecting to a neuron
     μ = 1.0,  # Synaptic strength (nS)
     N = 1000, # Neurons in the Poisson Layer
 )
 
-poisson_inh = SNN.PoissonStimulusLayer(
+poisson_inh = PoissonStimulusLayer(
     3Hz,       # Mean firing rate (Hz)
     p = 1f0,   # Probability of connecting to a neuron
     μ = 4.0,   # Synaptic strength (nS)
@@ -67,8 +67,8 @@ poisson_inh = SNN.PoissonStimulusLayer(
 )
 
 # Create the Poisson layers for excitatory and inhibitory inputs
-stim_exc = SNN.PoissonLayer(E, :glu, :d, param=poisson_exc, name="noiseE")
-stim_inh = SNN.PoissonLayer(E, :gaba, :d, param=poisson_inh, name="noiseI")
+stim_exc = PoissonLayer(E, :glu, :d, param=poisson_exc, name="noiseE")
+stim_inh = PoissonLayer(E, :gaba, :d, param=poisson_inh, name="noiseI")
 
-model = SNN.compose(;E, stim_exc, stim_inh)
-SNN.sim!(model, 1s)
+model = compose(;E, stim_exc, stim_inh)
+sim!(model, 1s)
