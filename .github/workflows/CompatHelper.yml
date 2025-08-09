@@ -3,9 +3,13 @@ name: CompatHelper
 on:
   schedule:
     - cron: '00 00 * * *'
-    
+
   push:
-    - dev
+    branches:
+      - main
+      - dev
+  pull_request:
+
 jobs:
   CompatHelper:
     runs-on: ubuntu-latest
