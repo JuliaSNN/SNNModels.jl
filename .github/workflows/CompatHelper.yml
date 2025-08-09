@@ -10,6 +10,11 @@ on:
       - dev
   pull_request:
 
+permissions:
+  actions: write
+  contents: read
+
+
 jobs:
   CompatHelper:
     runs-on: ubuntu-latest
