@@ -3,6 +3,15 @@ name: CompatHelper
 on:
   schedule:
     - cron: '00 00 * * *'
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+
+permissions:
+  actions: write
+  contents: read
 
 jobs:
   CompatHelper:
