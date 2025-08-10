@@ -34,6 +34,8 @@ end
 SynapseArray = Vector{Receptor{Float32}}
 ReceptorVoltage = Receptor
 
+
+
 """
 Synapse struct represents a synaptic connection with different types of receptors.
 
@@ -45,12 +47,16 @@ Synapse struct represents a synaptic connection with different types of receptor
 """
 Synapse
 
-@kwdef struct Synapse
-    AMPA::Receptor = Receptor()
-    NMDA::ReceptorVoltage = ReceptorVoltage()
-    GABAa::Receptor = Receptor()
-    GABAb::Receptor = Receptor()
+@snn_kw struct Synapse{T = Float32}
+    AMPA::Receptor{T} = Receptor()
+    NMDA::ReceptorVoltage{T} = ReceptorVoltage()
+    GABAa::Receptor{T} = Receptor()
+    GABAb::Receptor{T} = Receptor()
 end
+
+import Base.getindex
+getindex(s::Synapse, sym::Symbol) =  getfield(s, sym)
+export getindex
 
 """
 Glutamatergic struct represents a group of glutamatergic receptors.
