@@ -199,6 +199,11 @@ NMDAVoltageDependency
     mg::T = Mg_mM
 end
 
+function nmda_gating(v, NMDA::NMDAVoltageDependency)
+    @unpack b, k, mg = NMDA
+    return 1/ (1.0f0 + (mg / b) * exp256(k * v))
+end
+
 export norm_synapse,
     EyalNMDA,
     Receptor,
@@ -208,4 +213,5 @@ export norm_synapse,
     Glutamatergic,
     SynapseArray,
     synapsearray,
-    NMDAVoltageDependency
+    NMDAVoltageDependency,
+    nmda_gating

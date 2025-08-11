@@ -57,6 +57,18 @@ end
     records::Dict = Dict()
 end
 
+function AdExNeuron(; param::T, kwargs...) where {T<:AbstractAdExParameter}
+    if isa(param, AdExSynapseParameter)
+        for n in eachindex(param.syn)
+            param.α[n] = param.syn[n].α
+        end
+        return AdExSynapse(; param = param, kwargs...)
+    elseif isa(param, AdExMultiTimescaleParameter)
+        return AdExMultiTimescale(; param = param, kwargs...)
+    else
+        return AdExSimple(; param = param, kwargs...)
+    end
+end
 
 function synaptic_target(
     targets::Dict,
