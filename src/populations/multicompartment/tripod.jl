@@ -30,6 +30,7 @@ Tripod
 @snn_kw struct Tripod{
     MFT = Matrix{Float32},
     VIT = Vector{Int32},
+    VST = Vector{Symbol},
     VFT = Vector{Float32},
     VBT = Vector{Bool},
     VDT = Dendrite{Vector{Float32}},
@@ -46,10 +47,6 @@ Tripod
     param::DendNeuronParameter = TripodParameter
     d1::VDT = create_dendrite(N, param.ds[1])
     d2::VDT = create_dendrite(N, param.ds[2])
-    soma_syn::ST = synapsearray(param.soma_syn)
-    dend_syn::ST = synapsearray(param.dend_syn)
-    NMDA::NMDAT = param.NMDA
-    postspike::PST = param.postspike
 
     # Membrane potential and adaptation
     v_s::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
@@ -69,9 +66,8 @@ Tripod
     h_s::MFT = zeros(N, 4)
 
     # Receptors
-    glu_receptors::VIT = [1, 2]
-    gaba_receptors::VIT = [3, 4]
-    α::VFT = [1.0, 1.0, 1.0, 1.0]
+    glu_receptors::VST = [:AMPA, :NMDA]
+    gaba_receptors::VST = [:GABAa, :GABAb]
 
     glu_d1::VFT = zeros(N) #! target
     gaba_d1::VFT = zeros(N) #! target
@@ -106,20 +102,19 @@ end
 
 
 function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
-    @unpack N, v_s, w_s, v_d1, v_d2 = p
-    @unpack fire, θ, after_spike, Δv, Δv_temp = p
-    @unpack Er, up, τabs, BAP, AP_membrane, Vr, Vt, τw, a, b = param
-    @unpack d1, d2 = p
-    @unpack soma_syn, dend_syn = p
-
-
-    # update the neurons
     @fastmath @inbounds begin
+        @unpack N, v_s, w_s, v_d1, v_d2 = p
+        @unpack fire, θ, after_spike, Δv, Δv_temp = p
+        @unpack Er, up, τabs, BAP, AP_membrane, Vr, Vt, τw, a, b = param
+        @unpack d1, d2 = p
+        @unpack soma_syn, dend_syn = param
+        @unpack N, g_d1, g_d2, h_d1, h_d2, g_s, h_s = p
+        @unpack glu_d1, glu_d2, glu_s, gaba_d1, gaba_d2, gaba_s = p
+
         # Update all synaptic conductance
-        update_synapses!(p, dt)
-        # update_synapses!(p, soma_syn, dend_syn, dt)
-        # parts = collect(Iterators.partition(1:N, Threads.nthreads()))
-        # Threads.@threads :static for part in eachindex(parts)
+        update_synapses!(p, soma_syn, glu_s, gaba_s, g_s, h_s, dt)
+        update_synapses!(p, dend_syn, glu_d1, gaba_d1, g_d1, h_d1, dt)
+        update_synapses!(p, dend_syn, glu_d2, gaba_d2, g_d2, h_d2, dt)
         for i ∈ 1:N
             # implementation of the absolute refractory period with backpropagation (up) and after spike (τabs)
             if after_spike[i] > (τabs + up - up) / dt # backpropagation
@@ -175,66 +170,7 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     # return
 end
 
-function update_synapses!(
-    p::Tripod,
-    dt::Float32,
-)
-    @unpack N, g_d1, g_d2, h_d1, h_d2, g_s, h_s = p
-    @unpack glu_d1, glu_d2, glu_s, gaba_d1, gaba_d2, gaba_s, glu_receptors, gaba_receptors = p
-    @unpack soma_syn, dend_syn = p
-
-    @inbounds @fastmath begin
-        for n in glu_receptors
-            @unpack α, τr⁻, τd⁻ = dend_syn[n]
-            @turbo for i ∈ 1:N
-                h_d1[i, n] += glu_d1[i] * α
-                h_d2[i, n] += glu_d2[i] * α
-            end
-            @unpack α, τr⁻, τd⁻ = soma_syn[n]
-            @turbo for i ∈ 1:N
-                h_s[i, n]  += glu_s[i]  * α
-            end
-        end
-        for n in gaba_receptors
-            @unpack α, τr⁻, τd⁻ = dend_syn[n]
-            @turbo for i ∈ 1:N
-                h_d1[i, n] += gaba_d1[i] * α
-                h_d2[i, n] += gaba_d2[i] * α
-            end
-            @unpack α, τr⁻, τd⁻ = soma_syn[n]
-            @turbo for i ∈ 1:N
-                h_s[i, n]  += gaba_s[i]  * α
-            end
-        end
-        for n in eachindex(soma_syn)
-            @unpack α, τr⁻, τd⁻ = soma_syn[n]
-            @turbo for i ∈ 1:N
-                g_s[i, n] = exp64(-dt * τd⁻) * (g_s[i, n] + dt * h_s[i, n])
-                h_s[i, n] = exp64(-dt * τr⁻) * (h_s[i, n])
-            end
-        end
-        for n in eachindex(dend_syn)
-            @unpack α, τr⁻, τd⁻ = dend_syn[n]
-            @turbo for i ∈ 1:N
-                g_d1[i, n] = exp64(-dt * τd⁻) * (g_d1[i, n] + dt * h_d1[i, n])
-                h_d1[i, n] = exp64(-dt * τr⁻) * (h_d1[i, n])
-                g_d2[i, n] = exp64(-dt * τd⁻) * (g_d2[i, n] + dt * h_d2[i, n])
-                h_d2[i, n] = exp64(-dt * τr⁻) * (h_d2[i, n])
-            end
-        end
-
-        fill!(glu_d1, 0.0f0)
-        fill!(glu_d2, 0.0f0)
-        fill!(glu_s, 0.0f0)
-        fill!(gaba_d1, 0.0f0)
-        fill!(gaba_d2, 0.0f0)
-        fill!(gaba_s, 0.0f0)
-
-    end
-
-end
-
-function update_neuron!(
+@inline function update_neuron!(
     p::Tripod,
     Δv::Vector{Float32},
     i::Int64,
@@ -247,7 +183,7 @@ function update_neuron!(
         @unpack g_d1, g_d2, g_s = p
         @unpack d1, d2 = p
         @unpack is, cs = p
-        @unpack soma_syn, dend_syn, NMDA = p
+        @unpack soma_syn, dend_syn, NMDA = param
         @unpack mg, b, k = NMDA
 
 
@@ -255,30 +191,13 @@ function update_neuron!(
         cs[1] = -((v_d1[i] + Δv[2] * dt) - (v_s[i] + Δv[1] * dt)) * d1.gax[i]
         cs[2] = -((v_d2[i] + Δv[3] * dt) - (v_s[i] + Δv[1] * dt)) * d2.gax[i]
 
-        for _i ∈ 1:3
-            is[_i] = 0.0f0
-        end
-        # update synaptic currents soma
-        for r in eachindex(soma_syn)
-            @unpack gsyn, E_rev = soma_syn[r]
-            is[1] += gsyn * g_s[i, r] * (v_s[i] + Δv[1] * dt - E_rev)
-        end
-        # update synaptic currents dendrites
-        for r in eachindex(dend_syn)
-            @unpack gsyn, E_rev, nmda = dend_syn[r]
-            if nmda > 0.0f0
-                is[2] +=
-                    gsyn * g_d1[i, r] * (v_d1[i] + Δv[2] * dt - E_rev) /
-                    (1.0f0 + (mg / b) * exp256(k * (v_d1[i] + Δv[2] * dt)))
-                is[3] +=
-                    gsyn * g_d2[i, r] * (v_d2[i] + Δv[3] * dt - E_rev) /
-                    (1.0f0 + (mg / b) * exp256(k * (v_d2[i] + Δv[2] * dt)))
-            else
-                is[2] += gsyn * g_d1[i, r] * (v_d1[i] + Δv[2] * dt - E_rev)
-                is[3] += gsyn * g_d2[i, r] * (v_d2[i] + Δv[3] * dt - E_rev)
-            end
-        end
-        @turbo for _i ∈ 1:3
+        fill!(is,0.f0)
+        synaptic_current!(p, param, soma_syn, v_s[i] + Δv[1] * dt, g_s, is, 1, i)
+        synaptic_current!(p, param, dend_syn, v_d1[i] + Δv[2] * dt, g_d1, is, 2, i)
+        synaptic_current!(p, param, dend_syn, v_d2[i] + Δv[3] * dt, g_d2, is, 3, i)
+        ## update synaptic currents soma
+
+        @turbo for _i in eachindex(is)
             is[_i] = clamp(is[_i], -1500, 1500)
         end
 

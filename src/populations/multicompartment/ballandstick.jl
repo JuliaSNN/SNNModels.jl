@@ -26,6 +26,7 @@ BallAndStick
 @snn_kw struct BallAndStick{
     MFT = Matrix{Float32},
     VIT = Vector{Int32},
+    VST = Vector{Symbol},
     VFT = Vector{Float32},
     VBT = Vector{Bool},
     VDT = Dendrite{Vector{Float32}},
@@ -38,8 +39,6 @@ BallAndStick
     N::IT = 100
     param::DendNeuronParameter = BallAndStickParameter()
     d::VDT = create_dendrite(N, param.ds[1])
-    soma_syn::ST = synapsearray(param.soma_syn)
-    dend_syn::ST = synapsearray(param.dend_syn)
 
     # Membrane potential and adaptation
     v_s::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
@@ -57,8 +56,9 @@ BallAndStick
     Id::VFT = zeros(N)
 
     # Receptors properties
-    glu_receptors::VIT = [1, 2]
-    gaba_receptors::VIT = [3, 4]
+    glu_receptors::VST = [:AMPA, :NMDA]
+    gaba_receptors::VST = [:GABAa, :GABAb]
+    all_receptors::VST = vcat(glu_receptors..., gaba_receptors)
     gaba_d::VFT = zeros(N) #! target
     glu_d::VFT = zeros(N) #! target
     gaba_s::VFT = zeros(N) #! target
@@ -90,11 +90,13 @@ function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
     @unpack N, v_s, w_s, v_d = p
     @unpack fire, θ, after_spike,  Δv, Δv_temp = p
     @unpack Er, up, τabs, BAP, AP_membrane, Vr, Vt, τw, a, b, postspike = param
-    @unpack d, soma_syn, dend_syn = p
-    @unpack NMDA = param
+    @unpack d = p
+    @unpack NMDA, soma_syn, dend_syn = param
+    @unpack N, g_s, g_d, h_s, h_d = p
+    @unpack glu_d, glu_s, gaba_d, gaba_s = p
 
-
-    update_synapses!(p, dt)
+    update_synapses!(p, soma_syn, glu_s, gaba_s, g_s, h_s, dt)
+    update_synapses!(p, dend_syn, glu_d, gaba_d, g_d, h_d, dt)
     # update the neurons
     @inbounds for i ∈ 1:N
         if after_spike[i] > τabs
@@ -114,11 +116,11 @@ function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
                 Δv_temp[_i] = 0.0f0
                 Δv[_i] = 0.0f0
             end
-            update_ballandstick!(p, Δv, i, param, 0.f0)
+            update_ballandstick!(p, Δv, i, param,soma_syn, dend_syn,  0.f0)
             for _i ∈ 1:2
                 Δv_temp[_i] = Δv[_i]
             end
-            update_ballandstick!(p, Δv, i, param, dt)
+            update_ballandstick!(p, Δv, i, param,  soma_syn, dend_syn, dt)
             @fastmath v_s[i] += 0.5 * dt * (Δv_temp[1] + Δv[1])
             @fastmath v_d[i] += 0.5 * dt * (Δv_temp[2] + Δv[2])
             @fastmath w_s[i] += dt * (param.a * (v_s[i] - param.Er) - w_s[i]) / param.τw
@@ -144,101 +146,29 @@ function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
     return
 end
 
-function update_synapses!(
-    p::BallAndStick,
-    dt::Float32,
-)
-    @unpack N, g_s, g_d, h_s, h_d = p
-    @unpack glu_d, glu_s, gaba_d, gaba_s, glu_receptors, gaba_receptors, = p
-    @unpack soma_syn, dend_syn = p
-
-    @inbounds for n in glu_receptors
-        @unpack τr⁻, τd⁻, α = dend_syn[n]
-        @turbo for i ∈ 1:N
-            h_d[i, n] += glu_d[i] * α
-        end
-        @unpack τr⁻, τd⁻, α = soma_syn[n]
-        @turbo for i ∈ 1:N
-            h_s[i, n] += glu_s[i] * α
-        end
-    end
-
-    @inbounds for n in gaba_receptors
-        @unpack τr⁻, τd⁻, α = dend_syn[n]
-        @turbo for i ∈ 1:N
-            h_d[i, n] += gaba_d[i] * α
-        end
-        @unpack τr⁻, τd⁻, α = soma_syn[n]
-        @turbo for i ∈ 1:N
-            h_s[i, n] += gaba_s[i] * α
-        end
-    end
-
-    @inbounds for n in eachindex(dend_syn)
-        @unpack τr⁻, τd⁻, α = dend_syn[n]
-        @turbo for i ∈ 1:N
-            g_d[i, n] = exp64(-dt * τd⁻) * (g_d[i, n] + dt * h_d[i, n])
-            h_d[i, n] = exp64(-dt * τr⁻) * (h_d[i, n])
-        end
-    end
-    @inbounds for n in eachindex(soma_syn)
-        @unpack τr⁻, τd⁻, α = soma_syn[n]
-        @turbo for i ∈ 1:N
-            g_s[i, n] = exp64(-dt * τd⁻) * (g_s[i, n] + dt * h_s[i, n])
-            h_s[i, n] = exp64(-dt * τr⁻) * (h_s[i, n])
-        end
-    end
-
-    fill!(glu_s, 0.0f0)
-    fill!(glu_d, 0.0f0)
-    fill!(gaba_s, 0.0f0)
-    fill!(gaba_d, 0.0f0)
-
-end
-
 
 function update_ballandstick!(
     p::BallAndStick,
     Δv::Vector{Float32},
     i::Int64,
     param::DendNeuronParameter,
+    soma_syn::Synapse,
+    dend_syn::Synapse,
     dt::Float32,
 )
 
     @fastmath @inbounds begin
         @unpack v_d, v_s, w_s, g_s, g_d, θ, d, Is, Id = p
         @unpack is, cs = p
-        @unpack soma_syn, dend_syn = p
-        @unpack mg, b, k = param.NMDA
 
         #compute axial currents
         cs[1] = -((v_d[i] + Δv[2] * dt) - (v_s[i] + Δv[1] * dt)) * d.gax[i]
 
-        for _i ∈ 1:2
-            is[_i] = 0.0f0
-        end
+        fill!(is, 0.0f0)
+        synaptic_current!(p, param, soma_syn, v_s[i] + Δv[1] * dt, g_s, is, 1, i)
+        synaptic_current!(p, param, dend_syn, v_d[i] + Δv[2] * dt, g_d, is, 2, i)
+
         ## update synaptic currents soma
-        for r in eachindex(soma_syn)
-            @unpack gsyn, E_rev, nmda = soma_syn[1]
-            if nmda > 0.0f0
-                is[1] +=
-                    gsyn * g_s[i, r] * (v_s[i] + Δv[1] * dt - E_rev) /
-                    (1.0f0 + (mg / b) * exp256(k * (v_s[i] + Δv[1] * dt)))
-            else
-                is[1] += gsyn * g_s[i, r] * (v_s[i] + Δv[1] * dt - E_rev)
-            end
-        end
-        ## update synaptic currents dendrites
-        for r in eachindex(dend_syn)
-            @unpack gsyn, E_rev, nmda = dend_syn[r]
-            if nmda > 0.0f0
-                is[2] +=
-                    gsyn * g_d[i, r] * (v_d[i] + Δv[2] * dt - E_rev) /
-                    (1.0f0 + (mg / b) * exp256(k * (v_d[i] + Δv[2] * dt)))
-            else
-                is[2] += gsyn * g_d[i, r] * (v_d[i] + Δv[2] * dt - E_rev)
-            end
-        end
         @turbo for _i ∈ 1:2
             is[_i] = clamp(is[_i], -1500, 1500)
         end
