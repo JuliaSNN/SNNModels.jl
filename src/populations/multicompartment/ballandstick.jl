@@ -56,7 +56,6 @@ BallAndStick
     Id::VFT = zeros(N)
 
     # Receptors properties
-    all_receptors::VST = vcat(glu_receptors..., gaba_receptors)
     gaba_d::VFT = zeros(N) #! target
     glu_d::VFT = zeros(N) #! target
     gaba_s::VFT = zeros(N) #! target
@@ -114,11 +113,11 @@ function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
                 Δv_temp[_i] = 0.0f0
                 Δv[_i] = 0.0f0
             end
-            update_ballandstick!(p, Δv, i, param,soma_syn, dend_syn,  0.f0)
+            update_ballandstick!(p, Δv, i, param, 0.f0)
             for _i ∈ 1:2
                 Δv_temp[_i] = Δv[_i]
             end
-            update_ballandstick!(p, Δv, i, param,  soma_syn, dend_syn, dt)
+            update_ballandstick!(p, Δv, i, param, dt)
             @fastmath v_s[i] += 0.5 * dt * (Δv_temp[1] + Δv[1])
             @fastmath v_d[i] += 0.5 * dt * (Δv_temp[2] + Δv[2])
             @fastmath w_s[i] += dt * (param.a * (v_s[i] - param.Er) - w_s[i]) / param.τw
@@ -150,11 +149,9 @@ function update_ballandstick!(
     Δv::Vector{Float32},
     i::Int64,
     param::DendNeuronParameter,
-    soma_syn::SynapseArray,
-    dend_syn::SynapseArray,
     dt::Float32,
 )
-
+    @unpack NMDA, soma_syn, dend_syn = param
     @fastmath @inbounds begin
         @unpack v_d, v_s, w_s, g_s, g_d, θ, d, Is, Id = p
         @unpack is, cs = p
