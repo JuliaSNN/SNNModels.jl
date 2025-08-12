@@ -120,4 +120,17 @@ Time
     dt::FT = 0.125f0
 end
 
+function validate_population_model(model)
+    # Validate the neuron model
+    @assert typeof(model) <: AbstractPopulation "Model must inherit from AbstractPopulation"
+    @assert typeof(model.param) <: AbstractPopulationParameter "Model parameter must inherit from AbstractPopulationParameter"
+    @assert hasproperty(model, :N) "Model must have a field N for the number of neurons"
+    @assert hasproperty(model, :param) "Model must have a field param for the neuron parameters"
+    @assert hasproperty(model, :id) "Model must have a field id for a unique identifier"
+    @assert hasproperty(model, :name) "Model must have a field name for the population name"
+    @assert hasproperty(model, :records) "Model must have a field records for storing recorded variables"
+end
+
 export Spiketimes, Time
+export AbstractParameter, AbstractConnectionParameter, AbstractPopulationParameter, AbstractStimulusParameter
+export AbstractConnection, AbstractPopulation, AbstractStimulus

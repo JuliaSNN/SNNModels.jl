@@ -32,19 +32,6 @@ include("adex/adex_parameter.jl")
 include("adex/adex.jl")
 include("adex/adex_multitimescale.jl")
 
-function AdExNeuron(; param::T, kwargs...) where {T<:AbstractAdExParameter}
-    if isa(param, AdExSynapseParameter)
-        for n in eachindex(param.syn)
-            param.α[n] = param.syn[n].α
-        end
-        return AdExSynapse(; param = param, kwargs...)
-    elseif isa(param, AdExMultiTimescaleParameter)
-        return AdExMultiTimescale(; param = param, kwargs...)
-    else
-        return AdExSimple(; param = param, kwargs...)
-    end
-end
-
 ## Multicompartment
 abstract type AbstractDendriteIF <: AbstractGeneralizedIF end
 include("multicompartment/dendrite.jl")

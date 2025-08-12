@@ -51,7 +51,7 @@ DendLength = Union{Float32, Tuple}
 @snn_kw struct DendNeuronParameter{FT = Float32, 
                                     IT = Int64, 
                                     DT=Vector{DendLength},
-                                    ST = Synapse,
+                                    ST = Synapse{Float32},
                                     NMDAT = NMDAVoltageDependency{Float32},
                                     PST = PostSpike{Float32},
                                     PT = Physiology} <: AbstractAdExParameter
@@ -136,3 +136,93 @@ function MulticompartmentNeuron(;
 end
 
 export DendNeuronParameter, TripodParameter, BallAndStickParameter, MulticompartmentNeuron
+
+@inline function update_synapses!(
+    p::P,
+    syn::Synapse,
+    glu::Vector{Float32},
+    gaba::Vector{Float32},
+    g::Matrix{Float32},
+    h::Matrix{Float32},
+    dt::Float32,
+) where {P <: AbstractPopulation}
+    @unpack glu_receptors, gaba_receptors, N = p
+    @inbounds for n in eachindex(glu_receptors)
+        @unpack τr⁻, τd⁻, α = getfield(syn,glu_receptors[n])
+        @turbo for i ∈ 1:N
+            h[i, n] += glu[i] * α
+            g[i, n] = exp64(-dt * τd⁻) * (g[i, n] + dt * h[i, n])
+            h[i, n] = exp64(-dt * τr⁻) * (h[i, n])
+        end
+    end
+    @inbounds for _n in eachindex(gaba_receptors)
+        n = _n + length(glu_receptors)
+        @unpack τr⁻, τd⁻, α = getfield(syn, gaba_receptors[_n])
+        @turbo for i ∈ 1:N
+            h[i, n] += gaba[i] * α
+            g[i, n] = exp64(-dt * τd⁻) * (g[i, n] + dt * h[i, n])
+            h[i, n] = exp64(-dt * τr⁻) * (h[i, n])
+        end
+    end
+
+    fill!(glu, 0.0f0)
+    fill!(gaba, 0.0f0)
+end
+
+@inline function update_synapses!(
+    p::P,
+    syn::Synapse,
+    glu::Vector{Vector{Float32}},
+    gaba::Vector{Vector{Float32}},
+    g:: Array{Float32,3},
+    h::Array{Float32,3},
+    d::Int,
+    dt::Float32,
+) where {P <: AbstractPopulation}
+    @unpack glu_receptors, gaba_receptors, N = p
+    @inbounds for n in eachindex(glu_receptors)
+        @unpack τr⁻, τd⁻, α = getfield(syn,glu_receptors[n])
+        @turbo for i ∈ 1:N
+            h[d, i, n] += glu[d][i] * α
+            g[d, i, n] = exp64(-dt * τd⁻) * (g[d, i, n] + dt * h[i, n])
+            h[d, i, n] = exp64(-dt * τr⁻) * (h[d, i, n])
+        end
+    end
+    @inbounds for _n in eachindex(gaba_receptors)
+        n = _n + length(glu_receptors)
+        @unpack τr⁻, τd⁻, α = getfield(syn, gaba_receptors[_n])
+        @turbo for i ∈ 1:N
+            h[d, i, n] += gaba[d][i] * α
+            g[d, i, n] = exp64(-dt * τd⁻) * (g[d, i, n] + dt * h[d, i, n])
+            h[d, i, n] = exp64(-dt * τr⁻) * (h[d, i, n])
+        end
+    end
+
+    fill!(glu[d], 0.0f0)
+    fill!(gaba[d], 0.0f0)
+end
+
+
+@inline function synaptic_current!(
+            p::P, 
+            param::DendNeuronParameter, 
+            syn::Synapse,
+            v::Float32, 
+            g,            
+            is::Vector{Float32}, 
+            comp::Int, 
+            neuron::Int) where {P <: AbstractDendriteIF}
+        @unpack gaba_receptors, glu_receptors = p
+        @unpack mg, b, k = param.NMDA
+        @fastmath @inbounds begin
+        @simd for n in eachindex(glu_receptors)
+            @unpack gsyn, E_rev, nmda = getfield(syn, glu_receptors[n])
+            is[comp] += gsyn * g[neuron, n] * (v - E_rev) * (nmda==0.f0 ? 1.f0 : 1/(1.0f0 + (mg / b) * exp256(k * v)))
+        end
+        @simd for _n in eachindex(gaba_receptors)
+            n = _n + length(glu_receptors)
+            @unpack gsyn, E_rev, nmda = getfield(syn, gaba_receptors[_n])
+                is[comp] += gsyn * g[neuron, n] * (v - E_rev)        
+        end
+    end
+end
