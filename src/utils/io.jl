@@ -296,6 +296,7 @@ function write_config(path::String, info; config, name = "", kwargs...)
     # end
     close(file)
     @info "Config file saved"
+    return config_path
 end
 
 """

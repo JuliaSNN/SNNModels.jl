@@ -56,8 +56,6 @@ BallAndStick
     Id::VFT = zeros(N)
 
     # Receptors properties
-    glu_receptors::VST = [:AMPA, :NMDA]
-    gaba_receptors::VST = [:GABAa, :GABAb]
     all_receptors::VST = vcat(glu_receptors..., gaba_receptors)
     gaba_d::VFT = zeros(N) #! target
     glu_d::VFT = zeros(N) #! target
@@ -95,8 +93,8 @@ function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
     @unpack N, g_s, g_d, h_s, h_d = p
     @unpack glu_d, glu_s, gaba_d, gaba_s = p
 
-    update_synapses!(p, soma_syn, glu_s, gaba_s, g_s, h_s, dt)
-    update_synapses!(p, dend_syn, glu_d, gaba_d, g_d, h_d, dt)
+    update_synapses!(p, param, soma_syn, glu_s, gaba_s, g_s, h_s, dt)
+    update_synapses!(p, param, dend_syn, glu_d, gaba_d, g_d, h_d, dt)
     # update the neurons
     @inbounds for i ∈ 1:N
         if after_spike[i] > τabs
@@ -152,8 +150,8 @@ function update_ballandstick!(
     Δv::Vector{Float32},
     i::Int64,
     param::DendNeuronParameter,
-    soma_syn::Synapse,
-    dend_syn::Synapse,
+    soma_syn::SynapseArray,
+    dend_syn::SynapseArray,
     dt::Float32,
 )
 
@@ -165,8 +163,8 @@ function update_ballandstick!(
         cs[1] = -((v_d[i] + Δv[2] * dt) - (v_s[i] + Δv[1] * dt)) * d.gax[i]
 
         fill!(is, 0.0f0)
-        synaptic_current!(p, param, soma_syn, v_s[i] + Δv[1] * dt, g_s, is, 1, i)
-        synaptic_current!(p, param, dend_syn, v_d[i] + Δv[2] * dt, g_d, is, 2, i)
+        synaptic_current!(param, soma_syn, v_s[i] + Δv[1] * dt, g_s, is, 1, i)
+        synaptic_current!(param, dend_syn, v_d[i] + Δv[2] * dt, g_d, is, 2, i)
 
         ## update synaptic currents soma
         @turbo for _i ∈ 1:2
