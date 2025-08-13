@@ -159,14 +159,8 @@ function update_ballandstick!(
         #compute axial currents
         cs[1] = -((v_d[i] + Δv[2] * dt) - (v_s[i] + Δv[1] * dt)) * d.gax[i]
 
-        fill!(is, 0.0f0)
         synaptic_current!(param, soma_syn, v_s[i] + Δv[1] * dt, g_s, is, 1, i)
         synaptic_current!(param, dend_syn, v_d[i] + Δv[2] * dt, g_d, is, 2, i)
-
-        ## update synaptic currents soma
-        @turbo for _i ∈ 1:2
-            is[_i] = clamp(is[_i], -1500, 1500)
-        end
 
         # update membrane potential
         @unpack C, gl, Er, ΔT = param

@@ -190,14 +190,9 @@ end
         cs[1] = -((v_d1[i] + Δv[2] * dt) - (v_s[i] + Δv[1] * dt)) * d1.gax[i]
         cs[2] = -((v_d2[i] + Δv[3] * dt) - (v_s[i] + Δv[1] * dt)) * d2.gax[i]
 
-        fill!(is,0.f0)
         synaptic_current!(param, soma_syn, v_s[i] + Δv[1] * dt, g_s, is, 1, i)
         synaptic_current!(param, dend_syn, v_d1[i] + Δv[2] * dt, g_d1, is, 2, i)
         synaptic_current!(param, dend_syn, v_d2[i] + Δv[3] * dt, g_d2, is, 3, i)
-        @turbo for _i in eachindex(is)
-            is[_i] = clamp(is[_i], -1500, 1500)
-        end
-
 
         ## update synaptic currents soma
 

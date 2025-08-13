@@ -86,7 +86,7 @@ DendLength = Union{Float32, Tuple}
 
     ## Synapse parameters
     glu_receptors::VIT = [1, 2]
-    gaba_receptors::VIT = [1, 2]
+    gaba_receptors::VIT = [3, 4]
     soma_syn::ST = TripodSomaSynapse 
     dend_syn::ST = TripodDendSynapse 
     NMDA::NMDAT = NMDAVoltageDependency(mg = Mg_mM, b = nmda_b, k = nmda_k)
@@ -220,14 +220,16 @@ end
             neuron::Int)
     @unpack glu_receptors, gaba_receptors = param
     @unpack mg, b, k = param.NMDA
+    is[comp] = 0.f0
     @inbounds @fastmath begin
         @simd for n in glu_receptors
             @unpack gsyn, E_rev, nmda = syn[n]
             is[comp] += gsyn * g[neuron, n] * (v - E_rev) * (nmda==0.f0 ? 1.f0 : 1/(1.0f0 + (mg / b) * exp256(k * v)))
         end
         @simd for n in gaba_receptors
-            @unpack gsyn, E_rev, nmda = syn[n]
+            @unpack gsyn, E_rev, nmda, name = syn[n]
             is[comp] += gsyn * g[neuron, n] * (v - E_rev)        
         end
     end
+    is[comp] = clamp(is[comp], -1500, 1500)
 end
