@@ -37,7 +37,7 @@ BallAndStick
     name::String = "BallAndStick"
     id::String = randstring(12)
     N::IT = 100
-    param::DendNeuronParameter = BallAndStickParameter()
+    param::DendNeuronParameter = BallAndStickParameter
     d::VDT = create_dendrite(N, param.ds[1])
 
     # Membrane potential and adaptation

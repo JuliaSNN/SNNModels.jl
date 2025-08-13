@@ -12,3 +12,5 @@ plots = map(if_types) do if_type
 end
 
 # plot(plots...)
+
+true

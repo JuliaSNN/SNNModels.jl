@@ -102,7 +102,7 @@ end
     name::String = "Generalized IF"
     id::String = randstring(12)
 
-    param::GIFParam
+    param::GIFParam = AdExParameter()
     N::Int32 = 100 # Number of neurons
     v::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
     w::VFT = zeros(N) # Adaptation current

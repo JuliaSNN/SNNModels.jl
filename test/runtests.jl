@@ -1,5 +1,6 @@
 using SNNModels
 using Test
+using Random
 @load_units
 
 if VERSION > v"1.1"
@@ -7,23 +8,28 @@ if VERSION > v"1.1"
 end
 ##
 
+@testset "Neurons and stimuli" begin
+    @test include("hh_neuron.jl")
+    @test include("if_neuron.jl")
+    @test include("if_inputs.jl")
+    @test include("adex_neuron.jl")
+    @test include("adex_inputs.jl")
+    @test include("iz_neuron.jl")
+    @test include("spiketime.jl")
+    @test include("ballandstick.jl")
+    @test include("poisson_stim.jl")
+end
 
-include("chain.jl")
-include("hh_net.jl")
-include("hh_neuron.jl")
-include("if_net.jl")
-include("if_neuron.jl")
-include("if_inputs.jl")
-include("adex_neuron.jl")
-include("adex_inputs.jl")
-include("iz_net.jl")
-include("iz_neuron.jl")
-include("oja.jl")
-include("rate_net.jl")
-include("stdp_demo.jl")
-include("poisson_stim.jl")
-include("spiketime.jl")
-include("ballandstick.jl")
+
+@testset "Networks and synapses" begin
+    @test include("if_net.jl")
+    @test include("chain.jl")
+    @test include("iz_net.jl")
+    @test include("hh_net.jl")
+    @test include("oja.jl")
+    @test include("rate_net.jl")
+    @test include("stdp_demo.jl")
+end
 
 # include("dendrite.jl")
 # include("tripod_network.jl")

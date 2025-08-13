@@ -26,8 +26,8 @@ include("generalized_if/gif.jl")
 include("generalized_if/synapses.jl")
 include("generalized_if/if.jl")
 include("generalized_if/adex.jl")
+include("generalized_if/if_extended.jl")
 # include("generalized_if/if_CANAHP.jl")
-# include("generalized_if/if_extended.jl")
 # include("adex/adex_multitimescale.jl")
 
 ## Multicompartment

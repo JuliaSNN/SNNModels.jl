@@ -64,5 +64,7 @@ poisson_inh = PoissonStimulusLayer(
 stim_exc = PoissonLayer(E, :glu, :d, param = poisson_exc, name = "noiseE")
 stim_inh = PoissonLayer(E, :gaba, :d, param = poisson_inh, name = "noiseI")
 
-model = compose(; E, stim_exc, stim_inh)
+model = compose(; E, stim_exc, stim_inh, silent=true)
 sim!(model, 1s)
+
+true

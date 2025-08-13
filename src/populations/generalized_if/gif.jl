@@ -28,3 +28,6 @@ PostSpike
     A::FT
     τA::FT
 end
+
+export PostSpike
+
