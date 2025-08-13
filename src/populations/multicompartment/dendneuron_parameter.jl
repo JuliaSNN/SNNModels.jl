@@ -55,7 +55,7 @@ DendLength = Union{Float32, Tuple}
                                     ST = SynapseArray,
                                     NMDAT = NMDAVoltageDependency{Float32},
                                     PST = PostSpike{Float32},
-                                    PT = Physiology} <: AbstractAdExParameter
+                                    PT = Physiology} <: AbstractGeneralizedIFParameter
     #Membrane parameters
     C::FT = 281pF           # (pF) membrane timescale
     gl::FT = 40nS                # (nS) gl is the leaking conductance,opposite of Rm
@@ -218,17 +218,12 @@ end
             is::Vector{Float32}, 
             comp::Int, 
             neuron::Int)
-    @unpack glu_receptors, gaba_receptors = param
     @unpack mg, b, k = param.NMDA
     is[comp] = 0.f0
     @inbounds @fastmath begin
-        @simd for n in glu_receptors
+        @simd for n in eachindex(syn)
             @unpack gsyn, E_rev, nmda = syn[n]
             is[comp] += gsyn * g[neuron, n] * (v - E_rev) * (nmda==0.f0 ? 1.f0 : 1/(1.0f0 + (mg / b) * exp256(k * v)))
-        end
-        @simd for n in gaba_receptors
-            @unpack gsyn, E_rev, nmda, name = syn[n]
-            is[comp] += gsyn * g[neuron, n] * (v - E_rev)        
         end
     end
     is[comp] = clamp(is[comp], -1500, 1500)

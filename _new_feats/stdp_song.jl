@@ -6,7 +6,7 @@ inputs = Poisson(; N = 1000)
 inputs.param = PoissonParameter(; rate = 1Hz)
 
 neurons = IF(; N = 1)
-neurons.param = IFParameterSingleExponential(;
+neurons.param = IFSinExpParameter(;
     τm = 10ms,
     τe = 5ms,
     El = -74mV,

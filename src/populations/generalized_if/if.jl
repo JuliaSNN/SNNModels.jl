@@ -1,4 +1,6 @@
-@snn_kw struct IFParameter{FT = Float32} <: AbstractIFParameter
+@snn_kw struct IFParameter{FT = Float32} <: AbstractDoubleExpParameter
+    C::FT = 281pF        #(pF)
+    gL::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
     τm::FT = 20ms
     Vt::FT = -50mV # Membrane threshold potential
     Vr::FT = -60mV # Membrane reset potential
@@ -19,7 +21,10 @@
     τw::FT = 0.0 #144ms # adaptation time constant (~Ca-activated K current inactivation)
 end
 
-@snn_kw struct IFCurrentParameter{FT = Float32} <: AbstractIFParameter
+
+@snn_kw struct IFCurrentParameter{FT = Float32} <: AbstractCurrentParameter
+    C::FT = 281pF        #(pF)
+    gL::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
     τm::FT = 20ms # Membrane time constant
     Vt::FT = -50mV # Membrane potential threshold
     Vr::FT = -60mV # Reset potential
@@ -34,7 +39,9 @@ end
     E_e::FT = 0mV # Reversal potential
 end
 
-@snn_kw struct IFCurrentDeltaParameter{FT = Float32} <: AbstractIFParameter
+@snn_kw struct IFCurrentDeltaParameter{FT = Float32} <: AbstractDeltaParameter
+    C::FT = 281pF        #(pF)
+    gL::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
     τm::FT = 20ms # Membrane time constant
     Vt::FT = -50mV # Membrane potential threshold
     Vr::FT = -60mV # Reset potential
@@ -46,30 +53,9 @@ end
 end
 
 
-function IFParameterGsyn(;
-    gsyn_i = 1.0,
-    gsyn_e = 1.0,
-    τde = 6ms,
-    τre = 1ms,
-    τdi = 2ms,
-    τri = 0.5ms,
-    kwargs...,
-)
-    gsyn_e *= norm_synapse(τre, τde)
-    gsyn_i *= norm_synapse(τri, τdi)
-    return IFParameter(
-        τre = τre,
-        τde = τde,
-        τri = τri,
-        τdi = τdi,
-        gsyn_e = Float32(gsyn_e),
-        gsyn_i = Float32(gsyn_i),
-        ;
-        kwargs...,
-    )
-end
-
-@snn_kw struct IFParameterSingleExponential{FT = Float32} <: AbstractIFParameter
+@snn_kw struct IFSinExpParameter{FT = Float32} <: AbstractSinExpParameter
+    C::FT = 281pF        #(pF)
+    gL::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
     τm::FT = 20ms
     Vt::FT = -50mV
     Vr::FT = -60mV
@@ -89,11 +75,11 @@ end
 @snn_kw mutable struct IF{
     VFT = Vector{Float32},
     VBT = Vector{Bool},
-    IFT<:AbstractIFParameter,
+    GIFT<:AbstractGeneralizedIFParameter,
 } <: AbstractGeneralizedIF
     id::String = randstring(12)
     name::String = "IF"
-    param::IFT = IFParameter()
+    param::GIFT = IFParameter()
     N::Int32 = 100
     v::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
     ge::VFT = zeros(N)
@@ -104,6 +90,7 @@ end
     w::VFT = zeros(N)
     fire::VBT = zeros(Bool, N)
     I::VFT = zeros(N)
+    syn_curr::VFT = zeros(N) # Synaptic current
     records::Dict = Dict()
     Δv::VFT = zeros(Float32, N)
     Δv_temp::VFT = zeros(Float32, N)
@@ -115,31 +102,9 @@ end
 """
 IF
 
-function integrate!(p::IF, param::T, dt::Float32) where {T<:AbstractIFParameter}
-    update_synapses!(p, param, dt)
-    # Heun_update_neuron!(p, param, dt)
-    update_neuron!(p, param, dt)
-    update_spike!(p, param, dt)
-end
-
-function update_spike!(p::IF, param::T, dt::Float32) where {T<:AbstractIFParameter}
-    @unpack N, v, w, tabs, fire = p
-    @unpack Vt, Vr, τabs = param
-    @inbounds for i = 1:N
-        # Spike
-        fire[i] = v[i] > Vt
-        v[i] = ifelse(fire[i], Vr, v[i])
-        # Absolute refractory period
-        tabs[i] = ifelse(fire[i], round(Int, τabs / dt), tabs[i])
-        # Adaptation current
-        !(hasfield(typeof(param), :τw) && param.τw > 0.0f0) && continue
-        w[i] = ifelse(fire[i], w[i] + param.b, w[i])
-    end
-end
-
-function update_neuron!(p::IF, param::T, dt::Float32) where {T<:AbstractIFParameter}
-    @unpack N, v, w, I, tabs, fire = p
-    @unpack τm, El, R, τabs = param
+function update_neuron!(p::IF, param::T, dt::Float32) where {T<:AbstractGeneralizedIFParameter}
+    @unpack N, v, w, I, tabs, fire, syn_curr = p
+    @unpack τm, El, R, Vt, Vr, τabs = param
 
     @inbounds for i = 1:N
         # Idle time
@@ -149,92 +114,33 @@ function update_neuron!(p::IF, param::T, dt::Float32) where {T<:AbstractIFParame
             continue
         end
         # Membrane potential
-        v[i] += dt/τm * (-(v[i] - El) + R*(-w[i] + I[i]))
+        v[i] += dt/τm * (-(v[i] - El) 
+                         + R*(-w[i] + I[i])
+                         - R*syn_curr[i]
+                         )
+
+        # Spike and absolute refractory period
+        fire[i] = v[i] > Vt
+        v[i] = ifelse(fire[i], Vr, v[i])
+        tabs[i] = ifelse(fire[i], round(Int, τabs / dt), tabs[i])
     end
 
-    synaptic_current!(p, param, dt)
 
     # Adaptation current
     if (hasfield(typeof(param), :τw) && param.τw > 0.0f0)
         @unpack a, b, τw = param
         @inbounds for i = 1:N
+            w[i] = ifelse(fire[i], w[i] + param.b, w[i])
             (w[i] += dt * (a * (v[i] - El) - w[i]) / τw)
         end
     end
 end
 
 
-function synaptic_current!(
-    p::IF,
-    param::T,
-    dt::Float32,
-) where {T<:Union{IFParameterSingleExponential,IFParameter}}
-    @unpack E_i, E_e, gsyn_e, gsyn_i, R, τm = param
-    @unpack ge, gi, v, N = p
-    @inbounds for i = 1:N
-        v[i] +=
-            dt/τm * R * (-ge[i] * (v[i] - E_e) * gsyn_e + -gi[i] * (v[i] - E_i) * gsyn_i)
-    end
-end
-
-function synaptic_current!(
-    p::IF,
-    param::T,
-    dt::Float32,
-) where {T<:Union{IFCurrentParameter,IFCurrentDeltaParameter}}
-    @unpack E_i, E_e, gsyn_e, gsyn_i, v, R, τm = param
-    @unpack ge, gi = p
-    @inbounds for i = 1:N
-        v[i] += dt/τm * R * (ge[i] - gi[i]) #synaptic term
-    end
-end
-
-
-function update_synapses!(p::IF, param::IFParameter, dt::Float32)
-    @unpack N, ge, gi, he, hi = p
-    @unpack τde, τre, τdi, τri = param
-    @inbounds for i = 1:N
-        ge[i] += dt * (-ge[i] / τde + he[i])
-        he[i] -= dt * he[i] / τre
-        gi[i] += dt * (-gi[i] / τdi + hi[i])
-        hi[i] -= dt * hi[i] / τri
-    end
-end
-
-function update_synapses!(p::IF, param::IFParameterSingleExponential, dt::Float32)
-    @unpack N, ge, gi = p
-    @unpack τe, τi = param
-    @inbounds for i = 1:N
-        ge[i] += dt * (-ge[i] / τe)
-        gi[i] += dt * (-gi[i] / τi)
-        ge[i] = clamp(ge[i], 0, 1000pA)
-        gi[i] = clamp(gi[i], 0, 1000pA)
-    end
-end
-
-function update_synapses!(p::IF, param::IFCurrentParameter, dt::Float32)
-    @unpack N, ge, gi = p
-    @unpack τe, τi = param
-    @inbounds for i = 1:N
-        ge[i] += dt * (-ge[i] / τe)
-        gi[i] += dt * (-gi[i] / τi)
-    end
-end
-
-
-function update_synapses!(p::IF, param::IFCurrentDeltaParameter, dt::Float32)
-    @unpack N, ge, gi = p
-    @inbounds for i = 1:N
-        ge[i] = 0.0f0
-        gi[i] = 0.0f0
-    end
-end
-
 
 export IF,
     IFParameter,
-    IFParameterSingleExponential,
-    IFParameterGsyn,
+    IFSinExpParameter,
     IFCurrentParameter,
     IFCurrentDeltaParameter
 

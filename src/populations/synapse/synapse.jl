@@ -148,39 +148,6 @@ function α_synapse(τr, τd)
     return (τd - τr) / (τd * τr)
 end
 
-# """
-# Convert a Synapse to a SynapseArray.
-
-# # Arguments
-# - `syn::Synapse`: The Synapse object
-# - `indices::Vector`: Optional vector of indices to include in the SynapseArray
-
-# # Returns
-# - `SynapseArray`: The SynapseArray object
-# """
-# function synapsearray(syn::Synapse, indices::Vector = [])::SynapseArray
-#     container = SynapseArray()
-#     names = isempty(indices) ? fieldnames(Synapse) : fieldnames(Synapse)[indices]
-#     for name in names
-#         receptor = getfield(syn, name)
-#             push!(container, receptor)
-#     end
-#     return container
-# end
-
-# """
-# Return the SynapseArray as is.
-
-# # Arguments
-# - `syn::SynapseArray`: The SynapseArray object
-
-# # Returns
-# - `SynapseArray`: The SynapseArray object
-# """
-# function synapsearray(syn::SynapseArray)::SynapseArray
-#     return syn
-# end
-
 Mg_mM = 1.0f0
 nmda_b = 3.36   # voltage dependence of nmda channels
 nmda_k = -0.077     # Eyal 2018
