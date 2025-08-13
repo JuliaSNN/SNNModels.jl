@@ -8,3 +8,5 @@ E.I[1] = 30
 
 monitor!(E, [(:v, [1, N])])
 train!([E], [EE]; duration = 100ms)
+
+true

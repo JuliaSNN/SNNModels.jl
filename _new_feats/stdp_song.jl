@@ -6,14 +6,8 @@ inputs = Poisson(; N = 1000)
 inputs.param = PoissonParameter(; rate = 1Hz)
 
 neurons = IF(; N = 1)
-neurons.param = IFParameterSingleExponential(;
-    τm = 10ms,
-    τe = 5ms,
-    El = -74mV,
-    E_e = 0mV,
-    Vt = -54mV,
-    Vr = -60mV,
-)
+neurons.param =
+    IFSinExpParameter(; τm = 10ms, τe = 5ms, El = -74mV, E_e = 0mV, Vt = -54mV, Vr = -60mV)
 
 S = SpikingSynapse(
     inputs,

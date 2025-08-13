@@ -9,3 +9,5 @@ C = [EE, EI, IE, II]
 
 monitor!(E, [(:v, [1, 10, 100])])
 sim!(P, C; dt = 0.01ms, duration = 100ms)
+
+true

@@ -19,3 +19,5 @@ for t = 0:T
     RZ.I = [(0.5T < t < 0.6T) ? 10mV : 0mV]
     sim!(P, duration = 0.1f0)
 end
+
+true

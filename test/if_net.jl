@@ -10,3 +10,4 @@ C = [EE, EI, IE, II]
 monitor!([E, I], [:fire])
 sim!(P, C; duration = 1second)
 train!(P, C; duration = 1second)
+true

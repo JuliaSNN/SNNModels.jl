@@ -1,4 +1,4 @@
-@snn_kw struct ExtendedIFParameter{FT = Float32} <: AbstractIFParameter
+@snn_kw struct ExtendedIFParameter{FT = Float32} <: AbstractGeneralizedIFParameter
     Cm::FT = 250pF
     Vt::FT = -40mV
     Vr::FT = -65mV
@@ -15,7 +15,7 @@ end
 @snn_kw mutable struct ExtendedIF{
     VFT = Vector{Float32},
     VBT = Vector{Bool},
-    IFT<:AbstractIFParameter,
+    IFT <: AbstractGeneralizedIFParameter,
 } <: AbstractGeneralizedIF
     id::String = randstring(12)
     name::String = "ExtendedIF"
@@ -34,28 +34,16 @@ end
     Δv_temp::VFT = zeros(Float32, N)
 end
 
-ExtendedIF
-
-function integrate!(p::ExtendedIF, param::T, dt::Float32) where {T<:AbstractIFParameter}
+function integrate!(p::ExtendedIF, param::ExtendedIFParameter, dt::Float32)
     update_synapses!(p, param, dt)
     update_neuron!(p, param, dt)
-    update_spike!(p, param, dt)
 end
 
-function update_spike!(p::ExtendedIF, param::T, dt::Float32) where {T<:AbstractIFParameter}
-    @unpack N, v, w, tabs, fire = p
-    @unpack Vt, Vr, τabs = param
-    @inbounds for i = 1:N
-        fire[i] = v[i] > Vt
-        v[i] = ifelse(fire[i], Vr, v[i])
-        # Absolute refractory period
-        tabs[i] = ifelse(fire[i], round(Int, τabs / dt), tabs[i])
-    end
-end
-
-function update_neuron!(p::ExtendedIF, param::T, dt::Float32) where {T<:AbstractIFParameter}
+function update_neuron!(p::ExtendedIF, param::ExtendedIFParameter, dt::Float32)
     @unpack N, v, g_Exc, g_PV, g_SST, w, I, tabs, fire = p
     @unpack El, E_i, E_e, τabs, gl, α = param
+    @unpack N, v, w, tabs, fire = p
+    @unpack Vt, Vr, τabs = param
     @inbounds for i = 1:N
         if tabs[i] > 0
             fire[i] = false
@@ -74,14 +62,11 @@ function update_neuron!(p::ExtendedIF, param::T, dt::Float32) where {T<:Abstract
                 # 0
             ) / param.Cm
         v[i] += dt * dv
+        fire[i] = v[i] > Vt
+        v[i] = ifelse(fire[i], Vr, v[i])
+        # Absolute refractory period
+        tabs[i] = ifelse(fire[i], round(Int, τabs / dt), tabs[i])
     end
-    # # Adaptation current
-    # if hasfield(typeof(param), :τw) && param.τw > 0.0f0
-    #     @unpack a, b, τw = param
-    #     @inbounds for i = 1:N
-    #         w[i] += dt * (a * (v[i] - El) - w[i]) / τw
-    #     end
-    # end
 end
 
 function update_synapses!(p::ExtendedIF, param::ExtendedIFParameter, dt::Float32)

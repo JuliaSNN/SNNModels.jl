@@ -17,3 +17,5 @@ end
 
 ΔW = getrecord(EE, :W)[end]
 x = getrecord(EE, :LTPVars_x)[end]
+
+true

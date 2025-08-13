@@ -16,3 +16,5 @@ for t = 1:1000
     I.I .= 2randn(Ni)
     sim!(P, C, [EmptyStimulus()], 1.0f0, Time())
 end
+
+true
