@@ -8,14 +8,18 @@ abstract type AbstractDeltaParameter <: AbstractGeneralizedIFParameter end
 
 ## Receptor Synapse updates
 
-function update_synapses!(p::P, param::T, dt::Float32) where {P<:AbstractGeneralizedIF, T<: AbstractReceptorParameter}
+function update_synapses!(
+    p::P,
+    param::T,
+    dt::Float32,
+) where {P<:AbstractGeneralizedIF,T<:AbstractReceptorParameter}
     @unpack N, g, h, glu, gaba, hi, he = p
     @unpack glu_receptors, gaba_receptors, syn = param
 
     @inbounds for n in glu_receptors
         @unpack τr⁻, τd⁻, α = syn[n]
         @turbo for i ∈ 1:N
-            h[i, n] += (he[i] +glu[i]) * α
+            h[i, n] += (he[i] + glu[i]) * α
             g[i, n] = exp64(-dt * τd⁻) * (g[i, n] + dt * h[i, n])
             h[i, n] = exp64(-dt * τr⁻) * (h[i, n])
         end
@@ -36,7 +40,10 @@ function update_synapses!(p::P, param::T, dt::Float32) where {P<:AbstractGeneral
     fill!(he, 0.0f0)
 end
 
-@inline function synaptic_current!(p::T, param::P) where {T<:AbstractGeneralizedIF, P<:AbstractReceptorParameter}
+@inline function synaptic_current!(
+    p::T,
+    param::P,
+) where {T<:AbstractGeneralizedIF,P<:AbstractReceptorParameter}
     @unpack N, g, h, g, v, syn_curr = p
     @unpack syn, NMDA = param
     @unpack mg, b, k = NMDA
@@ -44,7 +51,11 @@ end
     @inbounds @fastmath for n in eachindex(syn)
         @unpack gsyn, E_rev, nmda = syn[n]
         for neuron ∈ 1:N
-            syn_curr[neuron] += gsyn * g[neuron, n] * (v[neuron] - E_rev) * (nmda==0.f0 ? 1.f0 : 1/(1.0f0 + (mg / b) * exp256(k * v[neuron])))
+            syn_curr[neuron] +=
+                gsyn *
+                g[neuron, n] *
+                (v[neuron] - E_rev) *
+                (nmda==0.0f0 ? 1.0f0 : 1/(1.0f0 + (mg / b) * exp256(k * v[neuron])))
         end
     end
     return
@@ -52,7 +63,11 @@ end
 
 ## Double Exponential Synapse updates
 
-function update_synapses!(p::P, param::T, dt::Float32) where {P<:AbstractGeneralizedIF, T<:AbstractDoubleExpParameter}
+function update_synapses!(
+    p::P,
+    param::T,
+    dt::Float32,
+) where {P<:AbstractGeneralizedIF,T<:AbstractDoubleExpParameter}
     @unpack N, ge, gi, he, hi = p
     @unpack τde, τre, τdi, τri = param
     @inbounds for i ∈ 1:N
@@ -63,7 +78,10 @@ function update_synapses!(p::P, param::T, dt::Float32) where {P<:AbstractGeneral
     end
 end
 
-@inline function synaptic_current!(p::P, param::T) where {P<:AbstractGeneralizedIF, T<:AbstractDoubleExpParameter}
+@inline function synaptic_current!(
+    p::P,
+    param::T,
+) where {P<:AbstractGeneralizedIF,T<:AbstractDoubleExpParameter}
     @unpack gsyn_e, gsyn_i, E_e, E_i = param
     @unpack N, v, ge, gi, syn_curr = p
     @inbounds @simd for i ∈ 1:N
@@ -73,7 +91,11 @@ end
 
 ## Single Exponential Synapse updates
 
-function update_synapses!(p::P, param::T, dt::Float32) where {P<:AbstractGeneralizedIF, T<:AbstractSinExpParameter}
+function update_synapses!(
+    p::P,
+    param::T,
+    dt::Float32,
+) where {P<:AbstractGeneralizedIF,T<:AbstractSinExpParameter}
     @unpack N, ge, gi, he, hi = p
     @unpack τe, τi = param
     @fastmath @inbounds for i ∈ 1:N
@@ -82,7 +104,10 @@ function update_synapses!(p::P, param::T, dt::Float32) where {P<:AbstractGeneral
     end
 end
 
-@inline function synaptic_current!(p::P, param::T) where {P<:AbstractGeneralizedIF, T<:AbstractSinExpParameter}
+@inline function synaptic_current!(
+    p::P,
+    param::T,
+) where {P<:AbstractGeneralizedIF,T<:AbstractSinExpParameter}
     @unpack gsyn_e, gsyn_i, E_e, E_i = param
     @unpack N, v, ge, gi, syn_curr = p
     @inbounds @simd for i ∈ 1:N
@@ -92,16 +117,23 @@ end
 
 ## Delta Synapse updates
 
-@inline function update_synapses!(p::P, param::T, dt::Float32) where {P<:AbstractGeneralizedIF, T<:AbstractDeltaParameter}
+@inline function update_synapses!(
+    p::P,
+    param::T,
+    dt::Float32,
+) where {P<:AbstractGeneralizedIF,T<:AbstractDeltaParameter}
     @unpack N, ge, gi = p
     # @inbounds for i = 1:N
     # end
 end
 
-@inline function synaptic_current!(p::P, param::T) where {P<:AbstractGeneralizedIF, T<:AbstractDeltaParameter}
+@inline function synaptic_current!(
+    p::P,
+    param::T,
+) where {P<:AbstractGeneralizedIF,T<:AbstractDeltaParameter}
     @unpack N, v, ge, gi, syn_curr = p
     @inbounds @simd for i ∈ 1:N
-        syn_curr[i] = -(ge[i] - gi[i] )
+        syn_curr[i] = -(ge[i] - gi[i])
         ge[i] = 0.0f0
         gi[i] = 0.0f0
     end
@@ -109,7 +141,11 @@ end
 
 
 ## Current Synapse updates
-@inline function update_synapses!(p::P, param::T, dt::Float32) where {P<:AbstractGeneralizedIF, T<:AbstractCurrentParameter}
+@inline function update_synapses!(
+    p::P,
+    param::T,
+    dt::Float32,
+) where {P<:AbstractGeneralizedIF,T<:AbstractCurrentParameter}
     @unpack N, ge, gi = p
     @unpack τe, τi = param
     @fastmath @inbounds for i ∈ 1:N
@@ -118,7 +154,10 @@ end
     end
 end
 
-@inline function synaptic_current!(p::P, param::T) where {P<:AbstractGeneralizedIF, T<:AbstractCurrentParameter}
+@inline function synaptic_current!(
+    p::P,
+    param::T,
+) where {P<:AbstractGeneralizedIF,T<:AbstractCurrentParameter}
     @unpack E_e, E_i = param
     @unpack N, v, ge, gi, syn_curr = p
     @inbounds @simd for i ∈ 1:N
@@ -130,12 +169,12 @@ end
 ## Synaptic currents
 
 
-        # if nmda > 0.0f0
-        #     @simd for neuron ∈ 1:N
-        #         syn_curr[i] +=
-        #             gsyn * g[i, r] * (v[i] - E_rev) / (1.0f0 + (mg / b) * exp256(k * (v[i])))
-        #     end
-        # else
-        #     @simd for i ∈ 1:N
-        #         syn_curr[i] += gsyn * g[i, r] * (v[i] - E_rev)
-        #     end
+# if nmda > 0.0f0
+#     @simd for neuron ∈ 1:N
+#         syn_curr[i] +=
+#             gsyn * g[i, r] * (v[i] - E_rev) / (1.0f0 + (mg / b) * exp256(k * (v[i])))
+#     end
+# else
+#     @simd for i ∈ 1:N
+#         syn_curr[i] += gsyn * g[i, r] * (v[i] - E_rev)
+#     end

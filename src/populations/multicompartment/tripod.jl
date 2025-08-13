@@ -223,7 +223,7 @@ end
         #     end
         # end
 
-              # update membrane potential
+        # update membrane potential
         @unpack C, gl, Er, ΔT = param
         Δv[1] =
             1/C * (

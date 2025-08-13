@@ -102,7 +102,11 @@ end
 """
 IF
 
-function update_neuron!(p::IF, param::T, dt::Float32) where {T<:AbstractGeneralizedIFParameter}
+function update_neuron!(
+    p::IF,
+    param::T,
+    dt::Float32,
+) where {T<:AbstractGeneralizedIFParameter}
     @unpack N, v, w, I, tabs, fire, syn_curr = p
     @unpack τm, El, R, Vt, Vr, τabs = param
 
@@ -114,10 +118,7 @@ function update_neuron!(p::IF, param::T, dt::Float32) where {T<:AbstractGenerali
             continue
         end
         # Membrane potential
-        v[i] += dt/τm * (-(v[i] - El) 
-                         + R*(-w[i] + I[i])
-                         - R*syn_curr[i]
-                         )
+        v[i] += dt/τm * (-(v[i] - El) + R*(-w[i] + I[i]) - R*syn_curr[i])
 
         # Spike and absolute refractory period
         fire[i] = v[i] > Vt
@@ -138,11 +139,7 @@ end
 
 
 
-export IF,
-    IFParameter,
-    IFSinExpParameter,
-    IFCurrentParameter,
-    IFCurrentDeltaParameter
+export IF, IFParameter, IFSinExpParameter, IFCurrentParameter, IFCurrentDeltaParameter
 
 
 # function Heun_update_neuron!(p::IF, param::T, dt::Float32) where {T<:AbstractIFParameter}

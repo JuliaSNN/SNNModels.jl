@@ -85,7 +85,7 @@ end
 
 function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
     @unpack N, v_s, w_s, v_d = p
-    @unpack fire, θ, after_spike,  Δv, Δv_temp = p
+    @unpack fire, θ, after_spike, Δv, Δv_temp = p
     @unpack Er, up, τabs, BAP, AP_membrane, Vr, Vt, τw, a, b, postspike = param
     @unpack d = p
     @unpack NMDA, soma_syn, dend_syn = param
@@ -113,7 +113,7 @@ function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
                 Δv_temp[_i] = 0.0f0
                 Δv[_i] = 0.0f0
             end
-            update_ballandstick!(p, Δv, i, param, 0.f0)
+            update_ballandstick!(p, Δv, i, param, 0.0f0)
             for _i ∈ 1:2
                 Δv_temp[_i] = Δv[_i]
             end

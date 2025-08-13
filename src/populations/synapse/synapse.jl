@@ -47,17 +47,21 @@ Synapse struct represents a synaptic connection with different types of receptor
 """
 Synapse
 
-function Synapse(;AMPA::Receptor{T} = Receptor(),
-                  NMDA::ReceptorVoltage{T} = ReceptorVoltage(),
-                  GABAa::Receptor{T} = Receptor(),
-                  GABAb::Receptor{T} = Receptor()) where {T <: Float32}
+function Synapse(;
+    AMPA::Receptor{T} = Receptor(),
+    NMDA::ReceptorVoltage{T} = ReceptorVoltage(),
+    GABAa::Receptor{T} = Receptor(),
+    GABAb::Receptor{T} = Receptor(),
+) where {T<:Float32}
     return SynapseArray([AMPA, NMDA, GABAa, GABAb])
 end
 
-function Synapse(AMPA::Receptor{T},
-                  NMDA::ReceptorVoltage{T},
-                  GABAa::Receptor{T},
-                  GABAb::Receptor{T}) where {T <: Float32}
+function Synapse(
+    AMPA::Receptor{T},
+    NMDA::ReceptorVoltage{T},
+    GABAa::Receptor{T},
+    GABAb::Receptor{T},
+) where {T<:Float32}
     return SynapseArray([AMPA, NMDA, GABAa, GABAb])
 end
 
@@ -103,7 +107,8 @@ function Synapse(glu::Glutamatergic, gaba::GABAergic)
     return Synapse(glu.AMPA, glu.NMDA, gaba.GABAa, gaba.GABAb)
 end
 
-export Receptor, Synapse, ReceptorVoltage, GABAergic, Glutamatergic, SynapseArray, NMDAVoltageDependency
+export Receptor,
+    Synapse, ReceptorVoltage, GABAergic, Glutamatergic, SynapseArray, NMDAVoltageDependency
 
 """
 Calculate the normalization factor for a synapse.
@@ -169,7 +174,7 @@ end
 
 function nmda_gating(v, NMDA::NMDAVoltageDependency)
     @unpack b, k, mg = NMDA
-    return 1/ (1.0f0 + (mg / b) * exp256(k * v))
+    return 1 / (1.0f0 + (mg / b) * exp256(k * v))
 end
 
 export norm_synapse,

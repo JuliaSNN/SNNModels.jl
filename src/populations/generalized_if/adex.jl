@@ -65,7 +65,7 @@ end
     NMDAT = NMDAVoltageDependency{Float32},
     VFT = Vector{Float32},
 } <: AbstractReceptorParameter
-    C::FT= 281pF        #(pF)
+    C::FT = 281pF        #(pF)
     gL::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
     τm::FT = C / gL # Membrane time constant
     Vt::FT = -50mV # Membrane potential threshold
@@ -151,7 +151,7 @@ function update_neuron!(
     p::P,
     param::T,
     dt::Float32,
-) where {P<:AdEx, T<:AbstractGeneralizedIFParameter}
+) where {P<:AdEx,T<:AbstractGeneralizedIFParameter}
     @unpack N, v, w, fire, θ, I, ξ_het, tabs, syn_curr = p
     @unpack τm, Vt, Vr, El, R, ΔT, τw, a, b, At, τt, τabs = param
 

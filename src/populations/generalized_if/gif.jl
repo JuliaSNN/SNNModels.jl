@@ -4,7 +4,7 @@ function integrate!(
     p::P,
     param::T,
     dt::Float32,
-) where {P<:AbstractGeneralizedIF, T<:AbstractGeneralizedIFParameter}
+) where {P<:AbstractGeneralizedIF,T<:AbstractGeneralizedIFParameter}
     update_synapses!(p, param, dt)
     synaptic_current!(p, param)
     update_neuron!(p, param, dt)
