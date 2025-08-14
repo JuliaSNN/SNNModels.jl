@@ -52,14 +52,14 @@ dend_neuron = DendNeuronParameter(
 
 E = SNNModels.BallAndStick(N=1, param = dend_neuron)
 
-poisson_exc = PoissonStimulusLayer(
+poisson_exc = PoissonLayerParameter(
     10.2Hz,    # Mean firing rate (Hz) 
     p = 1f0,  # Probability of connecting to a neuron
     μ = 1.0,  # Synaptic strength (nS)
     N = 1000, # Neurons in the Poisson Layer
 )
 
-poisson_inh = PoissonStimulusLayer(
+poisson_inh = PoissonLayerParameter(
     3Hz,       # Mean firing rate (Hz)
     p = 1f0,   # Probability of connecting to a neuron
     μ = 4.0,   # Synaptic strength (nS)

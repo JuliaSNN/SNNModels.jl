@@ -1,5 +1,5 @@
 """
-    PoissonStimulusLayer
+    PoissonLayerParameter
 
     Poisson stimulus with rate defined for each cell in the layer. Each neuron of the 'N' Poisson population fires with 'rate'.
     The connectivity is defined by the parameter 'ϵ'. Thus, the number of presynaptic neuronsconnected to the postsynaptic neuronsis 'N*ϵ'. Each post-synaptic cell receives rate: 'rate * N * ϵ'.
@@ -10,20 +10,27 @@
     - `ϵ::Float32`: The fraction of presynaptic neuronsconnected to the postsynaptic neurons.
     - `active::Vector{Bool}`: A vector of booleans indicating if the stimulus is active.
 """
-PoissonStimulusLayer
-@snn_kw struct PoissonStimulusLayer{R = Float32} <: PoissonStimulusParameter
-    rate::Vector{R}
+PoissonLayerParameter
+
+@snn_kw struct PoissonLayerParameter{R = Float32} <: PoissonStimulusParameter
+    rate::Float32
     N::Int32
+    rates::Vector{R} = fill(Float32.(rate), N)
     p::Float32
     μ::Float32
     σ::Float32 = 0
     active::Vector{Bool} = [true]
 end
 
-function PoissonStimulusLayer(rate::R; kwargs...) where {R<:Real}
+function PoissonLayerParameter(rate::R; kwargs...) where {R<:Real}
     N = kwargs[:N]
-    rate = fill(Float32.(rate), N)
-    return PoissonStimulusLayer(; kwargs..., rate = rate)
+    rates = fill(Float32.(rate), N)
+    return PoissonLayerParameter(; N=N, kwargs..., rate = rate, rates = rates)
+end
+
+function PoissonStimulusLayer(rate::R; kwargs...) where {R<:Real}
+    @warn "PoissonStimulusLayer is deprecated, use PoissonLayer instead."
+    return PoissonLayerParameter(rate; kwargs...)
 end
 
 
@@ -33,10 +40,10 @@ function PoissonLayer(
     sym::Symbol,
     target = nothing;
     w = nothing,
-    param::PoissonStimulusLayer,
+    param::P,
     dist::Symbol = :Normal,
     kwargs...,
-) where {T<:AbstractPopulation}
+) where {T<:AbstractPopulation, P<:PoissonStimulusParameter}
 
     w = sparse_matrix(w, param.N, post.N, dist, param.μ, param.σ, param.p)
 
@@ -62,15 +69,15 @@ end
 
 function stimulate!(
     p::PoissonStimulus,
-    param::PoissonStimulusLayer,
+    param::PoissonLayerParameter,
     time::Time,
     dt::Float32,
 )
     @unpack N, randcache, fire, neurons, colptr, W, I, g = p
-    @unpack rate = param
+    @unpack rates = param
     rand!(randcache)
     @inbounds @simd for j = 1:N
-        if randcache[j] < rate[j] * dt
+        if randcache[j] < rates[j] * dt
             fire[j] = true
             @fastmath @simd for s ∈ colptr[j]:(colptr[j+1]-1)
                 g[I[s]] += W[s]
@@ -81,4 +88,4 @@ function stimulate!(
     end
 end
 
-export PoissonStimulusLayer, PoissonLayer, stimulate!
+export PoissonLayerParameter, PoissonLayer, stimulate!
