@@ -35,7 +35,7 @@ end
 
 @testset "Constructors" begin
     @testset "Type parameters" begin
-        for Model in (HH, IF, IZ, Poisson, Rate, AdEx, Tripod, BallAndStick, ExtendedIF)
+        for Model in (HH, IF, IZ, Rate, AdEx, Tripod, Poisson, BallAndStick, ExtendedIF)
             test_typeparams(Model)
         end
         test_typeparams(RateSynapse; args = (Rate(), Rate()))

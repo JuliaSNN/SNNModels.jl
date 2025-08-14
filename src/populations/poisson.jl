@@ -86,5 +86,4 @@ function integrate!(p::VariablePoisson, param::VariablePoissonParameter, dt::Flo
 end
 
 
-export Poisson,
-    PoissonParameter, integrate!, VariablePoisson, VariablePoissonParameter, stimulate!
+export Poisson, PoissonParameter, integrate!, VariablePoisson, VariablePoissonParameter, stimulate!
