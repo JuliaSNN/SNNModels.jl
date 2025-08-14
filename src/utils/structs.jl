@@ -132,5 +132,6 @@ function validate_population_model(model)
 end
 
 export Spiketimes, Time
-export AbstractParameter, AbstractConnectionParameter, AbstractPopulationParameter, AbstractStimulusParameter
+export AbstractParameter,
+    AbstractConnectionParameter, AbstractPopulationParameter, AbstractStimulusParameter
 export AbstractConnection, AbstractPopulation, AbstractStimulus

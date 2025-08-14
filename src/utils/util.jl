@@ -211,7 +211,7 @@ If `syn` and/or `pop` and/or `stim` arguments are provided, they are merged into
 
 ## Example
 """
-function compose(args...; name = randstring(10), silent = false, time=Time(), kwargs...)
+function compose(args...; name = randstring(10), silent = false, time = Time(), kwargs...)
     pop = Dict{Symbol,Any}()
     syn = Dict{Symbol,Any}()
     stim = Dict{Symbol,Any}()
@@ -437,7 +437,7 @@ function remove_element(model, key)
 end
 
 
-function merge_models(args...;kwargs...) 
+function merge_models(args...; kwargs...)
     @warn "merge_models is deprecated, use `compose` instead"
     compose(args...; kwargs...)
 end

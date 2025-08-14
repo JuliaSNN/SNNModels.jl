@@ -49,8 +49,8 @@ SomaGlu = Glutamatergic(
     ),
 )
 SomaGABA = GABAergic(
-    Receptor( E_rev = -70.0, τr = 0.5, τd = 10.0, g0 = 2.0),
-    Receptor( E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.006), # τd = 100.0
+    Receptor(E_rev = -70.0, τr = 0.5, τd = 10.0, g0 = 2.0),
+    Receptor(E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.006), # τd = 100.0
 )
 SomaNMDA = NMDAVoltageDependency()
 SomaSynapse = Synapse(SomaGlu, SomaGABA)

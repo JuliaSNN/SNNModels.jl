@@ -9,8 +9,8 @@ plasticity!(
     T::Time,
 ) = nothing
 
-include("synapse.jl")
-include("synapse_parameters.jl")
+include("synapse/synapse.jl")
+include("synapse/synapse_parameters.jl")
 
 ## Neurons
 include("poisson.jl")
@@ -21,16 +21,14 @@ include("rate.jl")
 include("identity.jl")
 
 ## IF
-abstract type AbstractIFParameter <: AbstractGeneralizedIFParameter end
-include("if/if.jl")
-include("if/if_CANAHP.jl")
-include("if/if_extended.jl")
 
-## AdEx
-abstract type AbstractAdExParameter <: AbstractGeneralizedIFParameter end
-include("adex/adex_parameter.jl")
-include("adex/adex.jl")
-include("adex/adex_multitimescale.jl")
+include("generalized_if/gif.jl")
+include("generalized_if/synapses.jl")
+include("generalized_if/if.jl")
+include("generalized_if/adex.jl")
+include("generalized_if/if_extended.jl")
+# include("generalized_if/if_CANAHP.jl")
+# include("adex/adex_multitimescale.jl")
 
 ## Multicompartment
 abstract type AbstractDendriteIF <: AbstractGeneralizedIF end

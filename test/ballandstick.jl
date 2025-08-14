@@ -1,19 +1,13 @@
 SomaSynapse = Synapse(
-    AMPA = Receptor(E_rev = 0.0, 
-                    τr = 0.26, 
-                    τd = 2.0, 
-                    g0 = 0.73),
-    GABAa = Receptor(E_rev = -70.0, 
-                     τr = 0.1, 
-                     τd = 15.0, 
-                     g0 = 0.38)
+    AMPA = Receptor(E_rev = 0.0, τr = 0.26, τd = 2.0, g0 = 0.73),
+    GABAa = Receptor(E_rev = -70.0, τr = 0.1, τd = 15.0, g0 = 0.38),
 )
 
 DendSynapse = Synapse(
     AMPA = Receptor(E_rev = 0.0, τr = 0.26, τd = 2.0, g0 = 0.73),
     NMDA = Receptor(E_rev = 0.0, τr = 8, τd = 35.0, g0 = 1.31, nmda = 1.0f0),
     GABAa = Receptor(E_rev = -70.0, τr = 4.8, τd = 29.0, g0 = 0.27),
-    GABAb = Receptor(E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.0006), 
+    GABAb = Receptor(E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.0006),
 )
 
 NMDA = let
@@ -38,7 +32,7 @@ dend_neuron = DendNeuronParameter(
     τabs = 0.1ms,
 
     # post-spike adaptation
-    postspike = PostSpike(A= 10.0, τA= 30.0), 
+    postspike = PostSpike(A = 10.0, τA = 30.0),
 
     # synaptic properties
     soma_syn = SomaSynapse,
@@ -50,25 +44,27 @@ dend_neuron = DendNeuronParameter(
     physiology = human_dend,
 )
 
-E = SNNModels.BallAndStick(N=1, param = dend_neuron)
+E = SNNModels.BallAndStick(N = 1, param = dend_neuron)
 
 poisson_exc = PoissonLayerParameter(
     10.2Hz,    # Mean firing rate (Hz) 
-    p = 1f0,  # Probability of connecting to a neuron
+    p = 1.0f0,  # Probability of connecting to a neuron
     μ = 1.0,  # Synaptic strength (nS)
     N = 1000, # Neurons in the Poisson Layer
 )
 
 poisson_inh = PoissonLayerParameter(
     3Hz,       # Mean firing rate (Hz)
-    p = 1f0,   # Probability of connecting to a neuron
+    p = 1.0f0,   # Probability of connecting to a neuron
     μ = 4.0,   # Synaptic strength (nS)
     N = 1000,  # Neurons in the Poisson Layer
 )
 
 # Create the Poisson layers for excitatory and inhibitory inputs
-stim_exc = PoissonLayer(E, :glu, :d, param=poisson_exc, name="noiseE")
-stim_inh = PoissonLayer(E, :gaba, :d, param=poisson_inh, name="noiseI")
+stim_exc = PoissonLayer(E, :glu, :d, param = poisson_exc, name = "noiseE")
+stim_inh = PoissonLayer(E, :gaba, :d, param = poisson_inh, name = "noiseI")
 
-model = compose(;E, stim_exc, stim_inh)
+model = compose(; E, stim_exc, stim_inh, silent=true)
 sim!(model, 1s)
+
+true

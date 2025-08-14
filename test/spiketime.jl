@@ -4,15 +4,14 @@ inputs = SpikeTimeParameter(spiketime, neurons)
 w = zeros(Float32, 2, 2)
 w[2, 1] = 1.0f0
 
-inputs.neurons
-
 st = Identity(N = max_neuron(inputs))
 stim = SpikeTimeStimulusIdentity(st, :g, param = inputs)
 syn = SpikingSynapse(st, st, :g, w = w, LTPParam = STDPGerstner())
 model = compose(pop = st, stim = stim, syn = syn, silent = true)
 monitor!(model.pop..., [:fire])
-monitor!(model.syn..., [:tpre, :tpost, :W])
+# monitor!(model.syn..., [:tpre, :tpost, :W])
 train!(model = model, duration = 3000ms, dt = 0.1ms)
+true
 
 # # vecplot(model.syn..., [:tpre, :tpost], neurons = 1:2, r = 0s:3s)
 # # plot(getvariable(model.syn..., :W)')

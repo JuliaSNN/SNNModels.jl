@@ -47,16 +47,23 @@ Synapse struct represents a synaptic connection with different types of receptor
 """
 Synapse
 
-@snn_kw struct Synapse{T = Float32}
-    AMPA::Receptor{T} = Receptor()
-    NMDA::ReceptorVoltage{T} = ReceptorVoltage()
-    GABAa::Receptor{T} = Receptor()
-    GABAb::Receptor{T} = Receptor()
+function Synapse(;
+    AMPA::Receptor{T} = Receptor(),
+    NMDA::ReceptorVoltage{T} = ReceptorVoltage(),
+    GABAa::Receptor{T} = Receptor(),
+    GABAb::Receptor{T} = Receptor(),
+) where {T<:Float32}
+    return SynapseArray([AMPA, NMDA, GABAa, GABAb])
 end
 
-import Base.getindex
-getindex(s::Synapse, sym::Symbol) =  getfield(s, sym)
-export getindex
+function Synapse(
+    AMPA::Receptor{T},
+    NMDA::ReceptorVoltage{T},
+    GABAa::Receptor{T},
+    GABAb::Receptor{T},
+) where {T<:Float32}
+    return SynapseArray([AMPA, NMDA, GABAa, GABAb])
+end
 
 """
 Glutamatergic struct represents a group of glutamatergic receptors.
@@ -100,7 +107,8 @@ function Synapse(glu::Glutamatergic, gaba::GABAergic)
     return Synapse(glu.AMPA, glu.NMDA, gaba.GABAa, gaba.GABAb)
 end
 
-export Receptor, Synapse, ReceptorVoltage, GABAergic, Glutamatergic, SynapseArray, NMDAVoltageDependency
+export Receptor,
+    Synapse, ReceptorVoltage, GABAergic, Glutamatergic, SynapseArray, NMDAVoltageDependency
 
 """
 Calculate the normalization factor for a synapse.
@@ -145,41 +153,6 @@ function α_synapse(τr, τd)
     return (τd - τr) / (τd * τr)
 end
 
-"""
-Convert a Synapse to a SynapseArray.
-
-# Arguments
-- `syn::Synapse`: The Synapse object
-- `indices::Vector`: Optional vector of indices to include in the SynapseArray
-
-# Returns
-- `SynapseArray`: The SynapseArray object
-"""
-function synapsearray(syn::Synapse, indices::Vector = [])::SynapseArray
-    container = SynapseArray()
-    names = isempty(indices) ? fieldnames(Synapse) : fieldnames(Synapse)[indices]
-    for name in names
-        receptor = getfield(syn, name)
-        # if !(receptor.τr < 0)
-            push!(container, receptor)
-        # end
-    end
-    return container
-end
-
-"""
-Return the SynapseArray as is.
-
-# Arguments
-- `syn::SynapseArray`: The SynapseArray object
-
-# Returns
-- `SynapseArray`: The SynapseArray object
-"""
-function synapsearray(syn::SynapseArray)::SynapseArray
-    return syn
-end
-
 Mg_mM = 1.0f0
 nmda_b = 3.36   # voltage dependence of nmda channels
 nmda_k = -0.077     # Eyal 2018
@@ -201,7 +174,7 @@ end
 
 function nmda_gating(v, NMDA::NMDAVoltageDependency)
     @unpack b, k, mg = NMDA
-    return 1/ (1.0f0 + (mg / b) * exp256(k * v))
+    return 1 / (1.0f0 + (mg / b) * exp256(k * v))
 end
 
 export norm_synapse,

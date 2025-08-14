@@ -906,6 +906,6 @@ export spiketimes,
     st_order,
     isi_cv,
     CV_isi2,
-    sample_spikes, 
+    sample_spikes,
     sample_inputs,
     resample_spikes
