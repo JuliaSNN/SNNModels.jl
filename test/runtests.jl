@@ -1,5 +1,6 @@
 using SNNModels
 using Test
+using Logging
 using Random
 @load_units
 
@@ -20,15 +21,18 @@ end
     @test include("poisson_stim.jl")
 end
 
-
-@testset "Networks and synapses" begin
-    @test include("if_net.jl")
-    @test include("chain.jl")
-    @test include("iz_net.jl")
-    @test include("hh_net.jl")
-    @test include("oja.jl")
-    @test include("rate_net.jl")
-    @test include("stdp_demo.jl")
+## Set the default logger to output only errors:
+errorlogger = ConsoleLogger(stderr, Logging.Error)
+with_logger(errorlogger) do
+    @testset "Networks and synapses" begin
+        @test include("if_net.jl")
+        @test include("chain.jl")
+        @test include("iz_net.jl")
+        @test include("hh_net.jl")
+        @test include("oja.jl")
+        @test include("rate_net.jl")
+        @test include("stdp_demo.jl")
+    end
 end
 
 # include("dendrite.jl")

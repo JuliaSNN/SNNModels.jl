@@ -4,6 +4,7 @@
 An abstract type representing a parameter.
 """
 abstract type AbstractParameter end
+abstract type AbstractComponent end
 
 """
     AbstractConnectionParameter <: AbstractParameter
@@ -35,7 +36,7 @@ An abstract type representing a connection. Any struct inheriting from this type
 - `forward!(c::Synapse, param::SynapseParameter)`: Propagates the signal through the synapse.
 - `plasticity!(c::Synapse, param::SynapseParameter, dt::Float32, T::Time)`: Updates the synapse parameters based on plasticity rules.
 """
-abstract type AbstractConnection end
+abstract type AbstractConnection <: AbstractComponent  end
 
 """
     AbstractPopulation
@@ -45,7 +46,7 @@ An abstract type representing a population. Any struct inheriting from this type
 # Methods
 - `integrate!(p::NeuronModel, param::NeuronModelParam, dt::Float32)`: Integrates the neuron model over a time step `dt` using the given parameters.
 """
-abstract type AbstractPopulation end
+abstract type AbstractPopulation  <: AbstractComponent end
 
 """
     AbstractStimulus
@@ -55,7 +56,7 @@ An abstract type representing a stimulus. Any struct inheriting from this type m
 # Methods
 - `stimulate!(p::Stimulus, param::StimulusParameter, time::Time, dt::Float32)`: Applies the stimulus to the population.
 """
-abstract type AbstractStimulus end
+abstract type AbstractStimulus <: AbstractComponent end
 
 """
     AbstractSparseSynapse <: AbstractConnection
@@ -132,6 +133,6 @@ function validate_population_model(model)
 end
 
 export Spiketimes, Time
-export AbstractParameter,
+export AbstractParameter, AbstractComponent,
     AbstractConnectionParameter, AbstractPopulationParameter, AbstractStimulusParameter
 export AbstractConnection, AbstractPopulation, AbstractStimulus

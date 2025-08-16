@@ -98,7 +98,7 @@ function PoissonStimulus(
     if typeof(param) <: Real
         N_pre = round(Int, param*10)
         param = PoissonStimulusFixed(fill(param, N), [true])
-    elseif typeof(param) == PoissonStimulusLayer
+    elseif typeof(param) == PoissonLayerParameter
         N = param.N
         N_pre = round(Int, N * param.ϵ)
     end
@@ -271,4 +271,4 @@ export PoissonStimulus,
     PoissonStimulusVariable,
     PoissonStimulusFixed,
     PoissonStimulusInterval,
-    PoissonStimulusLayer
+    PoissonLayerParameter
