@@ -6,7 +6,6 @@ using JLD2
 using LinearAlgebra
 using SparseArrays
 using Requires
-using ProtoStructs
 using Documenter
 using IterTools
 using UnPack
