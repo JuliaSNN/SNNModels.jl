@@ -1,7 +1,7 @@
 using SpikingNeuralNetworks
 @load_units;
 
-E = AdExNeuron(N = 100, param = AdExReceptorParameter(), name = "E")
+E = AdEx(N = 100, param = AdExReceptorParameter(), name = "E")
 P = Poisson(N = 100, param = PoissonParameter(3Hz))
 S = SpikingSynapse(P, E, :he, μ = 10, σ = 3, p = 0.2)
 param = AggregateScalingParameter(

@@ -65,6 +65,10 @@ function Synapse(
     return SynapseArray([AMPA, NMDA, GABAa, GABAb])
 end
 
+function Synapse(args...)
+    return SynapseArray(collect(args))
+end
+
 """
 Glutamatergic struct represents a group of glutamatergic receptors.
 
