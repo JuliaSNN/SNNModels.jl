@@ -13,11 +13,11 @@
 PoissonLayerParameter
 
 @snn_kw struct PoissonLayerParameter{R = Float32} <: PoissonStimulusParameter
-    rate::Float32
-    N::Int32
+    rate::Float32 = 1.0f0  # Default rate in Hz
+    N::Int32 = 1
     rates::Vector{R} = fill(Float32.(rate), N)
-    p::Float32
-    μ::Float32
+    p::Float32 = 0.0
+    μ::Float32 = 0
     σ::Float32 = 0
     active::Vector{Bool} = [true]
 end
@@ -40,14 +40,13 @@ function PoissonLayer(
     sym::Symbol,
     target = nothing;
     w = nothing,
-    param::P,
+    param::P=nothing,
     dist::Symbol = :Normal,
     kwargs...,
-) where {T<:AbstractPopulation, P<:PoissonStimulusParameter}
+) where {T<:AbstractPopulation, P<:Union{PoissonStimulusParameter, Nothing}}
 
+    param = !isnothing(param) ? param : PoissonLayerParameter(rate = 0.0f0, N = size(w, 2))
     w = sparse_matrix(w, param.N, post.N, dist, param.μ, param.σ, param.p)
-
-    ## select a subset of neuronsthat receive the stimulus
     rowptr, colptr, I, J, index, W = dsparse(w)
 
     targets = Dict(:pre => :PoissonStim, :post => post.id)

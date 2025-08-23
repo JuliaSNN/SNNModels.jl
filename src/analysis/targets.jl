@@ -50,7 +50,7 @@ function is_attractor_state(
     interval::AbstractVector;
     ratio::Real = 0.3,
     σ::Real = 10.0f0,
-    false_value = 10,
+    false_value = missing,
 ) where {T<:AbstractPopulation}
     # Calculate the firing rate over the last N seconds
 
@@ -221,7 +221,7 @@ end
 
 
 
-export gaussian_kernel_estimate, gaussian_kernel
+export gaussian_kernel_estimate, gaussian_kernel, asynchronous_state, is_attractor_state
 
 
 

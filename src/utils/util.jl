@@ -92,7 +92,7 @@ end
 # """function dsparse
 
 function sparse_matrix(w, Npre, Npost, dist, μ, σ, ρ)
-    syn_sign = sign(μ)
+    syn_sign = μ ≈ 0 ? 1 :  sign(μ)
     if syn_sign == -1
         @warn "You are using negative synaptic weights "
         μ = abs(μ)
