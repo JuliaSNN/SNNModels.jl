@@ -274,17 +274,30 @@ spatial_avg, x_range, y_range = spatial_activity(points, activity; N, L, grid_si
 function spatial_activity(points, activity; N, L, grid_size = (x = [0, 0.1], y = [0, 0.1]))
     xs, ys = points
     _, num_values = size(activity)
-    num_matrices = num_values ÷ N
+
+    time_indices = Vector{}()
+    if isa(N, Number)
+        for t = 1:num_values ÷ N
+            push!(time_indices, (1+(t-1)*N):(t*N-1))
+        end
+    elseif isa(N, AbstractVector)
+        for t = eachindex(N)
+            push!(time_indices, N[t])
+        end
+    else
+        error("N must be a number or a vector of time_indices")
+    end
 
     # Define the grid size
     @unpack x, y = grid_size
     x_range = ceil(Int, diff(collect(x))[1] / L)
     y_range = ceil(Int, diff(collect(y))[1] / L)
 
-    spatial_avg = Array{Any,3}(undef, x_range, y_range, num_matrices)
+    spatial_avg = Array{Any,3}(undef, x_range, y_range, length(time_indices))
     spatial_avg[:].=0
-    for t = 1:num_matrices
-        time_index = (1+(t-1)*N):(t*N-1)
+    for t in eachindex(time_indices)
+        interval =  time_indices[t]
+
         for j = 1:x_range
             for k = 1:y_range
                 # Find points within the current grid cell
@@ -292,7 +305,7 @@ function spatial_activity(points, activity; N, L, grid_size = (x = [0, 0.1], y =
                 indices_y = findall(_y -> ((k-1)*L <= _y-y[1] < k*L), ys) |> Set
                 indices = intersect(indices_x, indices_y) |> collect
                 isempty(indices) && continue
-                spatial_avg[j, k, t] = mean(activity[indices, time_index])
+                spatial_avg[j, k, t] = mean(activity[indices, interval])
             end
         end
     end
