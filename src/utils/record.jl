@@ -365,6 +365,8 @@ function record(p, sym::Symbol; range = false, interval = nothing, kwargs...)
         else
             return v
         end#
+    elseif sym == :spiketimes || sym == :spikes
+        return spiketimes(p)
     else
         v, r = _record(p, sym; kwargs...)
         if range
