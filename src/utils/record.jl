@@ -355,9 +355,18 @@ function get_interpolator(A::AbstractArray)
     return Tuple(interp)
 end
 
-function _record(p, sym; interpolate = true, kwargs...)
+function _record(p, sym; interpolate = true, interval = nothing, kwargs...)
     if interpolate
-        return interpolated_record(p, sym)
+        v, r_v =  interpolated_record(p, sym)
+        if !isnothing(interval)
+            @assert interval[1] .>= r_v[1] "Interval start $(interval[1]) is out of bounds $(r_v[1])"
+            @assert interval[end] .<= r_v[end] "Interval end $(interval[end]) is out of bounds $(r_v[end])"
+            return v[:, interval], interval
+            # interp = get_interpolator(v_dt)
+            # v = interpolate(v_dt, interp)
+        else
+            return v, r_v
+        end
     else
         return getvariable(p, sym), []
     end
@@ -375,7 +384,7 @@ function record(p, sym::Symbol; range = false, interval = nothing, kwargs...)
     elseif sym == :spiketimes || sym == :spikes
         return spiketimes(p)
     else
-        v, r = _record(p, sym; kwargs...)
+        v, r = _record(p, sym; interval)
         if range
             return v, r
         else
@@ -385,16 +394,7 @@ function record(p, sym::Symbol; range = false, interval = nothing, kwargs...)
 end
 
 
-function record(p, sym::Symbol, interval::R; kwargs...) where {R<:AbstractRange}
-    if sym == :fire
-        fr, r = firing_rate(p, interval; kwargs...)
-        return fr[:, r]
-    else
-        v, r = interpolated_record(p, sym)
-        return v[:, interval]
-    end
-
-end
+record(p, sym::Symbol, interval::R; kwargs...) where {R<:AbstractRange}= record(p, sym; interval, kwargs...)
 
 
 
