@@ -132,7 +132,6 @@ function SNNsave(
         store_data(filename, data)
         return filename
     end
-
 end
 
 export load, save, load_model, load_data, SNNload, SNNsave, SNNpath, SNNfolder, savename
@@ -171,26 +170,19 @@ function model_path_name(; path, name = randstring(10), info = nothing, kwargs..
     return SNNpath(path, name, info, :model, 0)
 end
 
-function save_parameters(;
+function save_config(;
     path,
-    parameters,
     name = randstring(10),
+    config,
     info = nothing,
-    file_path,
-    force = false,
 )
     @info "Parameters: `$(savename(name, info, connector="-"))` \nsaved at $(path)"
 
     isdir(path) || mkpath(path)
 
-    params_path = joinpath(path, savename(name, info, "params.jld2", connector = "-"))
-    DrWatson.save(params_path, @strdict parameters)  # Here you are saving a Julia object to a file
+    params_path = joinpath(path, savename(name, info, "config.jld2", connector = "-"))
+    DrWatson.save(params_path, @strdict config)  # Here you are saving a Julia object to a file
 
-    params_path = joinpath(path, savename(name, info, "params.jl.script", connector = "-"))
-    isfile(params_path) &&
-        !force &&
-        throw("File already exists, use force=true to overwrite")
-    !isfile(params_path) && cp(file_path, params_path)
     return
 end
 
@@ -346,7 +338,7 @@ end
 export save_model,
     load_model,
     load_data,
-    save_parameters,
+    save_config,
     get_path,
     data2model,
     write_config,

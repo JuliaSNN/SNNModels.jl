@@ -231,7 +231,7 @@ function firing_rate(
 )
     # Check if the interval is empty and create an interval
     interval = _retrieve_interval(interval; kwargs...)
-    neurons = neurons == :ALL ? eachindex(spiketimes) : neurons
+    neurons = neurons == :ALL ? eachindex(spiketimes) : (isa(neurons, Int) ? [neurons] : neurons)
     rates = nothing
     if time_average
         return time_average_fr(spiketimes, interval, pop_average), interval
@@ -260,7 +260,7 @@ function firing_rate(
             interval,
         )
     else
-        rates = copy(hcat(rates...)')
+        rates = copy(rates)
     end
 
     if pop_average
@@ -452,8 +452,6 @@ containing the time points corresponding to the center of each bin.
 function bin_spiketimes(
     spike_times::Vector{Float32};
     interval::AbstractRange,
-    max_lag = 500ms,
-    bin_width = 1.0ms,
     do_sparse = true,
 )
     # interval =

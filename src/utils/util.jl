@@ -41,6 +41,16 @@ function update_weights!(
     end
 end
 
+function presynaptic(c::C) where {C<:AbstractConnection}
+    @unpack colptr, I, W = c
+    [I[colptr[j]:(colptr[j+1]-1)] for j in 1:length(colptr)-1]
+end
+
+function presynaptic(c::C, j::Int) where {C<:AbstractConnection}
+    @unpack colptr, I, W = c
+    I[colptr[j]:(colptr[j+1]-1)]
+end
+
 function indices(c::C, js::AbstractVector, is::AbstractVector) where {C<:AbstractConnection}
     @unpack colptr, I, W = c
     indices = Int[]
@@ -91,8 +101,23 @@ end
 
 # """function dsparse
 
-function sparse_matrix(w, Npre, Npost, dist, μ, σ, ρ)
-    syn_sign = sign(μ)
+using SpecialFunctions, Roots
+
+# function gamma_for_mean(μ::Float64, kmin::Int=1; γ_max::Float64=5.0)
+#     # Define the function to find the root of
+#     f(γ) = zeta(γ - 1, kmin) / zeta(γ, kmin) - μ
+
+#     # Find γ in the range (2, γ_max] where the mean is finite
+#     if μ == Inf
+#         return 2.0  # Mean is infinite for γ ≤ 2
+#     else
+#         result = find_zero(f, 3.0001)
+#         return result
+#     end
+# end
+
+function sparse_matrix(;w, Npre, Npost, dist, μ, σ, ρ, rule=:Fixed, γ=-1, kmin=-1, kwargs...)
+    syn_sign = μ ≈ 0 ? 1 :  sign(μ)
     if syn_sign == -1
         @warn "You are using negative synaptic weights "
         μ = abs(μ)
@@ -101,13 +126,32 @@ function sparse_matrix(w, Npre, Npost, dist, μ, σ, ρ)
         # if w is not defined, construct a random sparse matrix with `dist` with `μ` and `σ`. 
         my_dist = getfield(Distributions, dist)
         w = rand(my_dist(μ, σ), Npost, Npre) # Construct a random dense matrix with dimensions post.N x pre.N
-        w[[n for n in eachindex(w[:]) if rand() > ρ]] .= 0
-        w[w .<= 0] .= 0
-        w = sparse(w)
-    else
-        # if w is defined, convert it to a sparse matrix
-        w = sparse(w)
+        if rule == :Fixed
+            # Set to zero a fraction (1-ρ)*Npost of the weights in each column
+            for pre in 1:Npre
+                targets = sample(1:Npost, round(Int, (1-ρ)*Npost); replace=false)
+                # @show length(targets), (1-ρ)
+                w[targets, pre] .= 0
+            end
+        elseif rule == :Bernoulli
+            # Set to zero each weight with probability (1-ρ)
+            w[[n for n in eachindex(w[:]) if rand() < 1-ρ]] .= 0
+        elseif rule == :PowerLaw
+            for pre in 1:Npre
+                @assert γ > 0 "For PowerLaw connection rule, γ must be defined and positive"
+                @assert kmin > 0 "For PowerLaw connection rule, kmin must be defined and positive"
+                n = round(Int, rand(Distributions.Pareto(γ, kmin)))
+                n = minimum((n, Npost-1))
+                targets = sample(1:Npost, Npost-n; replace=false)
+                w[targets, pre] .= 0
+            end
+            # do nothing
+        else
+            throw(ArgumentError("Unknown connection mode: $rule; use :Fixed or :Bernoulli"))
+        end
+        w[w .<= 0] .= 0 # no negative weights
     end
+    w = sparse(w)
     @assert size(w) == (Npost, Npre) "The size of the synaptic weight is not correct: $(size(w)) != ($Npost, $Npre)"
     return w .* syn_sign
 end
@@ -469,4 +513,9 @@ export connect!,
     name,
     str_name,
     update_time!,
-    update_weights!
+    update_weights!,
+    presynaptic,
+    postsynaptic,
+    gamma_for_mean
+
+

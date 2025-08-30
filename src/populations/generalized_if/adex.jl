@@ -99,7 +99,7 @@ end
     VBT = Vector{Bool},
     GIFParam<:AbstractGeneralizedIFParameter,
 } <: AbstractGeneralizedIF
-    name::String = "Generalized IF"
+name::String = "AdEx"
     id::String = randstring(12)
 
     param::GIFParam = AdExParameter()

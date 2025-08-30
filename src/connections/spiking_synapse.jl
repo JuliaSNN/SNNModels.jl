@@ -72,11 +72,12 @@ function SpikingSynapse(
     w = nothing,
     dist::Symbol = :Normal,
     dt = 0.125f0,
+    rule::Symbol = :Fixed,
     kwargs...,
 )
 
     # set the synaptic weight matrix
-    w = sparse_matrix(w, pre.N, post.N, dist, μ, σ, p)
+    w = sparse_matrix(;w, Npre=pre.N, Npost=post.N, dist, μ, σ, ρ= p, rule, kwargs...)
     # remove autapses if pre == post
     (pre == post) && (w[diagind(w)] .= 0)
     # get the sparse representation of the synaptic weight matrix
@@ -106,6 +107,8 @@ function SpikingSynapse(
     # Network targets
 
     if isnothing(delay_dist)
+
+        args = filter(k-> Symbol(k) in fieldnames(SpikingSynapse), keys(kwargs)) |> x->Dict(k=>kwargs[k] for k in x)
         # Construct the SpikingSynapse instance
         return SpikingSynapse(;
             ρ = ρ,
@@ -116,13 +119,14 @@ function SpikingSynapse(
             STPVars,
             LTPParam,
             STPParam,
-            kwargs...,
+            args...,
         )
 
     else
         delayspikes = fill(-1, length(W))
         delaytime = round.(Int, rand(delay_dist, length(W))/dt)
 
+        args = filter(k-> Symbol(k) in fieldnames(SpikingSynapseDelay), keys(kwargs)) |> x->Dict(k=>kwargs[k] for k in x)
         return SpikingSynapseDelay(;
             ρ = ρ,
             delayspikes = delayspikes,
@@ -134,7 +138,7 @@ function SpikingSynapse(
             STPVars,
             LTPParam,
             STPParam,
-            kwargs...,
+            args...,
         )
     end
 end
@@ -187,3 +191,4 @@ function forward!(c::SpikingSynapseDelay, param::SpikingSynapseParameter)
 end
 
 export SpikingSynapse, SpikingSynapseDelay, update_plasticity!
+
