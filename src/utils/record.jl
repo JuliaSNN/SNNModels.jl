@@ -186,10 +186,12 @@ end
 function record!(obj, T::Time)
     @unpack records = obj
     for key::Symbol in keys(records)
+        ## If the key is :indices, :sr, :timestamp, skip
         if key == :fire
             record_fire!(obj.fire, obj.records[:fire], T, records[:indices])
             continue
         end
+        ## Record plasticity variables
         for v in records[:variables]
             if startswith(string(key), string(v))
                 sym = string(key)[(length(string(v))+2):end] |> Symbol
@@ -211,6 +213,8 @@ function record!(obj, T::Time)
             records[:indices],
             records[:sr][key],
         )
+        haskey(records[:start_time], key) || (records[:start_time][key] = get_time(T))
+        records[:end_time][key] = get_time(T)
     end
 end
 
@@ -227,7 +231,6 @@ function monitor!(
     obj::Item,
     keys;
     sr = 1000Hz,
-    T::Time = Time(),
     variables::Symbol = :none,
 ) where {Item<:Union{AbstractPopulation,AbstractStimulus,AbstractConnection}}
     if !haskey(obj.records, :indices)
@@ -239,8 +242,11 @@ function monitor!(
     if !haskey(obj.records, :variables)
         obj.records[:variables] = Vector{Symbol}()
     end
-    if !haskey(obj.records, :timestamp)
-        obj.records[:timestamp] = Vector{Float32}()
+    if !haskey(obj.records, :start_time)
+        obj.records[:start_time] = Dict{Symbol,Float32}()
+    end
+    if !haskey(obj.records, :end_time)
+        obj.records[:end_time] = Dict{Symbol,Float32}()
     end
     ## If the key is a tuple, then the first element is the symbol and the second element is the list of neurons to record.
     for key in keys
@@ -319,9 +325,10 @@ function interpolated_record(p, sym)
     v_dt = getvariable(p, sym)
 
     # ! adjust the end time to account for the added first element 
-    _end = (size(v_dt)[end] - 1) / sr
+    _end = p.records[:end_time][sym]
+    _start = p.records[:start_time][sym]
     # ! this is the recorded time (in ms), it assumes all recordings are contained in v_dt
-    r_v = 0:(1/sr):_end
+    r_v = _start:(1/sr):(_end)
 
     # Set NoInterp in the singleton dimensions:
     interp = get_interpolator(v_dt)
