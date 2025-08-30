@@ -42,15 +42,18 @@ function PoissonLayer(
     w = nothing,
     param::P=nothing,
     dist::Symbol = :Normal,
+    rule::Symbol = :Fixed,
     kwargs...,
 ) where {T<:AbstractPopulation, P<:Union{PoissonStimulusParameter, Nothing}}
 
     param = !isnothing(param) ? param : PoissonLayerParameter(rate = 0.0f0, N = size(w, 2))
-    w = sparse_matrix(w, param.N, post.N, dist, param.μ, param.σ, param.p)
+    w = sparse_matrix(;w, Npre=param.N, Npost=post.N, dist, μ =param.μ, σ= param.σ, ρ = param.p, rule, kwargs...)
     rowptr, colptr, I, J, index, W = dsparse(w)
 
     targets = Dict(:pre => :PoissonStim, :post => post.id)
     g, _ = synaptic_target(targets, post, sym, target)
+
+    args = filter(k-> Symbol(k) in fieldnames(PoissonStimulus), keys(kwargs)) |> x->Dict(k=>kwargs[k] for k in x)
 
     # Construct the SpikingSynapse instance
     return PoissonStimulus(;
@@ -61,7 +64,7 @@ function PoissonLayer(
         targets = targets,
         g = g,
         @symdict(rowptr, colptr, I, J, index, W)...,
-        kwargs...,
+        args...,
     )
 end
 
