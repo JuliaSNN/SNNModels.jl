@@ -416,6 +416,36 @@ function _record(p, sym; interpolate = true, interval = nothing, kwargs...)
     end
 end
 
+
+"""
+    record(p, sym::Symbol; range = false, interval = nothing, kwargs...)
+
+Record data from a population `p` based on the specified symbol `sym`.
+
+# Arguments
+- `p`: The population from which to record data.
+- `sym::Symbol`: The type of data to record. Valid options are `:fire` for firing rate, `:spiketimes` or `:spikes` for spike times.
+- `range::Bool=false`: If `true`, return both the recorded data and the range. Default is `false`.
+- `interval`: The time interval for recording. Required for firing rate recording (`sym = :fire`).
+- `kwargs...`: Additional keyword arguments to pass to the recording function.
+
+# Returns
+- If `sym = :fire` and `range = true`, returns a tuple `(v, r)` where `v` is the firing rate and `r` is the range.
+- If `sym = :fire` and `range = false`, returns the firing rate `v`.
+- If `sym = :spiketimes` or `sym = :spikes`, returns the spike times.
+- For other symbols, returns a tuple `(v, r)` if `range = true`, or `v` if `range = false`.
+
+# Examples
+```julia
+# Record firing rate for a population p over a specific interval
+v = record(p, :fire; interval = (0.0, 1.0))
+
+# Record firing rate and range for a population p over a specific interval
+v, r = record(p, :fire; range = true, interval = (0.0, 1.0))
+
+# Record spike times for a population p
+spikes = record(p, :spiketimes)
+"""
 function record(p, sym::Symbol; range = false, interval = nothing, kwargs...)
     if sym == :fire
         @assert !isnothing(interval) "Range must be provided for firing rate recording"
