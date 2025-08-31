@@ -182,7 +182,26 @@ end
     (get_step(T) % floor(Int, 1.0f0 / sr / get_dt(T))) == 0
 end
 
+"""
+    record!(obj, T::Time)
 
+Record the state of the object `obj` at the current time `T`.
+
+# Arguments
+- `obj`: The object to record the state from.
+- `T::Time`: The current time object.
+
+# Details
+This function records the state of the object by iterating through all keys in the object's records. For each key:
+- If the key is `:fire`, it records the firing activity using `record_fire!`.
+- For plasticity variables, it checks if the key starts with a variable name and records the corresponding field.
+- For other fields, it records the field if it exists in the object.
+- It updates the start and end times for each recorded variable.
+
+# Notes
+- The function skips special keys like `:indices`, `:sr`, and `:timestamp`.
+- The recording is performed only if the sampling rate condition is met.
+"""
 function record!(obj, T::Time)
     @unpack records = obj
     for key::Symbol in keys(records)
@@ -218,14 +237,28 @@ function record!(obj, T::Time)
     end
 end
 
-
 """
-Initialize dictionary records for the given object, by assigning empty vectors to the given keys
+    monitor!(obj::Item, keys::Vector; sr = 1000Hz, variables::Symbol = :none) where {Item<:Union{AbstractPopulation,AbstractStimulus,AbstractConnection}}
+
+Initialize monitoring for specified variables in an object.
 
 # Arguments
-- `obj`: An object whose variables will be monitored
-- `keys`: The variables to be monitored
+- `obj::Item`: The object to monitor (must be a population, stimulus, or connection).
+- `keys::Vector`: A vector of symbols or tuples specifying variables to monitor.
+  - If a symbol is provided, it specifies the variable to monitor.
+  - If a tuple is provided, the first element is the variable symbol and the second is a list of indices to monitor.
+- `sr::Float32`: The sampling rate for recording (default: 1000Hz).
+- `variables::Symbol`: The variable group to monitor (default: :none). If specified, monitors variables within this group.
 
+# Details
+This function sets up monitoring for the specified variables in the object. It initializes necessary recording structures if they don't exist, and configures the sampling rate and indices for each variable to be monitored.
+
+For firing activity (:fire), it creates a dictionary to store spike times and neuron indices. For other variables, it determines the appropriate data type and creates a vector to store the recorded values.
+
+# Notes
+- If a variable is not found in the object, a warning is issued.
+- If a variable is already being monitored, a warning is issued.
+- The function handles both direct object fields and nested fields within variable groups.
 """
 function monitor!(
     obj::Item,
@@ -299,7 +332,6 @@ function monitor!(
         obj.records[key] = Vector{typ}()
     end
 end
-
 
 
 function monitor!(objs::Array, keys::Vector; sr = 200Hz, kwargs...)
