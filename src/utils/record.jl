@@ -229,7 +229,7 @@ Initialize dictionary records for the given object, by assigning empty vectors t
 """
 function monitor!(
     obj::Item,
-    keys;
+    keys::Vector{Symbol};
     sr = 1000Hz,
     variables::Symbol = :none,
 ) where {Item<:Union{AbstractPopulation,AbstractStimulus,AbstractConnection}}
@@ -264,49 +264,64 @@ function monitor!(
             if hasfield(typeof(obj), sym)
                 typ = typeof(getfield(obj, sym))
                 key = sym
-                !isempty(ind) && (obj.records[:indices][key] = ind)
-                obj.records[:sr][key] = sr
-                obj.records[key] = Vector{typ}()
+                # !isempty(ind) && (obj.records[:indices][key] = ind)
+                # obj.records[:sr][key] = sr
+                # obj.records[key] = Vector{typ}()
             else
                 @warn "Field $sym not found in $(nameof(typeof(obj)))"
                 continue
             end
         else
-            if hasproperty(obj, variables) && hasproperty(getfield(obj, variables), sym)
-                typ = typeof(getfield(getfield(obj, variables), sym))
-                key = Symbol(variables, "_", sym)
-                if !(variables ∈ obj.records[:variables])
-                    @debug "Monitoring $(variables)"
-                    push!(obj.records[:variables], variables)
+            if hasproperty(obj, variables) 
+                if hasproperty(getfield(obj, variables), sym)
+                    typ = typeof(getfield(getfield(obj, variables), sym))
+                    key = Symbol(variables, "_", sym)
+                    if !(variables ∈ obj.records[:variables])
+                        @debug "Monitoring $(variables)"
+                        push!(obj.records[:variables], variables)
+                    end
+                else
+                    @warn "Field $sym not found in $(nameof(typeof(getfield(obj, variables))))"
+                    continue
                 end
             else
                 @warn "Field $variables not found in $(nameof(typeof(obj)))"
             end
         end
         @debug "Monitoring :$(key) in $(obj.name)"
+
+        if haskey(obj.records, key) 
+            @warn "Key $key already being monitored in $(obj.name)"
+            continue
+        end
         !isempty(ind) && (obj.records[:indices][key] = ind)
         obj.records[:sr][key] = sr
         obj.records[key] = Vector{typ}()
     end
 end
 
+
+
 """
 monitor!(objs::Array, keys)
 
 Function called when more than one object is given, which then calls the above monitor function for each object
 """
-function monitor!(objs::Array, keys; sr = 200Hz, kwargs...)
+function monitor!(objs::Array, keys::Vector; sr = 200Hz, kwargs...)
     for obj in objs
         monitor!(obj, keys, sr = sr; kwargs...)
     end
 end
 
-function monitor!(objs::NamedTuple, keys; sr = 200Hz, kwargs...)
+function monitor!(objs::NamedTuple, keys::Vector; sr = 200Hz, kwargs...)
     for obj in values(objs)
         monitor!(obj, keys, sr = sr; kwargs...)
     end
 end
 
+monitor!(obj, keys::Symbol; kwargs...) = monitor!(obj, [keys]; kwargs...) 
+
+monitor!(objs, keys, variables::Symbol; kwargs...) = monitor!(objs, keys; variables=variables, kwargs...)
 
 """
     interpolated_record(p, sym)
@@ -561,5 +576,5 @@ export Time,
     clear_records!,
     clear_monitor!,
     record,
-    reset_time!
-interpolated_record
+    reset_time!,
+    interpolated_record
