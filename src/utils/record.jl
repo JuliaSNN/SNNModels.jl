@@ -229,7 +229,7 @@ Initialize dictionary records for the given object, by assigning empty vectors t
 """
 function monitor!(
     obj::Item,
-    keys::Vector{Symbol};
+    keys::Vector;
     sr = 1000Hz,
     variables::Symbol = :none,
 ) where {Item<:Union{AbstractPopulation,AbstractStimulus,AbstractConnection}}
@@ -302,11 +302,6 @@ end
 
 
 
-"""
-monitor!(objs::Array, keys)
-
-Function called when more than one object is given, which then calls the above monitor function for each object
-"""
 function monitor!(objs::Array, keys::Vector; sr = 200Hz, kwargs...)
     for obj in objs
         monitor!(obj, keys, sr = sr; kwargs...)
@@ -320,6 +315,8 @@ function monitor!(objs::NamedTuple, keys::Vector; sr = 200Hz, kwargs...)
 end
 
 monitor!(obj, keys::Symbol; kwargs...) = monitor!(obj, [keys]; kwargs...) 
+
+monitor!(obj, keys::Tuple; kwargs...) = monitor!(obj, [keys]; kwargs...) 
 
 monitor!(objs, keys, variables::Symbol; kwargs...) = monitor!(objs, keys; variables=variables, kwargs...)
 
