@@ -82,6 +82,9 @@ export SpikingSynapse, PlasticityParameter,
     no_PlasticityVariables,
     plasticityvariables,
     plasticity!
-change_plasticity!
+    change_plasticity!,
+    set_plasticity!,
+    has_plasticity,
+
 
 export LTP, STP, NoLTP, NoSTP
