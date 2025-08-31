@@ -182,14 +182,35 @@ end
     (get_step(T) % floor(Int, 1.0f0 / sr / get_dt(T))) == 0
 end
 
+"""
+    record!(obj, T::Time)
 
+Record the state of the object `obj` at the current time `T`.
+
+# Arguments
+- `obj`: The object to record the state from.
+- `T::Time`: The current time object.
+
+# Details
+This function records the state of the object by iterating through all keys in the object's records. For each key:
+- If the key is `:fire`, it records the firing activity using `record_fire!`.
+- For plasticity variables, it checks if the key starts with a variable name and records the corresponding field.
+- For other fields, it records the field if it exists in the object.
+- It updates the start and end times for each recorded variable.
+
+# Notes
+- The function skips special keys like `:indices`, `:sr`, and `:timestamp`.
+- The recording is performed only if the sampling rate condition is met.
+"""
 function record!(obj, T::Time)
     @unpack records = obj
     for key::Symbol in keys(records)
+        ## If the key is :indices, :sr, :timestamp, skip
         if key == :fire
             record_fire!(obj.fire, obj.records[:fire], T, records[:indices])
             continue
         end
+        ## Record plasticity variables
         for v in records[:variables]
             if startswith(string(key), string(v))
                 sym = string(key)[(length(string(v))+2):end] |> Symbol
@@ -211,23 +232,38 @@ function record!(obj, T::Time)
             records[:indices],
             records[:sr][key],
         )
+        haskey(records[:start_time], key) || (records[:start_time][key] = get_time(T))
+        records[:end_time][key] = get_time(T)
     end
 end
 
-
 """
-Initialize dictionary records for the given object, by assigning empty vectors to the given keys
+    monitor!(obj::Item, keys::Vector; sr = 1000Hz, variables::Symbol = :none) where {Item<:Union{AbstractPopulation,AbstractStimulus,AbstractConnection}}
+
+Initialize monitoring for specified variables in an object.
 
 # Arguments
-- `obj`: An object whose variables will be monitored
-- `keys`: The variables to be monitored
+- `obj::Item`: The object to monitor (must be a population, stimulus, or connection).
+- `keys::Vector`: A vector of symbols or tuples specifying variables to monitor.
+  - If a symbol is provided, it specifies the variable to monitor.
+  - If a tuple is provided, the first element is the variable symbol and the second is a list of indices to monitor.
+- `sr::Float32`: The sampling rate for recording (default: 1000Hz).
+- `variables::Symbol`: The variable group to monitor (default: :none). If specified, monitors variables within this group.
 
+# Details
+This function sets up monitoring for the specified variables in the object. It initializes necessary recording structures if they don't exist, and configures the sampling rate and indices for each variable to be monitored.
+
+For firing activity (:fire), it creates a dictionary to store spike times and neuron indices. For other variables, it determines the appropriate data type and creates a vector to store the recorded values.
+
+# Notes
+- If a variable is not found in the object, a warning is issued.
+- If a variable is already being monitored, a warning is issued.
+- The function handles both direct object fields and nested fields within variable groups.
 """
 function monitor!(
     obj::Item,
-    keys;
+    keys::Vector;
     sr = 1000Hz,
-    T::Time = Time(),
     variables::Symbol = :none,
 ) where {Item<:Union{AbstractPopulation,AbstractStimulus,AbstractConnection}}
     if !haskey(obj.records, :indices)
@@ -239,8 +275,11 @@ function monitor!(
     if !haskey(obj.records, :variables)
         obj.records[:variables] = Vector{Symbol}()
     end
-    if !haskey(obj.records, :timestamp)
-        obj.records[:timestamp] = Vector{Float32}()
+    if !haskey(obj.records, :start_time)
+        obj.records[:start_time] = Dict{Symbol,Float32}()
+    end
+    if !haskey(obj.records, :end_time)
+        obj.records[:end_time] = Dict{Symbol,Float32}()
     end
     ## If the key is a tuple, then the first element is the symbol and the second element is the list of neurons to record.
     for key in keys
@@ -258,49 +297,60 @@ function monitor!(
             if hasfield(typeof(obj), sym)
                 typ = typeof(getfield(obj, sym))
                 key = sym
-                !isempty(ind) && (obj.records[:indices][key] = ind)
-                obj.records[:sr][key] = sr
-                obj.records[key] = Vector{typ}()
+                # !isempty(ind) && (obj.records[:indices][key] = ind)
+                # obj.records[:sr][key] = sr
+                # obj.records[key] = Vector{typ}()
             else
                 @warn "Field $sym not found in $(nameof(typeof(obj)))"
                 continue
             end
         else
-            if hasproperty(obj, variables) && hasproperty(getfield(obj, variables), sym)
-                typ = typeof(getfield(getfield(obj, variables), sym))
-                key = Symbol(variables, "_", sym)
-                if !(variables ∈ obj.records[:variables])
-                    @debug "Monitoring $(variables)"
-                    push!(obj.records[:variables], variables)
+            if hasproperty(obj, variables) 
+                if hasproperty(getfield(obj, variables), sym)
+                    typ = typeof(getfield(getfield(obj, variables), sym))
+                    key = Symbol(variables, "_", sym)
+                    if !(variables ∈ obj.records[:variables])
+                        @debug "Monitoring $(variables)"
+                        push!(obj.records[:variables], variables)
+                    end
+                else
+                    @warn "Field $sym not found in $(nameof(typeof(getfield(obj, variables))))"
+                    continue
                 end
             else
                 @warn "Field $variables not found in $(nameof(typeof(obj)))"
             end
         end
         @debug "Monitoring :$(key) in $(obj.name)"
+
+        if haskey(obj.records, key) 
+            @warn "Key $key already being monitored in $(obj.name)"
+            continue
+        end
         !isempty(ind) && (obj.records[:indices][key] = ind)
         obj.records[:sr][key] = sr
         obj.records[key] = Vector{typ}()
     end
 end
 
-"""
-monitor!(objs::Array, keys)
 
-Function called when more than one object is given, which then calls the above monitor function for each object
-"""
-function monitor!(objs::Array, keys; sr = 200Hz, kwargs...)
+function monitor!(objs::Array, keys::Vector; sr = 200Hz, kwargs...)
     for obj in objs
         monitor!(obj, keys, sr = sr; kwargs...)
     end
 end
 
-function monitor!(objs::NamedTuple, keys; sr = 200Hz, kwargs...)
+function monitor!(objs::NamedTuple, keys::Vector; sr = 200Hz, kwargs...)
     for obj in values(objs)
         monitor!(obj, keys, sr = sr; kwargs...)
     end
 end
 
+monitor!(obj, keys::Symbol; kwargs...) = monitor!(obj, [keys]; kwargs...) 
+
+monitor!(obj, keys::Tuple; kwargs...) = monitor!(obj, [keys]; kwargs...) 
+
+monitor!(objs, keys, variables::Symbol; kwargs...) = monitor!(objs, keys; variables=variables, kwargs...)
 
 """
     interpolated_record(p, sym)
@@ -319,9 +369,10 @@ function interpolated_record(p, sym)
     v_dt = getvariable(p, sym)
 
     # ! adjust the end time to account for the added first element 
-    _end = (size(v_dt)[end] - 1) / sr
+    _end = p.records[:end_time][sym]
+    _start = p.records[:start_time][sym]
     # ! this is the recorded time (in ms), it assumes all recordings are contained in v_dt
-    r_v = 0:(1/sr):_end
+    r_v = _start:(1/sr):(_end)
 
     # Set NoInterp in the singleton dimensions:
     interp = get_interpolator(v_dt)
@@ -348,14 +399,53 @@ function get_interpolator(A::AbstractArray)
     return Tuple(interp)
 end
 
-function _record(p, sym; interpolate = true, kwargs...)
+function _record(p, sym; interpolate = true, interval = nothing, kwargs...)
     if interpolate
-        return interpolated_record(p, sym)
+        v, r_v =  interpolated_record(p, sym)
+        if !isnothing(interval)
+            @assert interval[1] .>= r_v[1] "Interval start $(interval[1]) is out of bounds $(r_v[1])"
+            @assert interval[end] .<= r_v[end] "Interval end $(interval[end]) is out of bounds $(r_v[end])"
+            return v[:, interval], interval
+            # interp = get_interpolator(v_dt)
+            # v = interpolate(v_dt, interp)
+        else
+            return v, r_v
+        end
     else
         return getvariable(p, sym), []
     end
 end
 
+
+"""
+    record(p, sym::Symbol; range = false, interval = nothing, kwargs...)
+
+Record data from a population `p` based on the specified symbol `sym`.
+
+# Arguments
+- `p`: The population from which to record data.
+- `sym::Symbol`: The type of data to record. Valid options are `:fire` for firing rate, `:spiketimes` or `:spikes` for spike times.
+- `range::Bool=false`: If `true`, return both the recorded data and the range. Default is `false`.
+- `interval`: The time interval for recording. Required for firing rate recording (`sym = :fire`).
+- `kwargs...`: Additional keyword arguments to pass to the recording function.
+
+# Returns
+- If `sym = :fire` and `range = true`, returns a tuple `(v, r)` where `v` is the firing rate and `r` is the range.
+- If `sym = :fire` and `range = false`, returns the firing rate `v`.
+- If `sym = :spiketimes` or `sym = :spikes`, returns the spike times.
+- For other symbols, returns a tuple `(v, r)` if `range = true`, or `v` if `range = false`.
+
+# Examples
+```julia
+# Record firing rate for a population p over a specific interval
+v = record(p, :fire; interval = (0.0, 1.0))
+
+# Record firing rate and range for a population p over a specific interval
+v, r = record(p, :fire; range = true, interval = (0.0, 1.0))
+
+# Record spike times for a population p
+spikes = record(p, :spiketimes)
+"""
 function record(p, sym::Symbol; range = false, interval = nothing, kwargs...)
     if sym == :fire
         @assert !isnothing(interval) "Range must be provided for firing rate recording"
@@ -368,7 +458,7 @@ function record(p, sym::Symbol; range = false, interval = nothing, kwargs...)
     elseif sym == :spiketimes || sym == :spikes
         return spiketimes(p)
     else
-        v, r = _record(p, sym; kwargs...)
+        v, r = _record(p, sym; interval)
         if range
             return v, r
         else
@@ -378,16 +468,7 @@ function record(p, sym::Symbol; range = false, interval = nothing, kwargs...)
 end
 
 
-function record(p, sym::Symbol, interval::R; kwargs...) where {R<:AbstractRange}
-    if sym == :fire
-        fr, r = firing_rate(p, interval; kwargs...)
-        return fr[:, r]
-    else
-        v, r = interpolated_record(p, sym)
-        return v[:, interval]
-    end
-
-end
+record(p, sym::Symbol, interval::R; kwargs...) where {R<:AbstractRange}= record(p, sym; interval, kwargs...)
 
 
 
@@ -554,5 +635,5 @@ export Time,
     clear_records!,
     clear_monitor!,
     record,
-    reset_time!
-interpolated_record
+    reset_time!,
+    interpolated_record
