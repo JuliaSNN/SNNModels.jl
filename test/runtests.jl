@@ -6,6 +6,7 @@ using Random
 
 if VERSION > v"1.1"
     include("ctors.jl")
+    include("records.jl")
 end
 ##
 

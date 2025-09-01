@@ -482,25 +482,29 @@ function record(p, sym::Symbol; range = false, interval = nothing, interpolate=t
         return spiketimes(p)
     else
         # not interpolate
-        !interpolate && return getvariable(p, sym), []
-
+        if !interpolate 
+            v = getvariable(p, sym)
+            r = interval
         # interpolate
-        v, r_v =  interpolated_record(p, sym)
-        if !isnothing(interval)
-            @assert interval[1] .>= r_v[1] "Interval start $(interval[1]) is out of bounds $(r_v[1])"
-            @assert interval[end] .<= r_v[end] "Interval end $(interval[end]) is out of bounds $(r_v[end])"
-            v_dt = v[:, interval]
-            r_v = interval
-            ax = map(i-> axes(v_dt, i), 1:(length(size(v))-1)) 
-            v = scale(Interpolations.interpolate(v_dt,  get_interpolator(v_dt)), ax..., r_v)
+        else
+            v, r =  interpolated_record(p, sym)
+            if !isnothing(interval)
+                @assert interval[1] .>= r[1] "Interval start $(interval[1]) is out of bounds $(r_v[1])"
+                @assert interval[end] .<= r[end] "Interval end $(interval[end]) is out of bounds $(r_v[end])"
+                v_dt = v[:, interval]
+                r = interval
+                ax = map(i-> axes(v_dt, i), 1:(length(size(v))-1)) 
+                v = scale(Interpolations.interpolate(v_dt,  get_interpolator(v_dt)), ax..., r)
+            end
         end
     end
     if range
-        return v, r_v
+        return v, r
     else
         return v
     end
 end
+
 
 
 record(p, sym::Symbol, interval::R; kwargs...) where {R<:AbstractRange}= record(p, sym; interval, kwargs...)
