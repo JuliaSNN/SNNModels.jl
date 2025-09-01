@@ -399,7 +399,7 @@ function add_endtime!(model::NamedTuple)
                 !haskey(v.records, :end_time) && (v.records[:end_time] = Dict{Symbol,Float32}())
                 for (key, val) in v.records
                     if !haskey(v.records[:end_time], key)
-                        @info "Adding end time for $key"
+                        # @info "Adding end time for $key"
                         v.records[:end_time][key] = get_time(time)
                     end
                 end

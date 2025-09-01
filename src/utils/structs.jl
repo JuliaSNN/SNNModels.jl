@@ -4,6 +4,7 @@
 An abstract type representing a parameter.
 """
 abstract type AbstractParameter end
+
 abstract type AbstractComponent end
 
 """
@@ -121,18 +122,68 @@ Time
     dt::FT = 0.125f0
 end
 
-function validate_population_model(model)
-    # Validate the neuron model
-    @assert typeof(model) <: AbstractPopulation "Model must inherit from AbstractPopulation"
-    @assert typeof(model.param) <: AbstractPopulationParameter "Model parameter must inherit from AbstractPopulationParameter"
-    @assert hasproperty(model, :N) "Model must have a field N for the number of neurons"
-    @assert hasproperty(model, :param) "Model must have a field param for the neuron parameters"
-    @assert hasproperty(model, :id) "Model must have a field id for a unique identifier"
-    @assert hasproperty(model, :name) "Model must have a field name for the population name"
-    @assert hasproperty(model, :records) "Model must have a field records for storing recorded variables"
-end
 
-export Spiketimes, Time
+export Spiketimes, Time, NetworkModel
 export AbstractParameter, AbstractComponent,
     AbstractConnectionParameter, AbstractPopulationParameter, AbstractStimulusParameter
 export AbstractConnection, AbstractPopulation, AbstractStimulus
+
+
+NetworkModel = NamedTuple
+
+
+function isa_model(model)
+    # assert it has all the fields of a network model
+    @assert hasproperty(model, :pop)
+    @assert hasproperty(model, :syn)
+    @assert hasproperty(model, :stim)
+    @assert hasproperty(model, :time)
+    @assert hasproperty(model, :name)
+    for p in values(model.pop)
+        validate_population_model(p)
+    end
+    for s in values(model.syn)
+        validate_synapse_model(s)
+    end
+    for st in values(model.stim)
+        validate_stimulus_model(st)
+    end
+    @assert typeof(model.time) <: Time
+    return true
+end
+
+function validate_population_model(model)
+    # Validate the population model structure and types
+    @assert typeof(model) <: AbstractPopulation "Population $(model.name) must inherit from AbstractPopulation"
+    @assert typeof(model.param) <: AbstractPopulationParameter "Population $(model.name) must inherit from AbstractPopulationParameter"
+
+    # Validate required fields
+    required_fields = [:N, :param, :id, :name, :records]
+    for field in required_fields
+        @assert hasproperty(model, field) "Population $(model.name) must have a field $(field)"
+    end
+end
+
+function validate_synapse_model(model)
+    # Validate the synapse model structure and types
+    @assert typeof(model) <: AbstractConnection "Synapse $(model.name) must inherit from AbstractConnection"
+    @assert typeof(model.param) <: AbstractConnectionParameter "Synapse $(model.name) must inherit from AbstractConnectionParameter"
+
+    # Validate required fields
+    required_fields = [:param, :id, :name, :records]
+    for field in required_fields
+        @assert hasproperty(model, field) "Synapse  $(model.name) must have a field $(field)"
+    end
+end
+
+function validate_stimulus_model(model)
+    # Validate the stimulus model structure and types
+    @assert typeof(model) <: AbstractStimulus "Stimulus $(model.name) must inherit from AbstractStimulus"
+    @assert typeof(model.param) <: AbstractStimulusParameter "Stimulus $(model.name) parameter must inherit from AbstractStimulusParameter"
+
+    # Validate required fields
+    required_fields = [:param, :id, :name, :records]
+    for field in required_fields
+        @assert hasproperty(model, field) "Stimulus $(model.name) must have a field $(field)"
+    end
+end
