@@ -369,8 +369,8 @@ function interpolated_record(p, sym)
     v_dt = getvariable(p, sym)
 
     # ! adjust the end time to account for the added first element 
-    _end = p.records[:end_time][sym]
     _start = p.records[:start_time][sym]
+    _end = p.records[:end_time][sym]
     # ! this is the recorded time (in ms), it assumes all recordings are contained in v_dt
     r_v = _start:(1/sr):(_end)
 
@@ -385,6 +385,52 @@ function interpolated_record(p, sym)
     return y, r_v
 end
 
+function add_endtime!(model::NamedTuple)
+    @assert isa_model(model) "Model is not a valid NetworkModel"
+    time = model.time
+    for obj in values(model)
+        obj isa String && continue
+        obj isa Time && continue
+        for v in obj
+            if v isa AbstractPopulation ||
+               v isa AbstractStimulus ||
+               v isa AbstractConnection
+                @info "Adding end time for $(v.name)"
+                !haskey(v.records, :end_time) && (v.records[:end_time] = Dict{Symbol,Float32}())
+                for (key, val) in v.records
+                    if !haskey(v.records[:end_time], key)
+                        @info "Adding end time for $key"
+                        v.records[:end_time][key] = get_time(time)
+                    end
+                end
+            end
+        end
+    end
+end
+
+function add_starttime!(model::NamedTuple)
+    @assert isa_model(model) "Model is not a valid NetworkModel"
+    for obj in values(model)
+        obj isa String && continue
+        obj isa Time && continue
+        for v in obj
+            if v isa AbstractPopulation ||
+               v isa AbstractStimulus ||
+               v isa AbstractConnection
+                @info "Adding start time for $(v.name)"
+                !haskey(v.records, :start_time) && (v.records[:start_time] = Dict{Symbol,Float32}())
+                for (key, val) in v.records
+                    if !haskey(v.records[:start_time], key)
+                        @info "Adding start time for $key"
+                        v.records[:start_time][key] = 0
+                    end
+                end
+            end
+        end
+    end
+end
+
+
 function squeeze(A::AbstractArray)
     singleton_dims = tuple((d for d = 1:ndims(A) if size(A, d) == 1)...)
     return dropdims(A, dims = singleton_dims)
@@ -398,24 +444,6 @@ function get_interpolator(A::AbstractArray)
     end
     return Tuple(interp)
 end
-
-function _record(p, sym; interpolate = true, interval = nothing, kwargs...)
-    if interpolate
-        v, r_v =  interpolated_record(p, sym)
-        if !isnothing(interval)
-            @assert interval[1] .>= r_v[1] "Interval start $(interval[1]) is out of bounds $(r_v[1])"
-            @assert interval[end] .<= r_v[end] "Interval end $(interval[end]) is out of bounds $(r_v[end])"
-            return v[:, interval], interval
-            # interp = get_interpolator(v_dt)
-            # v = interpolate(v_dt, interp)
-        else
-            return v, r_v
-        end
-    else
-        return getvariable(p, sym), []
-    end
-end
-
 
 """
     record(p, sym::Symbol; range = false, interval = nothing, kwargs...)
@@ -446,24 +474,31 @@ v, r = record(p, :fire; range = true, interval = (0.0, 1.0))
 # Record spike times for a population p
 spikes = record(p, :spiketimes)
 """
-function record(p, sym::Symbol; range = false, interval = nothing, kwargs...)
+function record(p, sym::Symbol; range = false, interval = nothing, interpolate=true, kwargs...)
     if sym == :fire
         @assert !isnothing(interval) "Range must be provided for firing rate recording"
-        v, r = firing_rate(p, interval; kwargs...)
-        if range
-            return v, r
-        else
-            return v
-        end#
+        v, r = firing_rate(p, interval; interpolate, kwargs...)
     elseif sym == :spiketimes || sym == :spikes
         return spiketimes(p)
     else
-        v, r = _record(p, sym; interval)
-        if range
-            return v, r
-        else
-            return v
+        # not interpolate
+        !interpolate && return getvariable(p, sym), []
+
+        # interpolate
+        v, r_v =  interpolated_record(p, sym)
+        if !isnothing(interval)
+            @assert interval[1] .>= r_v[1] "Interval start $(interval[1]) is out of bounds $(r_v[1])"
+            @assert interval[end] .<= r_v[end] "Interval end $(interval[end]) is out of bounds $(r_v[end])"
+            v_dt = v[:, interval]
+            r_v = interval
+            ax = map(i-> axes(v_dt, i), 1:(length(size(v))-1)) 
+            v = scale(Interpolations.interpolate(v_dt,  get_interpolator(v_dt)), ax..., r_v)
         end
+    end
+    if range
+        return v, r_v
+    else
+        return v
     end
 end
 
@@ -636,4 +671,6 @@ export Time,
     clear_monitor!,
     record,
     reset_time!,
-    interpolated_record
+    interpolated_record,
+    add_endtime!,
+    add_starttime!
