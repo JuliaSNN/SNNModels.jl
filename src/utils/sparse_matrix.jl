@@ -165,7 +165,7 @@ using SpecialFunctions, Roots
 #     end
 # end
 
-function sparse_matrix(;w, Npre, Npost, dist, μ, σ, ρ, rule=:Fixed, γ=-1, kmin=-1, kwargs...)
+function sparse_matrix(;w, Npre, Npost, dist, μ, σ, ρ, rule=:Bernoulli, γ=-1, kmin=-1, kwargs...)
     syn_sign = μ ≈ 0 ? 1 :  sign(μ)
     if syn_sign == -1
         @warn "You are using negative synaptic weights "
