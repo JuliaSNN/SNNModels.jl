@@ -605,10 +605,16 @@ function _clean(z)
         (key == :sr) && (continue)
         (key == :timestamp) && (continue)
         (key == :plasticity) && (continue)
+        (key == :start_time) && (continue)
+        (key == :end_time) && (continue)
         if isa(val, Dict)
             _clean(val)
         else
-            empty!(val)
+            try 
+                empty!(val)
+            catch e
+                # @warn "Could not clear records for $key"
+            end
         end
     end
 end
