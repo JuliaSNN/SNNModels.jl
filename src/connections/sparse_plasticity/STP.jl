@@ -30,9 +30,9 @@ end
     ## Plasticity variables
     Npost::IT
     Npre::IT
-    u::VFT = zeros(Npost) # presynaptic spiking time
-    x::VFT = ones(Npost) # postsynaptic spiking time
-    _ρ::VFT = ones(Npost) # postsynaptic spiking time
+    u::VFT = zeros(Npre) # presynaptic state
+    x::VFT = ones(Npre)  # presynaptic state
+    _ρ::VFT = ones(Npre) # presynaptic state
     active::Vector{Bool} = [true]
 end
 
