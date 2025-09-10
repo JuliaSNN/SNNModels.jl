@@ -166,7 +166,7 @@ using SpecialFunctions, Roots
 # end
 
 function sparse_matrix(;w, Npre, Npost, dist, μ, σ, ρ, rule=:Bernoulli, γ=-1, kmin=-1, kwargs...)
-    @info "Constructing sparse matrix with $rule rule, $dist distribution, μ=$μ, σ=$σ, ρ=$ρ"
+    @debug "Constructing sparse matrix with $rule rule, $dist distribution, μ=$μ, σ=$σ, ρ=$ρ"
     syn_sign = μ ≈ 0 ? 1 :  sign(μ)
     if syn_sign == -1
         @warn "You are using negative synaptic weights "
