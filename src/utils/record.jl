@@ -395,7 +395,7 @@ function add_endtime!(model::NamedTuple)
             if v isa AbstractPopulation ||
                v isa AbstractStimulus ||
                v isa AbstractConnection
-                @info "Adding end time for $(v.name)"
+                # @info "Adding end time for $(v.name)"
                 !haskey(v.records, :end_time) && (v.records[:end_time] = Dict{Symbol,Float32}())
                 for (key, val) in v.records
                     if !haskey(v.records[:end_time], key)
@@ -417,11 +417,11 @@ function add_starttime!(model::NamedTuple)
             if v isa AbstractPopulation ||
                v isa AbstractStimulus ||
                v isa AbstractConnection
-                @info "Adding start time for $(v.name)"
+                # @info "Adding start time for $(v.name)"
                 !haskey(v.records, :start_time) && (v.records[:start_time] = Dict{Symbol,Float32}())
                 for (key, val) in v.records
                     if !haskey(v.records[:start_time], key)
-                        @info "Adding start time for $key"
+                        # @info "Adding start time for $key"
                         v.records[:start_time][key] = 0
                     end
                 end
