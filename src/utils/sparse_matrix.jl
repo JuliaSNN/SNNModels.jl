@@ -166,6 +166,7 @@ using SpecialFunctions, Roots
 # end
 
 function sparse_matrix(;w, Npre, Npost, dist, μ, σ, ρ, rule=:Bernoulli, γ=-1, kmin=-1, kwargs...)
+    @debug "Constructing sparse matrix with $rule rule, $dist distribution, μ=$μ, σ=$σ, ρ=$ρ"
     syn_sign = μ ≈ 0 ? 1 :  sign(μ)
     if syn_sign == -1
         @warn "You are using negative synaptic weights "
@@ -178,7 +179,7 @@ function sparse_matrix(;w, Npre, Npost, dist, μ, σ, ρ, rule=:Bernoulli, γ=-1
         if rule == :Fixed
             # Set to zero a fraction (1-ρ)*Npost of the weights in each column
             for pre in 1:Npre
-                targets = sample(1:Npost, round(Int, (1-ρ)*Npost); replace=false)
+                targets = ρ > 0 ?  sample(1:Npost, round(Int, (1-ρ)*Npost); replace=false) : 1:Npost
                 # @show length(targets), (1-ρ)
                 w[targets, pre] .= 0
             end

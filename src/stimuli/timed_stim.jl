@@ -60,7 +60,7 @@ function SpikeTimeStimulus(
     μ = 1.0,
     σ = 0.0,
     w = nothing,
-    dist = Normal,
+    dist = :Normal,
     rule = :Fixed,
     N = nothing,
     param::SpikeTimeStimulusParameter,
