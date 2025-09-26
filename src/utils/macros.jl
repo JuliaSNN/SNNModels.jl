@@ -215,17 +215,46 @@ macro update(base, update_expr)
     # end
 end
 
-# Deep merge function for named tuples
-function update_with_merge(base_config::NamedTuple, path::Vector{Symbol}, value)
+# # Deep merge function for named tuples
+# function update_with_merge(base_config::NamedTuple, path::Vector{Symbol}, value)
 
+#     if length(path) == 1
+#         # If it's the final field, update the value
+#         return merge(base_config, (path[1] => value,))
+#     else
+#         key = path[1]
+#         sub = getfield(base_config, key)
+#         # Recursively update the nested subfield
+#         updated_sub = update_with_merge(sub, path[2:end], value)
+
+#         # Merge the updated subfield back into the base
+#         return merge(base_config, (key => updated_sub,))
+#     end
+# end
+
+# Deep merge function for named tuples
+function update_with_merge(base_config::NamedTuple, path::Vector{Symbol}, value, full_path=nothing)
+    full_path = isnothing(full_path) ? path : full_path
     if length(path) == 1
         # If it's the final field, update the value
+        @debug "Updating field $(join(full_path,".")) to $value"
         return merge(base_config, (path[1] => value,))
     else
         key = path[1]
+        if !haskey(base_config, key) 
+            @warn("Field $key in $(join(full_path,".")) does not exist, assign it to an empty NamedTuple")
+            base_config = merge(base_config, (key => NamedTuple(),))
+            # updated_sub = update_with_merge(base_config, path, value)
+            # sub = (;tmp=nothing)
+        end
         sub = getfield(base_config, key)
-        # Recursively update the nested subfield
-        updated_sub = update_with_merge(sub, path[2:end], value)
+        if isa(sub, NamedTuple)
+            # Recursively update the nested subfield
+            updated_sub = update_with_merge(sub, path[2:end], value, full_path)
+        else
+            @warn("Field $key in $(join(full_path,".")) is not a NamedTuple. Overwriting $key with a new NamedTuple.")
+            updated_sub = update_with_merge(NamedTuple(), path[2:end], value, full_path)
+        end
 
         # Merge the updated subfield back into the base
         return merge(base_config, (key => updated_sub,))
