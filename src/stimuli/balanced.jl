@@ -2,6 +2,11 @@
     BalancedStimulusParameter{VFT} <: AbstractParameter
 
 A parameter struct for the BalancedStimulus, containing parameters for the balanced input distribution.
+The balanced stimulus generates both excitatory and inhibitory inputs to a postsynaptic population, maintaining a balance between excitation and inhibition. The balance is controlled by two parameters that define the characteristics of the input.
+kIE: Scaling factor for inhibitory rate.
+wIE: Weight for inhibitory connections.
+
+The parameter β controls the noise in the firing rate, with higher values leading to more variability. The time constant τ determines how quickly the noise decays over time. The baseline firing rate r0 sets the average rate of input spikes.
 
 # Fields
 - `kIE::Float32`: Scaling factor for inhibitory rate (default: 1.0)
@@ -11,8 +16,9 @@ A parameter struct for the BalancedStimulus, containing parameters for the balan
 - `wIE::Float32`: Weight for inhibitory connections (default: 1.0)
 - `same_input::Bool`: Whether to use same input for all neurons (default: false)
 """
-BSParam = BalancedStimulusParameter
-@snn_kw struct BalancedStimulusParameter{VFT}
+BalancedParameter
+
+@snn_kw struct BalancedParameter{VFT}
     kIE::Float32 = 1.0
     β::Float32 = 0.0
     τ::Float32 = 50.0ms
@@ -21,6 +27,37 @@ BSParam = BalancedStimulusParameter
     same_input::Bool = false
 end
 
+"""
+    BalancedStimulus{
+        VFT = Vector{Float32},
+        VBT = Vector{Bool},
+        VIT = Vector{Int},
+        IT = Int32,
+    } <: AbstractStimulus
+A stimulus that generates balanced excitatory and inhibitory inputs to a postsynaptic population.
+# Fields
+- `param::BalancedStimulusParameter`: Parameters for the balanced stimulus.
+- `N::IT`: Number of neurons in the stimulus.
+- `N_pre::IT`: Number of presynaptic neurons connected to each postsynaptic
+- `neurons::VIT`: Indices of neurons in the postsynaptic population receiving the stimulus.
+- `ge::VFT`: Target excitatory conductance for each neuron.
+- `gi::VFT`: Target inhibitory conductance for each neuron.
+- `colptr::VIT`: Column pointers for sparse connectivity matrix.
+- `rowptr::VIT`: Row pointers for sparse connectivity matrix.
+- `I::VIT`: Row indices for sparse connectivity matrix.
+- `J::VIT`: Column indices for sparse connectivity matrix.
+- `index::VIT`: Indices for non-zero entries in sparse connectivity matrix.
+- `W::VFT`: Weights for connections in sparse connectivity matrix.
+- `r::VFT`: Firing rates for each neuron.
+- `noise::VFT`: Noise values for each neuron.
+- `fire::VBT`: Boolean array indicating if presynaptic neurons have fired.
+- `randcache::VFT`: Cache for random values used in spike generation.
+- `randcache_β::VFT`: Cache for random values used in noise generation.
+- `records::Dict`: Dictionary for recording variables during simulation.
+- `targets::Dict`: Dictionary specifying the target populations and synaptic variables.
+"""
+BalancedStimulus
+
 @snn_kw struct BalancedStimulus{
     VFT = Vector{Float32},
     VBT = Vector{Bool},
@@ -28,7 +65,7 @@ end
     IT = Int32,
 } <: AbstractStimulus
     id::String = randstring(12)
-    param::BalancedStimulusParameter
+    param::BalancedParameter
     name::String = "Balanced"
     N::IT = 100
     N_pre::IT = 5
@@ -79,7 +116,7 @@ function BalancedStimulus(
     target = nothing;
     neurons = :ALL,
     μ = 1.0f0,
-    param::Union{BalancedStimulusParameter,R},
+    param::Union{BalancedParameter,R},
     kwargs...,
 ) where {T<:AbstractPopulation,R<:Real}
 
@@ -118,7 +155,7 @@ function BalancedStimulus(
 end
 
 
-function Stimulus(param::BalancedStimulusParameter, post::T, sym::Symbol, target = nothing; kwargs...) where {T<:AbstractPopulation}
+function Stimulus(param::BalancedParameter, post::T, sym::Symbol, target = nothing; kwargs...) where {T<:AbstractPopulation}
     return BalancedStimulus(post, sym, sym, target; param, kwargs...)
 end
 
@@ -130,7 +167,7 @@ Generate a Balanced stimulus for a postsynaptic population.
 """
 function stimulate!(
     p::BalancedStimulus,
-    param::BalancedStimulusParameter,
+    param::BalancedParameter,
     time::Time,
     dt::Float32,
 )
@@ -193,5 +230,5 @@ function stimulate!(
 
 end
 
-export BalancedStimulus, stimulate!, BSParam, BalancedStimulusParameter
+export BalancedStimulus, stimulate!, BSParam, BalancedParameter
 

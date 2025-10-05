@@ -493,6 +493,11 @@ function bin_spiketimes(populations; interval, kwargs...)
     return ss, interval, names_pop
 end
 
+function shift_spikes!(spiketimes::Spiketimes, delay::Number)
+    for n in eachindex(spiketimes)
+        spiketimes[n] .+= delay
+    end
+end
 
 
 

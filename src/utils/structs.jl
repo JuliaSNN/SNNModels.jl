@@ -122,6 +122,10 @@ Time
     dt::FT = 0.125f0
 end
 
+function Time(time::Number)
+    tts = time / 0.125f0
+    return Time([Float32(time)], Int32[Int32(tts)], 0.125f0)
+end
 
 export Spiketimes, Time, NetworkModel
 export AbstractParameter, AbstractComponent,

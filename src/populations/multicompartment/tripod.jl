@@ -1,4 +1,5 @@
-Tripod
+
+# Tripod
 @snn_kw struct Tripod{
     MFT = Matrix{Float32},
     VIT = Vector{Int32},
