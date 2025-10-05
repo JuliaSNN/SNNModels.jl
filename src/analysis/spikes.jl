@@ -281,7 +281,8 @@ function _retrieve_interval(interval; sampling = 20ms, ttf = -1, tt0 = -1, kwarg
 end
 
 function time_average_fr(spiketimes, interval, pop_average)
-    rates = sum.(length.(spiketimes)) ./ (interval[end] - interval[1]) ./ Hz
+    _spiketimes = spikes_in_interval(spiketimes, interval)
+    rates = sum.(length.(_spiketimes)) ./ (interval[end] - interval[1]) ./ Hz
     if pop_average
         rates = mean(rates)
         isnan(rates) && (rates = 0.0f0)
@@ -535,9 +536,10 @@ function spikes_in_interval(
     neurons = [Vector{Float32}() for x = 1:length(spiketimes)]
     @inbounds @fastmath for n in eachindex(neurons)
         ff = findfirst(x -> x > interval[1] + margin[1], spiketimes[n])
-        ll = findlast(x -> x <= interval[2] + margin[2], spiketimes[n])
+        ll = findlast(x -> x <= interval[end] + margin[2], spiketimes[n])
         if !isnothing(ff) && !isnothing(ll)
-            @views append!(neurons[n], spiketimes[n][ff:ll])
+            append!(neurons[n], copy(spiketimes[n][ff:ll]))
+            # @views append!(neurons[n], spiketimes[n][ff:ll])
         end
     end
     return neurons

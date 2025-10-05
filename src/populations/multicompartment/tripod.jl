@@ -1,29 +1,3 @@
-"""
-This is a struct representing a spiking neural network model that include two dendrites and a soma based on the adaptive exponential integrate-and-fire model (DendNeuronParameter)
-
-
-# Fields 
-- `t::VIT` : tracker of simulation index [0] 
-- `param::AdExSoma` : Parameters for the AdEx model.
-- `N::Int32` : The number of neurons in the network.
-- `d1::VDT`, `d2::VDT` : Dendrite structures.
-- `NMDA::NMDAT` : Specifies the properties of NMDA (N-methyl-D-aspartate) receptors.
-- `gax1::VFT`, `gax2::VFT` : Axial conductance (reciprocal of axial resistance) for dendrite 1 and 2 respectively.
-- `cd1::VFT`, `cd2::VFT` : Capacitance for dendrite 1 and 2.
-- `gm1::VFT`, `gm2::VFT` : Membrane conductance for dendrite 1 and 2.
-- `v_s::VFT` : Somatic membrane potential.
-- `w_s::VFT` : Adaptation variables for each soma.
-- `v_d1::VFT` , `v_d2::VFT` : Dendritic membrane potential for dendrite 1 and 2.
-- `g_s::MFT` , `g_d1::MFT`, `g_d2::MFT` : Conductance of somatic and dendritic synapses.
-- `h_s::MFT`, `h_d1::MFT`, `h_d2::MFT` : Synaptic gating variables.
-- `fire::VBT` : Boolean array indicating which neurons have fired.
-- `after_spike::VFT` : Post-spike timing.
-- `postspike::PST` : Model for post-spike behavior.
-- `θ::VFT` : Individual neuron firing thresholds.
-- `records::Dict` : A dictionary to store simulation results.
-- `Δv::VFT` , `Δv_temp::VFT` : Variables to hold temporary voltage changes.
-- `cs::VFT` , `is::VFT` : Temporary variables for currents.
-"""
 Tripod
 @snn_kw struct Tripod{
     MFT = Matrix{Float32},
@@ -45,11 +19,6 @@ Tripod
     param::DendNeuronParameter = TripodParameter
     d1::VDT = create_dendrite(N, param.ds[1])
     d2::VDT = create_dendrite(N, param.ds[2])
-    # soma_syn::ST = param.soma_syn
-    # dend_syn::ST = param.dend_syn
-    # NMDA::NMDAT = param.NMDA
-    # glu_receptors::VIT = param.glu_receptors
-    # gaba_receptors::VIT = param.gaba_receptors
 
     # Membrane potential and adaptation
     v_s::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
@@ -97,7 +66,6 @@ function synaptic_target(targets::Dict, post::Tripod, sym::Symbol, target::Symbo
 
     return g, v_post
 end
-
 
 
 function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
