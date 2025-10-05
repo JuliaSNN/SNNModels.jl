@@ -201,6 +201,8 @@ function sparse_matrix(;w, Npre, Npost, dist, μ, σ, ρ, rule=:Bernoulli, γ=-1
         end
         w[w .<= 0] .= 0 # no negative weights
     end
+    @assert size(w, 1) == Npost
+    @assert size(w, 2) == Npre
     w = sparse(w)
     @assert size(w) == (Npost, Npre) "The size of the synaptic weight is not correct: $(size(w)) != ($Npost, $Npre)"
     return w .* syn_sign
