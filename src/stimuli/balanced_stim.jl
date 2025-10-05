@@ -1,13 +1,25 @@
+"""
+    BalancedStimulusParameter{VFT} <: AbstractParameter
+
+A parameter struct for the BalancedStimulus, containing parameters for the balanced input distribution.
+
+# Fields
+- `kIE::Float32`: Scaling factor for inhibitory rate (default: 1.0)
+- `β::Float32`: Noise parameter (default: 0.0)
+- `τ::Float32`: Time constant for noise (default: 50.0 ms)
+- `r0::Float32`: Baseline firing rate (default: 1kHz)
+- `wIE::Float32`: Weight for inhibitory connections (default: 1.0)
+- `same_input::Bool`: Whether to use same input for all neurons (default: false)
+"""
+BSParam = BalancedStimulusParameter
 @snn_kw struct BalancedStimulusParameter{VFT}
     kIE::Float32 = 1.0
     β::Float32 = 0.0
-    τ::Float32 = 50.0
+    τ::Float32 = 50.0ms
     r0::Float32 = 1kHz
     wIE::Float32 = 1.0
     same_input::Bool = false
 end
-
-BSParam = BalancedStimulusParameter
 
 @snn_kw struct BalancedStimulus{
     VFT = Vector{Float32},
@@ -106,6 +118,11 @@ function BalancedStimulus(
 end
 
 
+function Stimulus(param::BalancedStimulusParameter, post::T, sym::Symbol, target = nothing; kwargs...) where {T<:AbstractPopulation}
+    return BalancedStimulus(post, sym, sym, target; param, kwargs...)
+end
+
+
 """
     stimulate!(p::BalancedStimulus, param::BalancedParameter, time::Time, dt::Float32)
 
@@ -177,3 +194,4 @@ function stimulate!(
 end
 
 export BalancedStimulus, stimulate!, BSParam, BalancedStimulusParameter
+

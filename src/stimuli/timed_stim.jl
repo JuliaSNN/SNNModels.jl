@@ -102,7 +102,7 @@ function SpikeTimeStimulusIdentity(
     kwargs...,
 ) where {T<:AbstractPopulation}
     w = LinearAlgebra.I(post.N)
-    return SpikeTimeStimulus(post, sym, target; w = w, param = param, kwargs...)
+    return SpikeTimeStimulus(post, sym, target; N=post.N, w = w, param = param, kwargs...)
 end
 
 # """
@@ -174,7 +174,7 @@ function update_spikes!(stim, spikes, start_time = 0.0f0)
 end
 
 
-max_neuron(param::SpikeTimeStimulusParameter) = maximum(param.neurons)
+max_neuron(param::SpikeTimeStimulusParameter) = isempty(param.neurons) ? 0 : maximum(param.neurons)
 
 
 
