@@ -145,6 +145,8 @@ macro snn_kw(str)
     end
 end
 
+export @symdict, @snn_kw
+
 """ Macro to update fields in a named tuple configuration.
     Usage:
         @update base_config field1.field2 = value
@@ -198,7 +200,7 @@ macro update(base, update_expr)
         lhs, rhs = update_expr.args  # Extract the left-hand side and right-hand side
 
 
-        @assert lhs.head == Symbol(".")
+        # @assert lhs.head == Symbol(".")
         fields = []
         while !isa(lhs, Symbol)
             pushfirst!(fields, lhs.args[2].value)  # Collect the field names
@@ -215,29 +217,13 @@ macro update(base, update_expr)
     # end
 end
 
-# # Deep merge function for named tuples
-# function update_with_merge(base_config::NamedTuple, path::Vector{Symbol}, value)
-
-#     if length(path) == 1
-#         # If it's the final field, update the value
-#         return merge(base_config, (path[1] => value,))
-#     else
-#         key = path[1]
-#         sub = getfield(base_config, key)
-#         # Recursively update the nested subfield
-#         updated_sub = update_with_merge(sub, path[2:end], value)
-
-#         # Merge the updated subfield back into the base
-#         return merge(base_config, (key => updated_sub,))
-#     end
-# end
-
 # Deep merge function for named tuples
 function update_with_merge(base_config::NamedTuple, path::Vector{Symbol}, value, full_path=nothing)
     full_path = isnothing(full_path) ? path : full_path
     if length(path) == 1
         # If it's the final field, update the value
         @debug "Updating field $(join(full_path,".")) to $value"
+        !haskey(base_config, path[1]) && @warn "The updated field was not present in config"
         return merge(base_config, (path[1] => value,))
     else
         key = path[1]
@@ -260,6 +246,71 @@ function update_with_merge(base_config::NamedTuple, path::Vector{Symbol}, value,
         return merge(base_config, (key => updated_sub,))
     end
 end
+
+macro update!(base, update_expr)
+    if update_expr.head == :block
+        updates = update_expr.args
+        current_config = :($(esc(base)))
+
+        # Process each update expression in the block
+        for update_expr in updates
+            isa(update_expr, LineNumberNode) && continue  # Ensure it's an expression
+            lhs, rhs = update_expr.args
+            value = :($(esc(rhs)))
+            fields = []
+            while !isa(lhs, Symbol)
+                pushfirst!(fields, lhs.args[2].value)  # Collect the field names
+                lhs = lhs.args[1]  # Move to the next part of the path
+            end
+            pushfirst!(fields, lhs)  # Add the first part
+            field_syms = [Symbol(f) for f in fields]
+            current_config = :(update_with_merge($current_config, $field_syms, $value))
+        end
+        # return current_config
+    else
+        lhs, rhs = update_expr.args  # Extract the left-hand side and right-hand side
+        fields = []
+        while !isa(lhs, Symbol)
+            pushfirst!(fields, lhs.args[2].value)  # Collect the field names
+            lhs = lhs.args[1]  # Move to the next part of the path
+        end
+        pushfirst!(fields, lhs)  # Add the first part
+        field_syms = [Symbol(f) for f in fields]
+        current_config =  :(update_with_merge($base, $field_syms, $rhs))
+    end
+    return Expr(:(=), esc(base), :($current_config))
+end
+
+#
+
+function pretty_nt_print(value, indent=0)
+    if isa(value, NamedTuple)
+        println("{")
+        for (subfield, subvalue) in pairs(value)
+            print(" " ^ (indent + 2))
+            print("  $subfield := ")
+            pretty_nt_print(subvalue, indent + 2)
+        end
+        println(" " ^ (indent+2) * " " * "}")
+    else
+        println(value)
+    end
+end
+
+
+function named_tuple_to_string(nt)
+    fields = []
+    for field in propertynames(nt)
+        push!(fields, "$field = $(round.((getproperty(nt, field)), digits=2))")
+    end
+    return join(fields, "\n")
+end
+
+function normalize(v)
+    return v / sum(abs, v)
+end
+export @update, @update!, update_with_merge, pretty_nt_print
+
 
 # macro compose(args...)
 #     # Separate non-keyworded and keyworded arguments
@@ -310,5 +361,4 @@ end
 
 # end
 
-export @symdict, @snn_kw, @update
 #, @compose
