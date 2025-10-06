@@ -8,31 +8,37 @@ if VERSION > v"1.1"
     include("ctors.jl")
     include("records.jl")
 end
-##
+#
 
 @testset "Neurons and stimuli" begin
-    @test include("hh_neuron.jl")
-    @test include("if_neuron.jl")
-    @test include("if_inputs.jl")
-    @test include("adex_neuron.jl")
-    @test include("adex_inputs.jl")
-    @test include("iz_neuron.jl")
-    @test include("spiketime.jl")
-    @test include("ballandstick.jl")
-    @test include("poisson_stim.jl")
+    include("pop/hh_neuron.jl")
+    include("pop/if_neuron.jl")
+    include("pop/adex_neuron.jl")
+    include("pop/iz_neuron.jl")
+    include("pop/spiketime.jl")
+    include("pop/ballandstick.jl")
+    include("pop/dendrite.jl")
 end
 
-## Set the default logger to output only errors:
+@testset "Stimuli" begin
+    include("stim/poisson.jl")
+    include("stim/poisson_layer.jl")
+    include("stim/current.jl")
+    include("stim/timed.jl")
+    include("stim/balanced.jl")
+end
+
+# Set the default logger to output only errors:
 errorlogger = ConsoleLogger(stderr, Logging.Error)
 with_logger(errorlogger) do
     @testset "Networks and synapses" begin
-        @test include("if_net.jl")
-        @test include("chain.jl")
-        @test include("iz_net.jl")
-        @test include("hh_net.jl")
-        @test include("oja.jl")
-        @test include("rate_net.jl")
-        @test include("stdp_demo.jl")
+        @test include("network/if_net.jl")
+        @test include("network/chain.jl")
+        @test include("network/iz_net.jl")
+        @test include("network/hh_net.jl")
+        @test include("network/oja.jl")
+        @test include("network/rate_net.jl")
+        @test include("network/stdp_demo.jl")
     end
 end
 

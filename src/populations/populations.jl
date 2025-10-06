@@ -11,6 +11,7 @@ plasticity!(
 
 include("synapse/synapse.jl")
 include("synapse/synapse_parameters.jl")
+include("synapse/synapses.jl")
 
 ## Neurons
 include("poisson.jl")
@@ -23,7 +24,6 @@ include("identity.jl")
 ## IF
 
 include("generalized_if/gif.jl")
-include("generalized_if/synapses.jl")
 include("generalized_if/if.jl")
 include("generalized_if/adex.jl")
 include("generalized_if/if_extended.jl")
@@ -39,4 +39,4 @@ include("multicompartment/ballandstick.jl")
 # include("multicompartment/multipod.jl")
 
 
-export AbstractDendriteIF, AbstractGeneralizedIF, AbstractGeneralizedIFParameter
+export AbstractDendriteIF, AbstractGeneralizedIF, AbstractGeneralizedIFParameter, Population

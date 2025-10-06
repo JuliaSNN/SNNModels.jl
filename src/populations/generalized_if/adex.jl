@@ -1,6 +1,6 @@
 # abstract type AbstractAdEx <: AbstractGeneralizedIF end
 
-@snn_kw mutable struct AdExParameter{FT = Float32} <: AbstractDoubleExpParameter
+@snn_kw mutable struct AdExParameter{FT = Float32} <: AbstractGeneralizedIFParameter
     C::FT = 281pF        #(pF)
     gL::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
     τm::FT = C / gL # Membrane time constant
@@ -14,82 +14,10 @@
     a::FT = 4nS # Subthreshold adaptation parameter
     b::FT = 80.5pA # Spike-triggered adaptation parameter (amount by which the voltage is increased at each threshold crossing)
     τabs::FT = 1ms # Absolute refractory period
-
-    ## Synapses
-    τre::FT = 1ms # Rise time for excitatory synapses
-    τde::FT = 6ms # Decay time for excitatory synapses
-    τri::FT = 0.5ms # Rise time for inhibitory synapses
-    τdi::FT = 2ms # Decay time for inhibitory synapses
-    E_i::FT = -75mV # Reversal potential excitatory synapses 
-    E_e::FT = 0mV #Reversal potential excitatory synapses
-    gsyn_e::FT = 1.0f0 #norm_synapse(τre, τde) # Synaptic conductance for excitatory synapses
-    gsyn_i::FT = 1.0f0 #norm_synapse(τri, τdi) # Synaptic conductance for inhibitory synapses
-
     ## Dynamic spike threshold
     At::FT = 10mV # Post spike threshold increase
     τt::FT = 30ms # Adaptive threshold time scale
 end
-
-@snn_kw struct AdExSinExpParameter{FT = Float32} <: AbstractSinExpParameter
-    C::FT = 281pF        #(pF)
-    gL::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
-    τm::FT = C / gL # Membrane time constant
-    Vt::FT = -50mV # Membrane potential threshold
-    Vr::FT = -70.6mV # Reset potential
-    El::FT = -70.6mV # Resting membrane potential 
-    R::FT = nS / gL # Resistance
-    ΔT::FT = 2mV # Slope factor
-    Vspike::FT = 20mV # Spike potential
-    τw::FT = 144ms # Adaptation time constant (Spike-triggered adaptation time scale)
-    a::FT = 4nS # Subthreshold adaptation parameter
-    b::FT = 80.5pA # Spike-triggered adaptation parameter (amount by which the voltage is increased at each threshold crossing)
-    τabs::FT = 1ms # Absolute refractory period
-
-    ## Synapses
-    τe::FT = 6ms # Decay time for excitatory synapses
-    τi::FT = 0.5ms # Rise time for inhibitory synapses
-    E_i::FT = -75mV # Reversal potential excitatory synapses 
-    E_e::FT = 0mV #Reversal potential excitatory synapses
-    gsyn_e::FT = 1.0f0 #norm_synapse(τre, τde) # Synaptic conductance for excitatory synapses
-    gsyn_i::FT = 1.0f0 #norm_synapse(τri, τdi) # Synaptic conductance for inhibitory synapses
-
-    ## Dynamic spike threshold
-    At::FT = 10mV # Post spike threshold increase
-    τt::FT = 30ms # Adaptive threshold time scale
-end
-
-@snn_kw struct AdExReceptorParameter{
-    FT = Float32,
-    VIT = Vector{Int},
-    ST = SynapseArray,
-    NMDAT = NMDAVoltageDependency{Float32},
-    VFT = Vector{Float32},
-} <: AbstractReceptorParameter
-    C::FT = 281pF        #(pF)
-    gL::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
-    τm::FT = C / gL # Membrane time constant
-    Vt::FT = -50mV # Membrane potential threshold
-    Vr::FT = -70.6mV # Reset potential
-    El::FT = -70.6mV # Resting membrane potential 
-    R::FT = nS / gL # Resistance
-    ΔT::FT = 2mV # Slope factor
-    Vspike::FT = 20mV # Spike potential
-    τw::FT = 144ms # Adaptation time constant (Spike-triggered adaptation time scale)
-    a::FT = 4nS # Subthreshold adaptation parameter
-    b::FT = 80.5pA # Spike-triggered adaptation parameter (amount by which the voltage is increased at each threshold crossing)
-    τabs::FT = 1ms # Absolute refractory period
-
-    ## Dynamic spike threshold
-    At::FT = 10mV # Post spike threshold increase
-    τt::FT = 30ms # Adaptive threshold time scale
-
-    ## Synapses
-    NMDA::NMDAT = SomaNMDA
-    glu_receptors::VIT = [1, 2]
-    gaba_receptors::VIT = [3, 4]
-    syn::ST = SomaSynapse
-end
-
 
 ## Generalized integrate and fire
 @snn_kw struct AdEx{
@@ -97,12 +25,15 @@ end
     MFT = Matrix{Float32},
     VIT = Vector{Int},
     VBT = Vector{Bool},
-    GIFParam<:AbstractGeneralizedIFParameter,
+    GIFT<:AbstractGeneralizedIFParameter,
+    SYNT<:AbstractSynapseParameter
 } <: AbstractGeneralizedIF
 name::String = "AdEx"
     id::String = randstring(12)
 
-    param::GIFParam = AdExParameter()
+    param::GIFT  = AdExParameter()
+    synapse::SYNT = DoubleExpSynapse()
+
     N::Int32 = 100 # Number of neurons
     v::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
     w::VFT = zeros(N) # Adaptation current
@@ -115,14 +46,14 @@ name::String = "AdEx"
 
     # Two receptors synaptic conductance
     syn_curr::VFT = zeros(N)
-    ge::VFT = hasproperty(param, :syn) ? zeros(0) : zeros(N) # Time-dependent conductance
-    gi::VFT = hasproperty(param, :syn) ? zeros(0) : zeros(N) # Time-dependent conductance
+    ge::VFT = synapse isa AbstractReceptorParameter ? zeros(0) : zeros(N) # Time-dependent conductance
+    gi::VFT = synapse isa AbstractReceptorParameter ? zeros(0) : zeros(N) # Time-dependent conductance
     he::VFT = zeros(N)
     hi::VFT = zeros(N)
 
     # Glu/Gaba conductance
-    g::MFT = hasproperty(param, :syn) ? zeros(N, 4) : zeros(0, 0)
-    h::MFT = hasproperty(param, :syn) ? zeros(N, 4) : zeros(0, 0)
+    g::MFT = synapse isa AbstractReceptorParameter ? zeros(N, 4) : zeros(0, 0)
+    h::MFT = synapse isa AbstractReceptorParameter ? zeros(N, 4) : zeros(0, 0)
     glu::VFT = zeros(N)
     gaba::VFT = zeros(N)
 
@@ -143,6 +74,11 @@ function synaptic_target(
 end
 
 
+function Population(param::AdExParameter, synapse::AbstractSynapseParameter; N, kwargs...)
+    return AdEx(;N, param, synapse, kwargs...)
+end
+
+
 """
 	[Integrate-And-Fire Neuron](https://neuronaldynamics.epfl.ch/online/Ch1.S3.html)
 """
@@ -155,7 +91,8 @@ function update_neuron!(
     @unpack N, v, w, fire, θ, I, ξ_het, tabs, syn_curr = p
     @unpack τm, Vt, Vr, El, R, ΔT, τw, a, b, At, τt, τabs = param
 
-    @inbounds for i ∈ 1:N
+    # @inbounds 
+    for i ∈ 1:N
         # Reset membrane potential after spike
         v[i] = ifelse(fire[i], Vr, v[i])
 
@@ -195,4 +132,4 @@ function update_neuron!(
     end
 end
 
-export AdEx, AdExParameter, AdExSinExpParameter, AdExReceptorParameter
+export AdEx, AdExParameter

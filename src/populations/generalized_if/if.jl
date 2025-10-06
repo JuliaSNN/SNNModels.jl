@@ -1,4 +1,4 @@
-@snn_kw struct IFParameter{FT = Float32} <: AbstractDoubleExpParameter
+@snn_kw struct IFParameter{FT = Float32} <: AbstractGeneralizedIFParameter
     C::FT = 281pF        #(pF)
     gL::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
     τm::FT = 20ms
@@ -7,68 +7,10 @@
     El::FT = -70mV    # Membrane leak potential
     R::FT = nS / gL # Resistance
     ΔT::FT = 2mV # Slope factor
-    τre::FT = 1ms # Rise time for excitatory synapses
-    τde::FT = 6ms # Decay time for excitatory synapses
-    τri::FT = 0.5ms # Rise time for inhibitory synapses
-    τdi::FT = 2ms # Decay time for inhibitory synapses
-    E_i::FT = -75mV # Reversal potential
-    E_e::FT = 0mV # Reversal potential
-    τabs::FT = 2ms # Absolute refractory period
-    gsyn_e::FT = 1.0f0 #norm_synapse(τre, τde) # Synaptic conductance for excitatory synapses
-    gsyn_i::FT = 1.0f0 #norm_synapse(τri, τdi) # Synaptic conductance for inhibitory synapses
     a::FT = 0.0 # Subthreshold adaptation parameter
     b::FT = 0.0 #80.5pA # 'sra' current increment
     τw::FT = 0.0 #144ms # adaptation time constant (~Ca-activated K current inactivation)
-end
-
-
-@snn_kw struct IFCurrentParameter{FT = Float32} <: AbstractCurrentParameter
-    C::FT = 281pF        #(pF)
-    gL::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
-    τm::FT = 20ms # Membrane time constant
-    Vt::FT = -50mV # Membrane potential threshold
-    Vr::FT = -60mV # Reset potential
-    El::FT = -70mV # Resting membrane potential
-    R::FT = nS / gL # 40nS Membrane conductance
-    ΔT::FT = 2mV # Slope factor
     τabs::FT = 2ms # Absolute refractory period
-    #synapses
-    τe::FT = 6ms # Rise time for excitatory synapses
-    τi::FT = 2ms # Rise time for inhibitory synapses
-    E_i::FT = -75mV # Reversal potential
-    E_e::FT = 0mV # Reversal potential
-end
-
-@snn_kw struct IFCurrentDeltaParameter{FT = Float32} <: AbstractDeltaParameter
-    C::FT = 281pF        #(pF)
-    gL::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
-    τm::FT = 20ms # Membrane time constant
-    Vt::FT = -50mV # Membrane potential threshold
-    Vr::FT = -60mV # Reset potential
-    El::FT = -70mV # Resting membrane potential
-    R::FT = nS / gL # 40nS Membrane conductance
-    ΔT::FT = 2mV # Slope factor
-    τabs::FT = 2ms # Absolute refractory period
-    #synapses
-end
-
-
-@snn_kw struct IFSinExpParameter{FT = Float32} <: AbstractSinExpParameter
-    C::FT = 281pF        #(pF)
-    gL::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
-    τm::FT = 20ms
-    Vt::FT = -50mV
-    Vr::FT = -60mV
-    El::FT = Vr
-    R::FT = nS / gL # Resistance
-    ΔT::FT = 2mV # Slope factor
-    τe::FT = 6ms # Rise time for excitatory synapses
-    τi::FT = 2ms # Rise time for inhibitory synapses
-    E_i::FT = -75mV # Reversal potential
-    E_e::FT = 0mV # Reversal potential
-    τabs::FT = 2ms # Absolute refractory period
-    gsyn_e::FT = 1.0 # Synaptic conductance for excitatory synapses
-    gsyn_i::FT = 1.0 # Synaptic conductance for inhibitory synapses
 end
 
 
@@ -76,10 +18,13 @@ end
     VFT = Vector{Float32},
     VBT = Vector{Bool},
     GIFT<:AbstractGeneralizedIFParameter,
+    SYNT<:AbstractSynapseParameter
 } <: AbstractGeneralizedIF
+
+    param::GIFT = IFParameter()
+    synapse::SYNT = DoubleExpSynapse()
     id::String = randstring(12)
     name::String = "IF"
-    param::GIFT = IFParameter()
     N::Int32 = 100
     v::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
     ge::VFT = zeros(N)
@@ -96,6 +41,9 @@ end
     Δv_temp::VFT = zeros(Float32, N)
 end
 
+function Population(param::IFParameter, synapse::AbstractSynapseParameter; N, kwargs...)
+    return IF(;N, param, synapse, kwargs...)
+end
 
 """
     [Integrate-And-Fire Neuron](https://neuronaldynamics.epfl.ch/online/Ch1.S3.html)
@@ -110,7 +58,8 @@ function update_neuron!(
     @unpack N, v, w, I, tabs, fire, syn_curr = p
     @unpack τm, El, R, Vt, Vr, τabs = param
 
-    @inbounds for i = 1:N
+    # @inbounds 
+    for i = 1:N
         # Idle time
         if tabs[i] > 0
             fire[i] = false
@@ -130,7 +79,8 @@ function update_neuron!(
     # Adaptation current
     if (hasfield(typeof(param), :τw) && param.τw > 0.0f0)
         @unpack a, b, τw = param
-        @inbounds for i = 1:N
+        # @inbounds 
+        for i = 1:N
             w[i] = ifelse(fire[i], w[i] + param.b, w[i])
             (w[i] += dt * (a * (v[i] - El) - w[i]) / τw)
         end
@@ -139,7 +89,7 @@ end
 
 
 
-export IF, IFParameter, IFSinExpParameter, IFCurrentParameter, IFCurrentDeltaParameter
+export IF, IFParameter
 
 
 # function Heun_update_neuron!(p::IF, param::T, dt::Float32) where {T<:AbstractIFParameter}

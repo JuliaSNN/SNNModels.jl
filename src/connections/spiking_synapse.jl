@@ -59,25 +59,21 @@ end
 """
 SpikingSynapse
 
-
 function SpikingSynapse(
-    pre,
-    post,
-    sym,
-    target = nothing;
-    delay_dist = nothing,
-    μ = 1.0,
-    σ = 0.0,
-    p = 0.0,
-    w = nothing,
-    dist::Symbol = :Normal,
-    dt = 0.125f0,
-    rule::Symbol = :Fixed,
-    kwargs...,
+    pre::AbstractPopulation,
+    post::AbstractPopulation,
+    sym::Symbol,
+    comp::Union{Symbol, Nothing} = nothing;
+    conn::Connectivity,
+    delay_dist::Union{Distribution, Nothing} = nothing,
+    dt::Float32 = 0.125f0,
+    LTPParam::LTPParameter = NoLTP(),
+    STPParam::STPParameter = NoSTP(),
+    name::String = "SpikingSynapse",
 )
 
     # set the synaptic weight matrix
-    w = sparse_matrix(;w, Npre=pre.N, Npost=post.N, dist, μ, σ, ρ= p, rule, kwargs...)
+    w = sparse_matrix(pre.N, post.N, conn)
     # remove autapses if pre == post
     (pre == post) && (w[diagind(w)] .= 0)
     # get the sparse representation of the synaptic weight matrix
@@ -92,12 +88,10 @@ function SpikingSynapse(
         :pre => pre.id,
         :type=>:SpikingSynapse,
     )
-    @views g, v_post = synaptic_target(targets, post, sym, target)
+    @views g, v_post = synaptic_target(targets, post, sym, comp)
 
     # set the paramter for the synaptic plasticity
-    LTPParam = haskey(kwargs, :LTPParam) ? kwargs[:LTPParam] : NoLTP()
     LTPVars = plasticityvariables(LTPParam, pre.N, post.N)
-    STPParam = haskey(kwargs, :STPParam) ? kwargs[:STPParam] : NoSTP()
     STPVars = plasticityvariables(STPParam, pre.N, post.N)
 
     # short term plasticity
@@ -108,7 +102,6 @@ function SpikingSynapse(
 
     if isnothing(delay_dist)
 
-        args = filter(k-> Symbol(k) in fieldnames(SpikingSynapse), keys(kwargs)) |> x->Dict(k=>kwargs[k] for k in x)
         # Construct the SpikingSynapse instance
         return SpikingSynapse(;
             ρ = ρ,
@@ -119,14 +112,13 @@ function SpikingSynapse(
             STPVars,
             LTPParam,
             STPParam,
-            args...,
+            name
         )
 
     else
         delayspikes = fill(-1, length(W))
         delaytime = round.(Int, rand(delay_dist, length(W))/dt)
 
-        args = filter(k-> Symbol(k) in fieldnames(SpikingSynapseDelay), keys(kwargs)) |> x->Dict(k=>kwargs[k] for k in x)
         return SpikingSynapseDelay(;
             ρ = ρ,
             delayspikes = delayspikes,
@@ -138,7 +130,7 @@ function SpikingSynapse(
             STPVars,
             LTPParam,
             STPParam,
-            args...,
+            name
         )
     end
 end

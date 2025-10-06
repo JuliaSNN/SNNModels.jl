@@ -5,8 +5,8 @@ function integrate!(
     param::T,
     dt::Float32,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractGeneralizedIFParameter}
-    update_synapses!(p, param, dt)
-    synaptic_current!(p, param)
+    update_synapses!(p, p.synapse, dt)
+    synaptic_current!(p, p.synapse)
     update_neuron!(p, param, dt)
 end
 

@@ -6,7 +6,7 @@ w[2, 1] = 1.0f0
 
 st = Identity(N = max_neuron(inputs))
 stim = SpikeTimeStimulusIdentity(st, :g, param = inputs)
-syn = SpikingSynapse(st, st, :g, w = w, LTPParam = STDPGerstner())
+syn = SpikingSynapse(st, st, :g, conn=w, LTPParam = STDPGerstner())
 model = compose(pop = st, stim = stim, syn = syn, silent = true)
 monitor!(model.pop..., [:fire])
 # monitor!(model.syn..., [:tpre, :tpost, :W])

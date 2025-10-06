@@ -80,6 +80,8 @@ function create_dendrite(N::Int, l; kwargs...)
     return dendrites
 end
 
+create_dendrite(;l, kwargs...) = create_dendrite(l ; kwargs...)
+
 function create_dendrite(l; d::Real = 4um, physiology = human_dend)
     if isa(l, Tuple)
         l = rand(l[1]:1um:l[2])
@@ -115,3 +117,5 @@ export create_dendrite,
     proximal_proximal,
     proximal,
     all_lengths
+
+export G_axial, G_mem, C_mem

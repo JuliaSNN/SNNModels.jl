@@ -21,6 +21,7 @@ using Graphs, MetaGraphs
 
 include("utils/macros.jl")
 include("utils/structs.jl")
+include("utils/connectivity.jl")
 include("utils/unit.jl")
 include("utils/util.jl")
 include("utils/io.jl")

@@ -1,8 +1,8 @@
-adex_types = [AdExParameter, AdExSinExpParameter, AdExReceptorParameter]
+adex_types = [DoubleExpSynapse, ReceptorSynapse, SingleExpSynapse]
 
 for adex_type in adex_types
     let
-        E = AdEx(; N = 1, param = adex_type())
+        E = AdEx(; N = 1, synapse = adex_type())
         E.I .= [11]
         monitor!(E, [:v, :fire])
         sim!([E]; duration = 300ms)
