@@ -1,20 +1,35 @@
 
 ## Synaptic updates 
-abstract type AbstractSinExpParameter <: AbstractGeneralizedIFParameter end
-abstract type AbstractDoubleExpParameter <: AbstractGeneralizedIFParameter end
-abstract type AbstractReceptorParameter <: AbstractGeneralizedIFParameter end
-abstract type AbstractCurrentParameter <: AbstractGeneralizedIFParameter end
-abstract type AbstractDeltaParameter <: AbstractGeneralizedIFParameter end
+abstract type AbstractSynapseParameter end
+abstract type AbstractSinExpParameter <: AbstractSynapseParameter end
+abstract type AbstractDoubleExpParameter <: AbstractSynapseParameter end
+abstract type AbstractReceptorParameter <: AbstractSynapseParameter end
+abstract type AbstractCurrentParameter <: AbstractSynapseParameter end
+abstract type AbstractDeltaParameter <: AbstractSynapseParameter end
+
 
 ## Receptor Synapse updates
+@snn_kw struct ReceptorSynapse{
+        FT = Float32,
+        VIT = Vector{Int},
+        ST = SynapseArray,
+        NMDAT = NMDAVoltageDependency{Float32},
+        VFT = Vector{Float32},
+    } <: AbstractReceptorParameter
+    ## Synapses
+    NMDA::NMDAT = SomaNMDA
+    glu_receptors::VIT = [1, 2]
+    gaba_receptors::VIT = [3, 4]
+    syn::ST = SomaSynapse
+end
 
 function update_synapses!(
     p::P,
-    param::T,
+    synapse::T,
     dt::Float32,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractReceptorParameter}
     @unpack N, g, h, glu, gaba, hi, he = p
-    @unpack glu_receptors, gaba_receptors, syn = param
+    @unpack glu_receptors, gaba_receptors, syn = synapse
 
     @inbounds for n in glu_receptors
         @unpack τr⁻, τd⁻, α = syn[n]
@@ -42,10 +57,10 @@ end
 
 @inline function synaptic_current!(
     p::T,
-    param::P,
+    synapse::P,
 ) where {T<:AbstractGeneralizedIF,P<:AbstractReceptorParameter}
     @unpack N, g, h, g, v, syn_curr = p
-    @unpack syn, NMDA = param
+    @unpack syn, NMDA = synapse
     @unpack mg, b, k = NMDA
     fill!(syn_curr, 0.0f0)
     @inbounds @fastmath for n in eachindex(syn)
@@ -62,14 +77,24 @@ end
 end
 
 ## Double Exponential Synapse updates
+@snn_kw struct DoubleExpSynapse{FT = Float32} <: AbstractDoubleExpParameter
+    τre::FT = 1ms # Rise time for excitatory synapses
+    τde::FT = 6ms # Decay time for excitatory synapses
+    τri::FT = 0.5ms # Rise time for inhibitory synapses
+    τdi::FT = 2ms # Decay time for inhibitory synapses
+    E_i::FT = -75mV # Reversal potential excitatory synapses 
+    E_e::FT = 0mV #Reversal potential excitatory synapses
+    gsyn_e::FT = 1.0f0 #norm_synapse(τre, τde) # Synaptic conductance for excitatory synapses
+    gsyn_i::FT = 1.0f0 #norm_synapse(τri, τdi) # Synaptic conductance for inhibitory synapses
+end
 
 function update_synapses!(
     p::P,
-    param::T,
+    synapse::T,
     dt::Float32,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractDoubleExpParameter}
     @unpack N, ge, gi, he, hi = p
-    @unpack τde, τre, τdi, τri = param
+    @unpack τde, τre, τdi, τri = synapse
     @inbounds for i ∈ 1:N
         ge[i] += dt * (-ge[i] / τde + he[i])
         he[i] += dt * (-he[i] / τre)
@@ -90,14 +115,22 @@ end
 end
 
 ## Single Exponential Synapse updates
-
+@snn_kw struct SingleExpSynapse{FT = Float32} <: AbstractSinExpParameter
+    ## Synapses
+    τe::FT = 6ms # Decay time for excitatory synapses
+    τi::FT = 0.5ms # Rise time for inhibitory synapses
+    E_i::FT = -75mV # Reversal potential excitatory synapses 
+    E_e::FT = 0mV #Reversal potential excitatory synapses
+    gsyn_e::FT = 1.0f0 #norm_synapse(τre, τde) # Synaptic conductance for excitatory synapses
+    gsyn_i::FT = 1.0f0 #norm_synapse(τri, τdi) # Synaptic conductance for inhibitory synapses
+end
 function update_synapses!(
     p::P,
-    param::T,
+    synapse::T,
     dt::Float32,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractSinExpParameter}
     @unpack N, ge, gi, he, hi = p
-    @unpack τe, τi = param
+    @unpack τe, τi = synapse
     @fastmath @inbounds for i ∈ 1:N
         ge[i] += dt * (-ge[i] / τe)
         gi[i] += dt * (-gi[i] / τi)
@@ -106,9 +139,9 @@ end
 
 @inline function synaptic_current!(
     p::P,
-    param::T,
+    synapse::T,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractSinExpParameter}
-    @unpack gsyn_e, gsyn_i, E_e, E_i = param
+    @unpack gsyn_e, gsyn_i, E_e, E_i = synapse
     @unpack N, v, ge, gi, syn_curr = p
     @inbounds @simd for i ∈ 1:N
         syn_curr[i] = ge[i] * (v[i] - E_e) * gsyn_e + gi[i] * (v[i] - E_i) * gsyn_i
@@ -116,10 +149,12 @@ end
 end
 
 ## Delta Synapse updates
+@snn_kw struct DeltaSynapse{FT = Float32} <: AbstractDeltaParameter
+end
 
 @inline function update_synapses!(
     p::P,
-    param::T,
+    synapse::T,
     dt::Float32,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractDeltaParameter}
     @unpack N, ge, gi = p
@@ -129,7 +164,7 @@ end
 
 @inline function synaptic_current!(
     p::P,
-    param::T,
+    synapse::T,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractDeltaParameter}
     @unpack N, v, ge, gi, syn_curr = p
     @inbounds @simd for i ∈ 1:N
@@ -141,6 +176,14 @@ end
 
 
 ## Current Synapse updates
+
+@snn_kw struct CurrentSynapse{FT = Float32} <: AbstractCurrentParameter
+    τe::FT = 6ms # Rise time for excitatory synapses
+    τi::FT = 2ms # Rise time for inhibitory synapses
+    E_i::FT = -75mV # Reversal potential
+    E_e::FT = 0mV # Reversal potential
+end
+
 @inline function update_synapses!(
     p::P,
     param::T,
@@ -178,3 +221,5 @@ end
 #     @simd for i ∈ 1:N
 #         syn_curr[i] += gsyn * g[i, r] * (v[i] - E_rev)
 #     end
+
+export ReceptorSynapse, DoubleExpSynapse, SingleExpSynapse, CurrentSynapse, DeltaSynapse
