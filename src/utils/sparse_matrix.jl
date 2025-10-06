@@ -182,9 +182,12 @@ function sparse_matrix(Npre, Npost; w=nothing, dist=:Normal, μ=1, σ=0, ρ=noth
         # Set to zero a fraction (1-ρ)*Npost of the weights in each column
         for pre in 1:Npre
             targets = ρ > 0 ?  sample(1:Npost, round(Int, (1-ρ)*Npost); replace=false) : 1:Npost
-            # @show length(targets), (1-ρ)
             w[targets, pre] .= 0
         end
+        # for post in 1:Npost
+        #     pres = ρ > 0 ?  sample(1:Npre, round(Int, (1-ρ)*Npre); replace=false) : 1:Npre
+        #     w[post, pres] .= 0
+        # end
     elseif rule == :Bernoulli
         # Set to zero each weight with probability (1-ρ)
         w[[n for n in eachindex(w[:]) if rand() < 1-ρ]] .= 0
@@ -202,12 +205,9 @@ function sparse_matrix(Npre, Npost; w=nothing, dist=:Normal, μ=1, σ=0, ρ=noth
         throw(ArgumentError("Unknown connection mode: $rule; use :Fixed or :Bernoulli"))
     end
     w[w .<= 0] .= 0 # no negative weights
-    @assert size(w, 1) == Npost
-    @assert size(w, 2) == Npre
     w = sparse(w)
     @assert size(w) == (Npost, Npre) "The size of the synaptic weight is not correct: $(size(w)) != ($Npost, $Npre)"
     return w .* syn_sign
-
 end
 
 
