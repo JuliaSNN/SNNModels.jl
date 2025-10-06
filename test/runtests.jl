@@ -8,7 +8,7 @@ if VERSION > v"1.1"
     include("ctors.jl")
     include("records.jl")
 end
-##
+#
 
 @testset "Neurons and stimuli" begin
     include("pop/hh_neuron.jl")
@@ -28,7 +28,7 @@ end
     include("stim/balanced.jl")
 end
 
-## Set the default logger to output only errors:
+# Set the default logger to output only errors:
 errorlogger = ConsoleLogger(stderr, Logging.Error)
 with_logger(errorlogger) do
     @testset "Networks and synapses" begin

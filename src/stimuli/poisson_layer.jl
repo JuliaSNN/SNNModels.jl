@@ -17,11 +17,6 @@ PoissonLayer
     rate::Float32 = 1.0f0  # Default rate in Hz
     N::Int32 = 1
     rates::Vector{R} = fill(Float32.(rate), N)
-    p::Float32 = 0.1f0  # Connection probability
-    μ::Float32 = 1.0f0
-    σ::Float32 = 0.0f0
-    dist::Symbol = :Normal
-    rule::Symbol = :Fixed
     active::Vector{Bool} = [true]
 end
 
@@ -30,6 +25,7 @@ function PoissonLayer(rate::R; kwargs...) where {R<:Real}
     rates = fill(Float32.(rate), N)
     return PoissonLayer(; N=N, kwargs..., rate = rate, rates = rates)
 end
+
 @snn_kw struct PoissonStimulusLayer{
     VFT = Vector{Float32},
     VBT = Vector{Bool},
@@ -59,17 +55,17 @@ end
 function PoissonStimulusLayer(
     post::T,
     sym::Symbol,
-    target = nothing;
+    comp = nothing;
+    conn::Connectivity,
     param::PoissonLayer,
-    w = nothing,
     name::String = "Poisson",
 ) where {T<:AbstractPopulation}
+    # @warn "PoissonStimulusLayer is deprecated. Please use Stimulus(param, post, sym, comp; conn) instead."
 
-    w = sparse_matrix(;w, Npre=param.N, Npost=post.N, param.dist, μ =param.μ, σ= param.σ, ρ = param.p, param.rule)
+    w = sparse_matrix(param.N, post.N, conn)
     rowptr, colptr, I, J, index, W = dsparse(w)
-
     targets = Dict(:pre => :PoissonStim, :post => post.id)
-    g, _ = synaptic_target(targets, post, sym, target)
+    g, _ = synaptic_target(targets, post, sym, comp)
 
     # Construct the SpikingSynapse instance
     return PoissonStimulusLayer(;
@@ -85,11 +81,26 @@ end
 function Stimulus(
     param::PoissonLayer,
     post::T,
-    sym::Symbol,
-    target = nothing;
-    kwargs...
+    sym::Symbol, 
+    comp = nothing;
+    conn::NamedTuple,
+    name::String = "Poisson",
 ) where {T<:AbstractPopulation}
-    return PoissonStimulusLayer(param, post, sym, target; kwargs...)
+
+    w = sparse_matrix(param.N, post.N; conn...)
+    rowptr, colptr, I, J, index, W = dsparse(w)
+    targets = Dict(:pre => :PoissonStim, :post => post.id)
+    g, _ = synaptic_target(targets, post, sym, comp)
+
+    # Construct the SpikingSynapse instance
+    return PoissonStimulusLayer(;
+        param = param,
+        N = param.N,
+        targets = targets,
+        g = g,
+        @symdict(rowptr, colptr, I, J, index, W)...,
+        name = name
+    )
 end
 
 

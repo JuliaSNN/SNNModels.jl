@@ -10,7 +10,7 @@ using Distributions
     @testset "CurrentNoise with default parameters" begin
         param = CurrentNoise(3200)
         @test param.I_base ≈ zeros(Float32, 3200)
-        @test param.I_dist == Normal(0.0, 0.0)
+        @test param.I_dist == Distributions.Normal(0.0, 0.0)
         @test param.α ≈ zeros(Float32, 3200)
     end
 

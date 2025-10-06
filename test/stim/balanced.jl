@@ -33,8 +33,6 @@ using Test
         stim = BalancedStimulus(E, :ge, :gi; param = param)
         @test stim.param == param
         @test stim.N == E.N
-        @test stim.N_pre == ceil(Int, param.r0 * maximum([1, param.β / 100]))
-        @test stim.neurons == 1:E.N
         @test stim.targets[:pre] == :BalancedStim
         @test stim.targets[:post] == E.id
         @test stim.r ≈ ones(Float32, E.N) * param.r0
@@ -49,8 +47,6 @@ using Test
         stim = BalancedStimulus(E, :ge, :gi; param = param)
         @test stim.param == param
         @test stim.N == E.N
-        @test stim.N_pre == ceil(Int, param.r0 * maximum([1, param.β / 100]))
-        @test stim.neurons == 1:E.N
         @test stim.targets[:pre] == :BalancedStim
         @test stim.targets[:post] == E.id
         @test stim.r ≈ ones(Float32, E.N) * param.r0
@@ -65,8 +61,6 @@ using Test
         stim = Stimulus(param, E, :ge)
         @test stim.param == param
         @test stim.N == E.N
-        @test stim.N_pre == ceil(Int, param.r0 * maximum([1, param.β / 100]))
-        @test stim.neurons == 1:E.N
         @test stim.targets[:pre] == :BalancedStim
         @test stim.targets[:post] == E.id
         @test stim.r ≈ ones(Float32, E.N) * param.r0

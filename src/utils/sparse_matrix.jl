@@ -165,48 +165,61 @@ using SpecialFunctions, Roots
 #     end
 # end
 
-function sparse_matrix(;w, Npre, Npost, dist, μ, σ, ρ, rule=:Bernoulli, γ=-1, kmin=-1, kwargs...)
+function sparse_matrix(Npre, Npost; w=nothing, dist=:Normal, μ=1, σ=0, ρ=nothing, p=nothing, rule=:Fixed, γ=-1, kmin=-1, kwargs...)
+    @assert (isnothing(p) || isnothing(ρ)) && !(isnothing(p) && isnothing(ρ)) "Specify either p or ρ"
+    ρ = isnothing(ρ) ? p : ρ
+    @assert ρ >= 0 && ρ <= 1 "ρ must be in [0, 1]"
     @debug "Constructing sparse matrix with $rule rule, $dist distribution, μ=$μ, σ=$σ, ρ=$ρ"
     syn_sign = μ ≈ 0 ? 1 :  sign(μ)
     if syn_sign == -1
         @warn "You are using negative synaptic weights "
         μ = abs(μ)
     end
-    if isnothing(w)
-        # if w is not defined, construct a random sparse matrix with `dist` with `μ` and `σ`. 
-        my_dist = getfield(Distributions, dist)
-        w = rand(my_dist(μ, σ), Npost, Npre) # Construct a random dense matrix with dimensions post.N x pre.N
-        if rule == :Fixed
-            # Set to zero a fraction (1-ρ)*Npost of the weights in each column
-            for pre in 1:Npre
-                targets = ρ > 0 ?  sample(1:Npost, round(Int, (1-ρ)*Npost); replace=false) : 1:Npost
-                # @show length(targets), (1-ρ)
-                w[targets, pre] .= 0
-            end
-        elseif rule == :Bernoulli
-            # Set to zero each weight with probability (1-ρ)
-            w[[n for n in eachindex(w[:]) if rand() < 1-ρ]] .= 0
-        elseif rule == :PowerLaw
-            for pre in 1:Npre
-                @assert γ > 0 "For PowerLaw connection rule, γ must be defined and positive"
-                @assert kmin > 0 "For PowerLaw connection rule, kmin must be defined and positive"
-                n = round(Int, rand(Distributions.Pareto(γ, kmin)))
-                n = minimum((n, Npost-1))
-                targets = sample(1:Npost, Npost-n; replace=false)
-                w[targets, pre] .= 0
-            end
-            # do nothing
-        else
-            throw(ArgumentError("Unknown connection mode: $rule; use :Fixed or :Bernoulli"))
+
+    my_dist = getfield(Distributions, dist)
+    w = rand(my_dist(μ, σ), Npost, Npre) # Construct a random dense matrix with dimensions post.N x pre.N
+    if rule == :Fixed
+        # Set to zero a fraction (1-ρ)*Npost of the weights in each column
+        for pre in 1:Npre
+            targets = ρ > 0 ?  sample(1:Npost, round(Int, (1-ρ)*Npost); replace=false) : 1:Npost
+            # @show length(targets), (1-ρ)
+            w[targets, pre] .= 0
         end
-        w[w .<= 0] .= 0 # no negative weights
+    elseif rule == :Bernoulli
+        # Set to zero each weight with probability (1-ρ)
+        w[[n for n in eachindex(w[:]) if rand() < 1-ρ]] .= 0
+    elseif rule == :PowerLaw
+        for pre in 1:Npre
+            @assert γ > 0 "For PowerLaw connection rule, γ must be defined and positive"
+            @assert kmin > 0 "For PowerLaw connection rule, kmin must be defined and positive"
+            n = round(Int, rand(Distributions.Pareto(γ, kmin)))
+            n = minimum((n, Npost-1))
+            targets = sample(1:Npost, Npost-n; replace=false)
+            w[targets, pre] .= 0
+        end
+        # do nothing
+    else
+        throw(ArgumentError("Unknown connection mode: $rule; use :Fixed or :Bernoulli"))
     end
+    w[w .<= 0] .= 0 # no negative weights
     @assert size(w, 1) == Npost
     @assert size(w, 2) == Npre
     w = sparse(w)
     @assert size(w) == (Npost, Npre) "The size of the synaptic weight is not correct: $(size(w)) != ($Npost, $Npre)"
     return w .* syn_sign
+
 end
+
+
+sparse_matrix(Npre, Npost, conn::NamedTuple) = sparse_matrix(Npre, Npost; conn...)
+
+function sparse_matrix(Npre, Npost, conn::AbstractMatrix) 
+    w = conn
+    @assert size(w) == (Npost, Npre) "The size of the synaptic weight is not correct: $(size(w)) != ($Npost, $Npre)"
+    return sparse(w)
+end
+
+
 
 function dsparse(A)
     # them in a special data structure leads to savings in space and execution time, compared to dense arrays.

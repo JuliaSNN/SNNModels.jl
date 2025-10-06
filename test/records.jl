@@ -1,10 +1,10 @@
 E = IF(; N = 3200, param = IFParameter(; El = -49mV))
 monitor!(E, [:fire, :v])
 I = IF(; N = 800, param = IFParameter(; El = -49mV))
-EE = SpikingSynapse(E, E, :ge; μ = 60 * 0.27 / 10, p = 0.02)
-EI = SpikingSynapse(E, I, :ge; μ = 60 * 0.27 / 10, p = 0.02)
-IE = SpikingSynapse(I, E, :gi; μ = -20 * 4.5 / 10, p = 0.02)
-II = SpikingSynapse(I, I, :gi; μ = -20 * 4.5 / 10, p = 0.02)
+EE = SpikingSynapse(E, E, :ge, conn=(μ = 60 * 0.27 / 10, ρ = 0.02))
+EI = SpikingSynapse(E, I, :ge, conn=(μ = 60 * 0.27 / 10, ρ = 0.02))
+IE = SpikingSynapse(I, E, :gi, conn=(μ = -20 * 4.5 / 10, ρ = 0.02))
+II = SpikingSynapse(I, I, :gi, conn=(μ = -20 * 4.5 / 10, ρ = 0.02))
 P = [E, I]
 C = [EE, EI, IE, II]
 model = compose(;E,I, EE, EI, IE, II, silent=true, name="E/I network")

@@ -41,7 +41,8 @@ using Test
     # Test SpikeTimeStimulus constructor with default parameters
     @testset "SpikeTimeStimulus with default parameters" begin
         param = SpikeTimeParameter()
-        stim = SpikeTimeStimulus(E, :ge; param = param)
+        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed,)
+        stim = SpikeTimeStimulus(E, :ge; param = param, conn = conn)
         @test stim.N == 0
         @test stim.name == "SpikeTime"
         @test stim.param == param
@@ -57,7 +58,8 @@ using Test
         spiketimes = [0.1, 0.2, 0.3]
         neurons = [1, 2, 3]
         param = SpikeTimeParameter(spiketimes, neurons)
-        stim = SpikeTimeStimulus(E, :ge; param = param)
+        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed,)
+        stim = SpikeTimeStimulus(E, :ge; param = param, conn = conn)
         @test stim.N == 3
         @test stim.name == "SpikeTime"
         @test stim.param == param
@@ -73,7 +75,8 @@ using Test
         spiketimes = [0.1, 0.2, 0.3]
         neurons = [1, 2, 3]
         param = SpikeTimeParameter(spiketimes, neurons)
-        stim = SpikeTimeStimulusIdentity(E, :ge; param = param)
+        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed,)
+        stim = SpikeTimeStimulusIdentity(E, :ge; param = param, conn = conn)
         @test stim.N == E.N
         @test stim.name == "SpikeTime"
         @test stim.param == param
@@ -89,7 +92,8 @@ using Test
         spiketimes = [0.1, 0.2, 0.3]
         neurons = [1, 2, 3]
         param = SpikeTimeParameter(spiketimes, neurons)
-        stim = SpikeTimeStimulus(E, :ge; param = param)
+        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed,)
+        stim = SpikeTimeStimulus(E, :ge; param = param, conn = conn)
         time = Time()
         dt = 0.001f0
         stimulate!(stim, param, time, dt)
@@ -101,8 +105,9 @@ using Test
     @testset "next_neuron with SpikeTimeStimulus" begin
         spiketimes = [0.1, 0.2, 0.3]
         neurons = [1, 2, 3]
+        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed,)
         param = SpikeTimeParameter(spiketimes, neurons)
-        stim = SpikeTimeStimulus(E, :ge; param = param)
+        stim = SpikeTimeStimulus(E, :ge; param = param, conn = conn)
         @test next_neuron(stim) == 1
     end
 
@@ -120,7 +125,8 @@ using Test
         spiketimes = [0.1, 0.2, 0.3]
         neurons = [1, 2, 3]
         param = SpikeTimeParameter(spiketimes, neurons)
-        stim = SpikeTimeStimulus(E, :ge; param = param)
+        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed,)
+        stim = SpikeTimeStimulus(E, :ge; param = param, conn = conn)
         shift_spikes!(stim, 0.1)
         @test stim.param.spiketimes ≈ [0.2, 0.3, 0.4]
         @test stim.next_index == [1]
@@ -132,7 +138,8 @@ using Test
         spiketimes = [0.1, 0.2, 0.3]
         neurons = [1, 2, 3]
         param = SpikeTimeParameter(spiketimes, neurons)
-        stim = SpikeTimeStimulus(E, :ge; param = param)
+        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed,)
+        stim = SpikeTimeStimulus(E, :ge; param = param, conn = conn)
         new_spiketimes = [0.4, 0.5, 0.6]
         new_neurons = [4, 5, 6]
         new_spikes = SpikeTimeParameter(new_spiketimes, new_neurons)
@@ -156,7 +163,8 @@ using Test
         spiketimes = [0.1, 0.2, 0.3]
         neurons = [1, 2, 3]
         param = SpikeTimeParameter(spiketimes, neurons)
-        stim = SpikeTimeStimulus(E, :ge; param = param)
+        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed,)
+        stim = SpikeTimeStimulus(E, :ge; param = param, conn = conn)
         model = compose(E = E, S = stim, silent = true)
         monitor!(E, [:fire, :ge])
         sim!(model; duration = 1s)

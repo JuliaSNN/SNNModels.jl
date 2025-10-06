@@ -26,9 +26,7 @@ SpikeTimeStimulusParameter
     neurons::VIT=[]
 end
 
-SpikeTimeParameter(; neurons, spiketimes) = SpikeTimeStimulusParameter(spiketimes, neurons)
-
-SpikeTimeParameter() = SpikeTimeStimulusParameter(spiketimes=Float32[],neurons= Int[])
+SpikeTimeParameter(; neurons=Int[], spiketimes=Float32[]) = SpikeTimeStimulusParameter(spiketimes, neurons)
 
 function SpikeTimeParameter(spiketimes::VFT, neurons::Vector{Int}) where {VFT<:Vector}
     @assert length(spiketimes) == length(neurons) "spiketimes and neurons must have the same length"
@@ -36,7 +34,6 @@ function SpikeTimeParameter(spiketimes::VFT, neurons::Vector{Int}) where {VFT<:V
     return SpikeTimeStimulusParameter(Float32.(spiketimes[order]), neurons[order])
 end
 
-SpikeTimeParameter(;spiketimes, neurons) = SpikeTimeParameter(spiketimes, neurons)
 
 function SpikeTimeParameter(spiketimes::Spiketimes)
     neurons = Int[]
@@ -124,32 +121,26 @@ end
 function SpikeTimeStimulus(
     post::T,
     sym::Symbol,
-    target = nothing;
-    p::R = 0.05f0,
-    μ = 1.0,
-    σ = 0.0,
-    w = nothing,
-    dist = :Normal,
-    rule = :Fixed,
+    comp = nothing;
+    conn::Connectivity,
     N = nothing,
     param::SpikeTimeStimulusParameter,
-    kwargs...,
-) where {T<:AbstractPopulation,R<:Real}
+    name::String = "SpikeTime",
+) where {T<:AbstractPopulation}
 
     # set the synaptic weight matrix
     N = isnothing(N) ? max_neuron(param) : N
-    w = sparse_matrix(;w, Npre=N, Npost=post.N, dist, μ, σ, ρ=p, rule, kwargs...)
+
+    w = sparse_matrix(N, post.N, conn)
     rowptr, colptr, I, J, index, W = dsparse(w)
 
     targets = Dict(:pre => :SpikeTimeStim, :post => post.id)
-    g, _ = synaptic_target(targets, post, sym, target)
+    g, _ = synaptic_target(targets, post, sym, comp)
 
     next_spike = zeros(Float32, 1)
     next_index = zeros(Int, 1)
     next_spike[1] = isempty(param.spiketimes) ? Inf : param.spiketimes[1]
     next_index[1] = isempty(param.spiketimes) ? -1 : 1
-
-    args = filter(k-> Symbol(k) in fieldnames(SpikeTimeStimulus), keys(kwargs)) |> x->Dict(k=>kwargs[k] for k in x)
 
     return SpikeTimeStimulus(;
         N = N,
@@ -159,12 +150,12 @@ function SpikeTimeStimulus(
         g = g,
         targets = targets,
         @symdict(rowptr, colptr, I, J, index, W)...,
-        args...,
+        name,
     )
 end
 
 """
-    SpikeTimeStimulusIdentity(post::AbstractPopulation, sym::Symbol, target; param::SpikeTimeStimulusParameter, kwargs...)
+    SpikeTimeStimulusIdentity(post::AbstractPopulation, sym::Symbol, comp::AbstractCompartment; param::SpikeTimeStimulusParameter, kwargs...)
 
 Create an identity spike time stimulus where each presynaptic neuron connects to a corresponding postsynaptic neuron.
 
@@ -187,26 +178,26 @@ This constructor creates a 1-to-1 connection between presynaptic and postsynapti
 """
 function SpikeTimeStimulusIdentity(
     post::T,
-    sym::Symbol,
-    target = nothing;
+    sym::Symbol, 
+    comp = nothing;
     param::SpikeTimeStimulusParameter,
     kwargs...,
 ) where {T<:AbstractPopulation}
-    w = LinearAlgebra.I(post.N)
-    return SpikeTimeStimulus(post, sym, target; N=post.N, w = w, param = param, kwargs...)
+    conn = LinearAlgebra.I(post.N) |> Matrix
+    return SpikeTimeStimulus(post, sym, comp; conn, N=post.N, param = param, kwargs...)
 end
 
 function Stimulus(
     param::SpikeTimeStimulusParameter,
     post::T,
     sym::Symbol,
-    target = nothing;
+    comp = nothing;
     kwargs...,
 ) where {T<:AbstractPopulation}
     return SpikeTimeStimulus(
         post,
         sym,
-        target;
+        comp;
         kwargs...,
     )
 end

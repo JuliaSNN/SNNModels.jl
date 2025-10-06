@@ -48,21 +48,22 @@ E = SNNModels.BallAndStick(N = 1, param = dend_neuron)
 
 poisson_exc = PoissonLayer(
     10.2Hz,    # Mean firing rate (Hz) 
-    p = 1.0f0,  # Probability of connecting to a neuron
-    μ = 1.0,  # Synaptic strength (nS)
     N = 1000, # Neurons in the Poisson Layer
 )
 
 poisson_inh = PoissonLayer(
     3Hz,       # Mean firing rate (Hz)
-    p = 1.0f0,   # Probability of connecting to a neuron
-    μ = 4.0,   # Synaptic strength (nS)
     N = 1000,  # Neurons in the Poisson Layer
 )
 
+    # p = 1.0f0,  # Probability of connecting to a neuron
+    # μ = 1.0,  # Synaptic strength (nS)
+    # p = 1.0f0,   # Probability of connecting to a neuron
+    # μ = 4.0,   # Synaptic strength (nS)
+
 # Create the Poisson layers for excitatory and inhibitory inputs
-stim_exc = Stimulus(poisson_exc, E, :glu, :d, name = "noiseE")
-stim_inh = Stimulus(poisson_inh, E, :gaba, :d, name = "noiseI")
+stim_exc = Stimulus(poisson_exc, E, :glu, :d,  conn=(μ=0.1, ρ=1), name = "noiseE")
+stim_inh = Stimulus(poisson_inh, E, :gaba, :d,  conn=(μ=0.1, ρ=1), name = "noiseI")
 
 model = compose(; E, stim_exc, stim_inh, silent=true)
 sim!(model, 1s)

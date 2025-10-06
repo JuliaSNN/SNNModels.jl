@@ -23,6 +23,7 @@ BalancedParameter
     β::Float32 = 0.0
     τ::Float32 = 50.0ms
     r0::Float32 = 1kHz
+    w::Float32 = 1.0
     wIE::Float32 = 1.0
     same_input::Bool = false
 end
@@ -38,7 +39,6 @@ A stimulus that generates balanced excitatory and inhibitory inputs to a postsyn
 # Fields
 - `param::BalancedStimulusParameter`: Parameters for the balanced stimulus.
 - `N::IT`: Number of neurons in the stimulus.
-- `N_pre::IT`: Number of presynaptic neurons connected to each postsynaptic
 - `neurons::VIT`: Indices of neurons in the postsynaptic population receiving the stimulus.
 - `ge::VFT`: Target excitatory conductance for each neuron.
 - `gi::VFT`: Target inhibitory conductance for each neuron.
@@ -47,10 +47,8 @@ A stimulus that generates balanced excitatory and inhibitory inputs to a postsyn
 - `I::VIT`: Row indices for sparse connectivity matrix.
 - `J::VIT`: Column indices for sparse connectivity matrix.
 - `index::VIT`: Indices for non-zero entries in sparse connectivity matrix.
-- `W::VFT`: Weights for connections in sparse connectivity matrix.
 - `r::VFT`: Firing rates for each neuron.
 - `noise::VFT`: Noise values for each neuron.
-- `fire::VBT`: Boolean array indicating if presynaptic neurons have fired.
 - `randcache::VFT`: Cache for random values used in spike generation.
 - `randcache_β::VFT`: Cache for random values used in noise generation.
 - `records::Dict`: Dictionary for recording variables during simulation.
@@ -67,23 +65,14 @@ BalancedStimulus
     id::String = randstring(12)
     param::BalancedParameter
     name::String = "Balanced"
-    N::IT = 100
-    N_pre::IT = 5
-    neurons::VIT
     ##
+    N::IT
     ge::VFT # target conductance for exc
     gi::VFT # target conductance for inh
-    colptr::VIT
-    rowptr::VIT
-    I::VIT
-    J::VIT
-    index::VIT
+    fire::VBT = zeros(Bool, 0)
     r::VFT
     noise::VFT
-    W::VFT
-    fire::VBT = zeros(Bool, N_pre)
-    ##
-    randcache::VFT = rand(N_pre) # random cache
+    # sparse connectivity
     randcache_β::VFT = rand(N) # random cache
     records::Dict = Dict()
     targets::Dict = Dict()
@@ -97,13 +86,8 @@ Constructs a BalancedStimulus object for a spiking neural network.
 
 # Arguments
 - `post::T`: The target population for the stimulus.
-- `sym::Symbol`: The symbol representing the synaptic conductance or current.
-- `r::Union{Function, Float32}`: The firing rate of the stimulus. Can be a constant value or a function of time.
-- `neurons=[]`: The indices of the neuronsin the target population that receive the stimulus. If empty, neuronsare randomly selected based on the probability `p_post`.
-- `N::Int=200`: The number of Balanced neurons neurons.
-- `N_pre::Int=5`: The number of presynaptic connected.
-- `p_post::R=0.05f0`: The probability of connection between presynaptic and postsynaptic neurons.
-- `μ::R=1.f0`: The scaling factor for the synaptic weights.
+- `sym_e::Symbol`: The symbol representing the excitatory synaptic conductance or current.
+- `sym_i::Symbol`: The symbol representing the inhibitory synaptic conductance or current.
 - `param=BalancedParameter()`: The parameters for the Balanced distribution.
 
 # Returns
@@ -114,17 +98,11 @@ function BalancedStimulus(
     sym_e::Symbol,
     sym_i::Symbol,
     target = nothing;
-    neurons = :ALL,
-    μ = 1.0f0,
     param::Union{BalancedParameter,R},
-    kwargs...,
+    name::String = "Balanced",
 ) where {T<:AbstractPopulation,R<:Real}
 
-    neurons = neurons == :ALL ? (1:post.N) : neurons
-    w = zeros(Float32, length(neurons), length(neurons))
-    w = μ * sparse(w)
-    rowptr, colptr, I, J, index, W = dsparse(w)
-
+    N = post.N
     targets = Dict(:pre => :BalancedStim, :post => post.id)
     ge, _ = synaptic_target(targets, post, sym_e, target)
     gi, _ = synaptic_target(targets, post, sym_i, target)
@@ -137,20 +115,15 @@ function BalancedStimulus(
     r = ones(Float32, post.N) * param.r0
     noise = zeros(Float32, post.N)
 
-    N_pre = ceil(Int, param.r0 * maximum([1, param.β / 100]))
-
     return BalancedStimulus(;
         param = param,
-        N = length(neurons),
-        N_pre = N_pre,
-        neurons = neurons,
-        targets = targets,
-        r = r,
+        N,
+        targets,
+        r,
         noise = noise,
         ge = ge,
         gi = gi,
-        @symdict(rowptr, colptr, I, J, index, W)...,
-        kwargs...,
+        name = name,
     )
 end
 
@@ -171,22 +144,17 @@ function stimulate!(
     time::Time,
     dt::Float32,
 )
-    @unpack N, N_pre, randcache, randcache_β, fire, neurons, colptr, W, I, ge, gi = p
+    @unpack N, randcache_β, ge, gi = p
 
     ## Inhomogeneous Poisson process
-    @unpack r0, β, τ, kIE, wIE, same_input = param
+    @unpack r0, β, τ, w, kIE, wIE, same_input = param
     @unpack noise, r = p
-    # Irate::Float32 = r0 * kIE
     R(x::Float32, v0::Float32 = 0.0f0) = x > 0.0f0 ? x : v0
 
     # Inhibitory spike
-    rand!(randcache)
-    for i = 1:N
-        @simd for j = 1:N_pre # loop on presynaptic neurons
-            if randcache[j] < r0 * kIE / N_pre * dt
-                gi[i] += 1 * wIE
-            end
-        end
+    my_rate = Distributions.Poisson{Float32}(r0 * kIE * dt)
+    @fastmath @simd for n in 1:N
+        gi[n] += w * rand(my_rate) * wIE
     end
 
     # Excitatory spike
@@ -194,7 +162,6 @@ function stimulate!(
     cc::Float32 = 0.0f0
     Erate::Float32 = 0.0f0
     rand!(randcache_β)
-    rand!(randcache)
     if same_input
         i = 1
         re = randcache_β[i] - 0.5f0
@@ -203,13 +170,10 @@ function stimulate!(
         Erate = R(r0 ./ 2 * R(noise[i] * β, 1.0f0) + r[i], 0.0f0)
         r[i] += (r0 - Erate) / 400ms * dt
         @assert Erate >= 0
-        @inbounds @fastmath for i = 1:N
-            rand!(randcache)
-            @simd for j = 1:N_pre # loop on presynaptic neurons
-                if randcache[j] < Erate / N_pre * dt
-                    ge[i] += 1.0
-                end
-            end
+
+        my_rate = Distributions.Poisson{Float32}(Erate * dt)
+        @fastmath @simd for n in 1:N
+            ge[i] += w * rand(my_rate)
         end
     else
         @inbounds @fastmath for i = 1:N
@@ -220,10 +184,9 @@ function stimulate!(
             r[i] += (r0 - Erate) / 400ms * dt
             @assert Erate >= 0
             rand!(randcache)
-            @simd for j = 1:N_pre # loop on presynaptic neurons
-                if randcache[j] < Erate / N_pre * dt
-                    ge[i] += 1.0
-                end
+            my_rate = Distributions.Poisson{Float32}(Erate * dt)
+            @fastmath @simd for n in 1:N
+                ge[i] += w * rand(my_rate)
             end
         end
     end

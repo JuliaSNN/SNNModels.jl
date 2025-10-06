@@ -75,17 +75,16 @@ end
 end
 
 
-function Stimulus(
-    param::PoissonStimulusParameter,
+function PoissonStimulus(
     post::T,
-    sym::Symbol,
-    target = nothing;
+    sym::Symbol;
+    param::PoissonStimulusParameter,
     neurons = :ALL,
-    μ = 1.0f0,
+    comp = nothing,
     kwargs...,
 ) where {T<:AbstractPopulation}
     targets = Dict(:pre => :PoissonStim, :post => post.id)
-    g, _ = synaptic_target(targets, post, sym, target)
+    g, _ = synaptic_target(targets, post, sym, comp)
     neurons = neurons == :ALL ? eachindex(1:post.N) : neurons
 
     # Construct the SpikingSynapse instance
@@ -96,6 +95,15 @@ function Stimulus(
         g = g,
         kwargs...,
     )
+end
+
+function Stimulus(
+    param::PoissonStimulusParameter,
+    post::T,
+    sym::Symbol;
+    kwargs...,
+) where {T<:AbstractPopulation}
+    return PoissonStimulus(post, sym; param, kwargs...)
 end
 
 
@@ -129,10 +137,8 @@ function stimulate!(
     @unpack μ = param
     @unpack neurons, g = p
     my_rate = Distributions.Poisson{Float32}(get_poisson_rate(param, time) * dt)
-    for _ in 1:rand(my_rate)
-        @fastmath @simd for n in neurons
-            g[n] += μ 
-        end
+    @fastmath @simd for n in neurons
+        g[n] += μ * rand(my_rate)
     end
 end
 
