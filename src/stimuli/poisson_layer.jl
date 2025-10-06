@@ -23,7 +23,7 @@ end
 function PoissonLayer(rate::R; kwargs...) where {R<:Real}
     N = kwargs[:N]
     rates = fill(Float32.(rate), N)
-    return PoissonLayer(; N=N, kwargs..., rate = rate, rates = rates)
+    return PoissonLayer(; N=N, rate = rate, rates = rates)
 end
 
 @snn_kw struct PoissonStimulusLayer{

@@ -31,7 +31,7 @@ end
 name::String = "AdEx"
     id::String = randstring(12)
 
-    param::GIFT 
+    param::GIFT  = AdExParameter()
     synapse::SYNT = DoubleExpSynapse()
 
     N::Int32 = 100 # Number of neurons

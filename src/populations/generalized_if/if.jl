@@ -21,7 +21,7 @@ end
     SYNT<:AbstractSynapseParameter
 } <: AbstractGeneralizedIF
 
-    param::GIFT
+    param::GIFT = IFParameter()
     synapse::SYNT = DoubleExpSynapse()
     id::String = randstring(12)
     name::String = "IF"
