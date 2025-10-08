@@ -25,8 +25,12 @@ The type `FT` represents Float32.
 PostSpike
 
 @snn_kw struct PostSpike{FT<:Float32}
-    A::FT
-    τA::FT
+    ## Dynamic spike threshold
+    At::FT = 0mV
+    τA::FT = -1mV
+    AP_membrane::FT = 10.0f0mV
+    τabs::FT = 1ms # Absolute refractory period
+    up::FT = 1ms
 end
 
 export PostSpike

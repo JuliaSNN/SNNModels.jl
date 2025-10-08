@@ -17,6 +17,7 @@ end
     include("pop/iz_neuron.jl")
     include("pop/spiketime.jl")
     include("pop/ballandstick.jl")
+    include("pop/tripod.jl")
     include("pop/dendrite.jl")
 end
 

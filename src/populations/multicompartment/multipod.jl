@@ -134,7 +134,7 @@ end
 function integrate!(p::Multipod, param::AdExSoma, dt::Float32)
     @unpack N, Nd, v_s, w_s, v_d = p
     @unpack fire, θ, after_spike, postspike, Δv, Δv_temp = p
-    @unpack Er, up, τabs, BAP, AP_membrane, Vr, Vt, τw, a, b = param
+    @unpack El, up, τabs, BAP, AP_membrane, Vr, Vt, τw, a, b = param
     @unpack gax, cd, gm = p
     @unpack dend_syn, soma_syn = p
 
@@ -164,7 +164,7 @@ function integrate!(p::Multipod, param::AdExSoma, dt::Float32)
             end
             update_multipod!(p, Δv, i, param, dt)
             @fastmath v_s[i] += 0.5 * dt * (Δv_temp[1] + Δv[1])
-            @fastmath w_s[i] += dt * (param.a * (v_s[i] - param.Er) - w_s[i]) / param.τw
+            @fastmath w_s[i] += dt * (param.a * (v_s[i] - param.El) - w_s[i]) / param.τw
             for d in eachindex(v_d)
                 @fastmath v_d[d][i] += 0.5 * dt * (Δv_temp[d+1] + Δv[d+1])
             end
@@ -293,18 +293,18 @@ function update_multipod!(
         end
 
         # update membrane potential
-        @unpack C, gl, Er, ΔT = param
+        @unpack C, gl, El, ΔT = param
         Δv[1] =
             (
                 gl * (
-                    (-v_s[i] + Δv[1] * dt + Er) +
+                    (-v_s[i] + Δv[1] * dt + El) +
                     ΔT * exp64(1 / ΔT * (v_s[i] + Δv[1] * dt - θ[i]))
                 ) - w_s[i] - is[1] - sum(cs)
             ) / C
 
         for d in eachindex(v_d)
             Δv[d+1] =
-                ((-(v_d[d][i] + Δv[d+1] * dt) + Er) * gm[d, i] - is[d+1] + cs[d]) / cd[d, i]
+                ((-(v_d[d][i] + Δv[d+1] * dt) + El) * gm[d, i] - is[d+1] + cs[d]) / cd[d, i]
         end
     end
 end
@@ -314,7 +314,7 @@ export Multipod, MultipodNeurons
 # @inline @fastmath function ΔvAdEx(v::Float32, w::Float32, θ::Float32, axial::Float32, synaptic::Float32, AdEx::AdExSoma)::Float32
 #     return 1/ AdEx.C * (
 #         AdEx.gl * (
-#                 (-v + AdEx.Er) + 
+#                 (-v + AdEx.El) + 
 #                 AdEx.ΔT * exp64(1 / AdEx.ΔT * (v - θ))
 #                 ) 
 #                 - w 

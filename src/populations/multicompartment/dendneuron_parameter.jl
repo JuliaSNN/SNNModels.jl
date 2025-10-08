@@ -8,7 +8,7 @@ A parameter struct for the Tripod neuron model, implementing an Adaptive Exponen
 - `gl::FT`: Leak conductance (default: 40nS)
 - `R::FT`: Total membrane resistance (default: nS/gl * GΩ)
 - `τm::FT`: Membrane time constant (default: C/gl)
-- `Er::FT`: Resting potential (default: -70.6mV)
+- `El::FT`: Resting potential (default: -70.6mV)
 - `Vr::FT`: Reset potential (default: -55.6mV)
 - `Vt::FT`: Rheobase threshold (default: -50.4mV)
 - `ΔT::FT`: Slope factor (default: 2mV)
@@ -58,29 +58,23 @@ DendLength = Union{Float32,Tuple}
     PST = PostSpike{Float32},
     PT = Physiology,
 } <: AbstractGeneralizedIFParameter
-    #Membrane parameters
-    C::FT = 281pF           # (pF) membrane timescale
-    gl::FT = 40nS                # (nS) gl is the leaking conductance,opposite of Rm
-    R::FT = nS / gl * GΩ               # (GΩ) total membrane resistance
-    τm::FT = C / gl                # (ms) C / gl
-    Er::FT = -70.6mV          # (mV) resting potential
-
     # AdEx model
-    Vr::FT = -55.6mV     # (mV) Reset potential of membrane
-    Vt::FT = -50.4mV          # (mv) Rheobase threshold
-    ΔT::FT = 2mV            # (mV) Threshold sharpness
-
-    # Adaptation parameters
-    τw::FT = 144ms          #ms adaptation current relaxing time
-    a::FT = 4nS            #nS adaptation current to membrane
-    b::FT = 80.5pA         #pA adaptation current increase due to spike
+    adex::AdExParameter = AdExParameter(
+            C = 281pF,
+            gl  = 40nS,
+            R = 0.025GΩ,
+            τm  = 7ms,
+            El  = -70.6mV,     
+            Vr  = -55.6mV,
+            Vt  = -50.4mV,
+            ΔT  = 2mV,
+            τw  = 144ms,
+            a = 4nS,
+            b = 80.5pA,
+    )
 
     # After spike timescales and membrane
-    AP_membrane::FT = 10.0f0mV
-    BAP::FT = 1.0f0mV
-    up::FT = 1ms
-    τabs::FT = 2ms
-    postspike::PST = PostSpike(A = 10, τA = 30ms)
+    spike::PST = PostSpike(At = 10, τA = 30ms)
 
     ## Dend parameters
     ds::DT # = [200um , (200um, 400um)] ## Dendritic segment lengths
@@ -107,34 +101,36 @@ function MulticompartmentNeuron(;
         mg = 1.0f0,  # NMDA voltage dependency parameter
     ),
     # After spike timescales and membrane
-    adex_param = (
+    adex = (
         C = 281pF,  # membrane capacitance
         gl = 40nS,  # leak conductance
-        R = (1 / 40)GΩ,  # membrane resistance
         τm = 281pF / 40nS,  # membrane time constant
-        Er = -70.6mV,  # reset potential
-        Vr = -55.6mV,  # resting potential
         Vt = -50.4mV,  # threshold potential
+        Vr = -55.6mV,  # resting potential
+        El = -70.6mV,  # reset potential
+        R = (1 / 40)GΩ,  # membrane resistance
+
         ΔT = 2mV,  # slope factor
         τw = 144ms,  # adaptation time constant
         a = 4nS,  # subthreshold adaptation conductance
         b = 80.5pA,  # spike-triggered adaptation current
-        AP_membrane = 2.0f0mV,  # action potential membrane potential
-        BAP = 1.0f0mV,  # burst afterpotential
-        up = 1ms,  # refractory period
         τabs = 2ms,  # absolute refractory period
     ),
+
+
     dend_syn::SynapseArray = Synapse(EyalGluDend, MilesGabaDend), # defines glutamaterbic and gabaergic receptors in the dendrites
     soma_syn::SynapseArray = Synapse(DuarteGluSoma, MilesGabaSoma),  # connect EyalGluDend to MilesGabaDend
-    postspike = PostSpike(A = 10.0, τA = 30.0), # post-spike adaptation
+    postspike=PostSpike(),
 )
     param = DendNeuronParameter(;
-        adex_param...,
+        adex,
+        postspike,
         ds = dend,
         soma_syn = soma_syn,
         dend_syn = dend_syn,
         NMDA = NMDA,
     )
+
     if length(dend) == 2
         return Tripod(
             N = N,

@@ -1,5 +1,46 @@
 
-# Tripod
+
+"""
+    Tripod
+
+A neuron model with a soma and two dendrites, implementing the Adaptive Exponential Integrate-and-Fire (AdEx) dynamics.
+The model includes synaptic conductances for both soma and dendrites, and supports NMDA voltage-dependent synapses.
+
+# Fields
+- `id::String`: Unique identifier for the neuron (default: random 12-character string)
+- `name::String`: Name of the neuron (default: "Tripod")
+- `N::IT`: Number of neurons in the population (default: 100)
+- `param::DendNeuronParameter`: Parameters for the neuron model (default: `TripodParameter`)
+- `d1::VDT`: First dendrite structure
+- `d2::VDT`: Second dendrite structure
+- `v_s::VFT`: Soma membrane potential (initialized randomly between Vt and Vr)
+- `w_s::VFT`: Adaptation current for soma (initialized to zeros)
+- `v_d1::VFT`: First dendrite membrane potential (initialized randomly between Vt and Vr)
+- `v_d2::VFT`: Second dendrite membrane potential (initialized randomly between Vt and Vr)
+- `I::VFT`: External current to soma (initialized to zeros)
+- `I_d::VFT`: External current to dendrites (initialized to zeros)
+- `g_d1::MFT`: Conductance for first dendrite synapses (initialized to zeros)
+- `g_d2::MFT`: Conductance for second dendrite synapses (initialized to zeros)
+- `h_d1::MFT`: Synaptic gating variable for first dendrite (initialized to zeros)
+- `h_d2::MFT`: Synaptic gating variable for second dendrite (initialized to zeros)
+- `g_s::MFT`: Conductance for soma synapses (initialized to zeros)
+- `h_s::MFT`: Synaptic gating variable for soma (initialized to zeros)
+- `glu_d1::VFT`: Glutamate synaptic input to first dendrite (initialized to zeros)
+- `gaba_d1::VFT`: GABA synaptic input to first dendrite (initialized to zeros)
+- `glu_d2::VFT`: Glutamate synaptic input to second dendrite (initialized to zeros)
+- `gaba_d2::VFT`: GABA synaptic input to second dendrite (initialized to zeros)
+- `glu_s::VFT`: Glutamate synaptic input to soma (initialized to zeros)
+- `gaba_s::VFT`: GABA synaptic input to soma (initialized to zeros)
+- `fire::VBT`: Boolean vector indicating which neurons fired (initialized to false)
+- `after_spike::VFT`: Counter for refractory period (initialized to zeros)
+- `θ::VFT`: Threshold potential (initialized to Vt)
+- `records::Dict`: Dictionary for storing simulation data (initialized empty)
+- `Δv::VFT`: Temporary voltage change vector (initialized to zeros)
+- `Δv_temp::VFT`: Temporary voltage change vector (initialized to zeros)
+- `cs::VFT`: Axial current vector (initialized to zeros)
+- `is::VFT`: Synaptic current vector (initialized to zeros)
+"""
+Tripod
 @snn_kw struct Tripod{
     MFT = Matrix{Float32},
     VIT = Vector{Int32},
@@ -22,10 +63,10 @@
     d2::VDT = create_dendrite(N, param.ds[2])
 
     # Membrane potential and adaptation
-    v_s::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
+    v_s::VFT = rand_value(N, param.adex.Vt, param.adex.Vr)
     w_s::VFT = zeros(N)
-    v_d1::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
-    v_d2::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
+    v_d1::VFT = rand_value(N, param.adex.Vt, param.adex.Vr)
+    v_d2::VFT = rand_value(N, param.adex.Vt, param.adex.Vr)
     I::VFT = zeros(N)
     I_d::VFT = zeros(N)
 
@@ -48,7 +89,7 @@
     # Spike model and threshold
     fire::VBT = zeros(Bool, N)
     after_spike::VFT = zeros(Int, N)
-    θ::VFT = ones(N) * param.Vt
+    θ::VFT = ones(N) * param.adex.Vt
     records::Dict = Dict()
     Δv::VFT = zeros(3)
     Δv_temp::VFT = zeros(3)
@@ -73,7 +114,9 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     @fastmath @inbounds begin
         @unpack N, v_s, w_s, v_d1, v_d2 = p
         @unpack fire, θ, after_spike, Δv, Δv_temp = p
-        @unpack Er, up, τabs, BAP, AP_membrane, Vr, Vt, τw, a, b = param
+        @unpack spike, adex = param
+        @unpack El, Vr, Vt, τw, a, b = adex
+        @unpack AP_membrane, up, τabs, At, τA  = spike 
         @unpack d1, d2 = p
         @unpack soma_syn, dend_syn = param
         @unpack N, g_d1, g_d2, h_d1, h_d2, g_s, h_s = p
@@ -114,11 +157,11 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
                 v_s[i] += 0.5 * dt * (Δv_temp[1] + Δv[1])
                 v_d1[i] += 0.5 * dt * (Δv_temp[2] + Δv[2])
                 v_d2[i] += 0.5 * dt * (Δv_temp[3] + Δv[3])
-                w_s[i] += dt * (param.a * (v_s[i] - param.Er) - w_s[i]) / param.τw
+                w_s[i] += dt * (a * (v_s[i] - El) - w_s[i]) / τw
             end
         end
         # reset firing
-        @unpack A, τA = param.postspike
+        @unpack At, τA = param.spike
         fire .= false
         @inbounds for i ∈ 1:N
             θ[i] -= dt * (θ[i] - Vt) / τA
@@ -127,7 +170,7 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
                 ## spike ?
                 if v_s[i] > θ[i] + 10.0f0
                     fire[i] = true
-                    θ[i] += A
+                    θ[i] += At
                     v_s[i] = AP_membrane
                     w_s[i] += b ##  *τw
                     after_spike[i] = (up + τabs) / dt
@@ -193,10 +236,10 @@ end
         # end
 
         # update membrane potential
-        @unpack C, gl, Er, ΔT = param
+        @unpack C, gl, El, ΔT = param.adex
         Δv[1] =
             1/C * (
-                + gl * (-v_s[i] + Δv[1] * dt + Er) +
+                + gl * (-v_s[i] + Δv[1] * dt + El) +
                 ΔT * exp64(1 / ΔT * (v_s[i] + Δv[1] * dt - θ[i])) - w_s[i]  # adaptation
                 - is[1]   # synapses
                 - sum(cs) # axial currents
@@ -204,9 +247,9 @@ end
             )
 
         Δv[2] =
-            ((-(v_d1[i] + Δv[2] * dt) + Er) * d1.gm[i] - is[2] + cs[1] + I_d[i]) / d1.C[i]
+            ((-(v_d1[i] + Δv[2] * dt) + El) * d1.gm[i] - is[2] + cs[1] + I_d[i]) / d1.C[i]
         Δv[3] =
-            ((-(v_d2[i] + Δv[3] * dt) + Er) * d2.gm[i] - is[3] + cs[2] + I_d[i]) / d2.C[i]
+            ((-(v_d2[i] + Δv[3] * dt) + El) * d2.gm[i] - is[3] + cs[2] + I_d[i]) / d2.C[i]
     end
 end
 

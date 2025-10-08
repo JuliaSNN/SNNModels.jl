@@ -1,16 +1,15 @@
 @snn_kw struct IFParameter{FT = Float32} <: AbstractGeneralizedIFParameter
     C::FT = 281pF        #(pF)
-    gL::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
+    gl::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
     τm::FT = 20ms
     Vt::FT = -50mV # Membrane threshold potential
     Vr::FT = -60mV # Membrane reset potential
     El::FT = -70mV    # Membrane leak potential
-    R::FT = nS / gL # Resistance
+    R::FT = nS / gl # Resistance
     ΔT::FT = 2mV # Slope factor
     a::FT = 0.0 # Subthreshold adaptation parameter
     b::FT = 0.0 #80.5pA # 'sra' current increment
     τw::FT = 0.0 #144ms # adaptation time constant (~Ca-activated K current inactivation)
-    τabs::FT = 2ms # Absolute refractory period
 end
 
 
@@ -23,6 +22,8 @@ end
 
     param::GIFT = IFParameter()
     synapse::SYNT = DoubleExpSynapse()
+    spike::PostSpike = PostSpike()
+
     id::String = randstring(12)
     name::String = "IF"
     N::Int32 = 100
@@ -41,8 +42,8 @@ end
     Δv_temp::VFT = zeros(Float32, N)
 end
 
-function Population(param::IFParameter, synapse::AbstractSynapseParameter; N, kwargs...)
-    return IF(;N, param, synapse, kwargs...)
+function Population(param::IFParameter; synapse::AbstractSynapseParameter, spike::PostSpike, N, kwargs...)
+    return IF(;N, param, synapse, spike, kwargs...)
 end
 
 """
@@ -56,7 +57,8 @@ function update_neuron!(
     dt::Float32,
 ) where {T<:AbstractGeneralizedIFParameter}
     @unpack N, v, w, I, tabs, fire, syn_curr = p
-    @unpack τm, El, R, Vt, Vr, τabs = param
+    @unpack τm, El, R, Vt, Vr= param
+    @unpack τabs = p.spike
 
     # @inbounds 
     for i = 1:N
