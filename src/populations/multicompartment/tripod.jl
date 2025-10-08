@@ -50,7 +50,7 @@ Tripod
     VDT = Dendrite{Vector{Float32}},
     IT = Int32,
     FT = Float32,
-    ST = SynapseArray,
+    ST = ReceptorArray,
     NMDAT = NMDAVoltageDependency{Float32},
     PST = PostSpike{Float32},
 } <: AbstractDendriteIF
@@ -123,9 +123,9 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
         @unpack glu_d1, glu_d2, glu_s, gaba_d1, gaba_d2, gaba_s = p
 
         # Update all synaptic conductance
-        update_synapses!(p, param, soma_syn, glu_s, gaba_s, g_s, h_s, dt)
-        update_synapses!(p, param, dend_syn, glu_d1, gaba_d1, g_d1, h_d1, dt)
-        update_synapses!(p, param, dend_syn, glu_d2, gaba_d2, g_d2, h_d2, dt)
+        update_synapses!(p, soma_syn, glu_s, gaba_s, g_s, h_s, dt)
+        update_synapses!(p, dend_syn, glu_d1, gaba_d1, g_d1, h_d1, dt)
+        update_synapses!(p, dend_syn, glu_d2, gaba_d2, g_d2, h_d2, dt)
         for i ∈ 1:N
             # implementation of the absolute refractory period with backpropagation (up) and after spike (τabs)
             if after_spike[i] > (τabs + up - up) / dt # backpropagation
@@ -194,46 +194,16 @@ end
         @unpack g_d1, g_d2, g_s = p
         @unpack d1, d2 = p
         @unpack is, cs = p
-        @unpack soma_syn, dend_syn, NMDA, glu_receptors, gaba_receptors = param
-        @unpack mg, b, k = NMDA
+        @unpack soma_syn, dend_syn = param
 
 
         #compute axial currents
         cs[1] = -((v_d1[i] + Δv[2] * dt) - (v_s[i] + Δv[1] * dt)) * d1.gax[i]
         cs[2] = -((v_d2[i] + Δv[3] * dt) - (v_s[i] + Δv[1] * dt)) * d2.gax[i]
 
-        synaptic_current!(param, soma_syn, v_s[i] + Δv[1] * dt, g_s, is, 1, i)
-        synaptic_current!(param, dend_syn, v_d1[i] + Δv[2] * dt, g_d1, is, 2, i)
-        synaptic_current!(param, dend_syn, v_d2[i] + Δv[3] * dt, g_d2, is, 3, i)
-
-        ## update synaptic currents soma
-
-        # ## update synaptic currents soma
-        # fill!(is,0.f0)
-        # for r in eachindex(soma_syn)
-        #     @unpack gsyn, E_rev, nmda = soma_syn[r]
-        #     if nmda > 0.0f0
-        #         is[1] +=
-        #             gsyn * g_s[i, r] * (v_s[i] + Δv[1] * dt - E_rev) /
-        #             (1.0f0 + (mg / b) * exp256(k * (v_d1[i] + Δv[2] * dt)))
-        #     else
-        #         is[1] += gsyn * g_s[i, r] * (v_s[i] + Δv[1] * dt - E_rev)
-        #     end
-        # end
-        # for r in eachindex(dend_syn)
-        #     @unpack gsyn, E_rev, nmda = dend_syn[r]
-        #     if nmda > 0.0f0
-        #         is[2] +=
-        #             gsyn * g_d1[i, r] * (v_d1[i] + Δv[2] * dt - E_rev) /
-        #             (1.0f0 + (mg / b) * exp256(k * (v_d1[i] + Δv[2] * dt)))
-        #         is[3] +=
-        #             gsyn * g_d2[i, r] * (v_d2[i] + Δv[3] * dt - E_rev) /
-        #             (1.0f0 + (mg / b) * exp256(k * (v_d2[i] + Δv[2] * dt)))
-        #     else
-        #         is[2] += gsyn * g_d1[i, r] * (v_d1[i] + Δv[2] * dt - E_rev)
-        #         is[3] += gsyn * g_d2[i, r] * (v_d2[i] + Δv[3] * dt - E_rev)
-        #     end
-        # end
+        synaptic_current!(soma_syn, v_s[i] + Δv[1] * dt, g_s, is, 1, i)
+        synaptic_current!(dend_syn, v_d1[i] + Δv[2] * dt, g_d1, is, 2, i)
+        synaptic_current!(dend_syn, v_d2[i] + Δv[3] * dt, g_d2, is, 3, i)
 
         # update membrane potential
         @unpack C, gl, El, ΔT = param.adex

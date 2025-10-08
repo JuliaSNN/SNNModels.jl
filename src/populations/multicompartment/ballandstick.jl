@@ -32,7 +32,7 @@ BallAndStick
     VDT = Dendrite{Vector{Float32}},
     IT = Int32,
     FT = Float32,
-    ST = SynapseArray,
+    ST = ReceptorArray,
 } <: AbstractDendriteIF     ## These are compulsory parameters
     name::String = "BallAndStick"
     id::String = randstring(12)
@@ -86,15 +86,15 @@ end
 function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
     @unpack N, v_s, w_s, v_d = p
     @unpack fire, θ, after_spike, Δv, Δv_temp = p
-    @unpack adex, spike, NMDA, soma_syn, dend_syn = param
+    @unpack adex, spike, soma_syn, dend_syn = param
     @unpack El, Vr, Vt, τw, a, b = adex
     @unpack AP_membrane, up, τabs, At, τA  = spike 
     @unpack d = p
     @unpack N, g_s, g_d, h_s, h_d = p
     @unpack glu_d, glu_s, gaba_d, gaba_s = p
 
-    update_synapses!(p, param, soma_syn, glu_s, gaba_s, g_s, h_s, dt)
-    update_synapses!(p, param, dend_syn, glu_d, gaba_d, g_d, h_d, dt)
+    update_synapses!(p, soma_syn, glu_s, gaba_s, g_s, h_s, dt)
+    update_synapses!(p, dend_syn, glu_d, gaba_d, g_d, h_d, dt)
     # update the neurons
     @inbounds for i ∈ 1:N
         if after_spike[i] > τabs
@@ -152,7 +152,7 @@ function update_ballandstick!(
     param::DendNeuronParameter,
     dt::Float32,
 )
-    @unpack NMDA, soma_syn, dend_syn = param
+    @unpack soma_syn, dend_syn = param
     @fastmath @inbounds begin
         @unpack v_d, v_s, w_s, g_s, g_d, θ, d, Is, Id = p
         @unpack is, cs = p
@@ -160,8 +160,8 @@ function update_ballandstick!(
         #compute axial currents
         cs[1] = -((v_d[i] + Δv[2] * dt) - (v_s[i] + Δv[1] * dt)) * d.gax[i]
 
-        synaptic_current!(param, soma_syn, v_s[i] + Δv[1] * dt, g_s, is, 1, i)
-        synaptic_current!(param, dend_syn, v_d[i] + Δv[2] * dt, g_d, is, 2, i)
+        synaptic_current!(soma_syn, v_s[i] + Δv[1] * dt, g_s, is, 1, i)
+        synaptic_current!(dend_syn, v_d[i] + Δv[2] * dt, g_d, is, 2, i)
 
         # update membrane potential
         @unpack C, gl, El, ΔT = param.adex

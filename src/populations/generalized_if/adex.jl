@@ -50,8 +50,8 @@ name::String = "AdEx"
     # Glu/Gaba conductance
     g::MFT = synapse isa AbstractReceptorParameter ? zeros(N, 4) : zeros(0, 0)
     h::MFT = synapse isa AbstractReceptorParameter ? zeros(N, 4) : zeros(0, 0)
-    glu::VFT = zeros(N)
-    gaba::VFT = zeros(N)
+    glu::VFT = synapse isa AbstractReceptorParameter ? zeros(N) : zeros(0)
+    gaba::VFT = synapse isa AbstractReceptorParameter ? zeros(N) : zeros(0)
 
     records::Dict = Dict()
 end

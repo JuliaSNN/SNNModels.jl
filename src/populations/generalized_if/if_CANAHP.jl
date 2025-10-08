@@ -3,7 +3,7 @@
 @snn_kw struct IF_CANAHPParameter{
     FT = Float32,
     VIT = Vector{Int},
-    ST = SynapseArray,
+    ST = ReceptorArray,
     NMDAT = NMDAVoltageDependency{Float32},
     VFT = Vector{Float32},
 } <: AbstractIFParameter

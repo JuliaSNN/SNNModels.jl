@@ -34,8 +34,8 @@ abstract type AbstractStimulusParameter <: AbstractParameter end
 An abstract type representing a connection. Any struct inheriting from this type must implement:
 
 # Methods
-- `forward!(c::Synapse, param::SynapseParameter)`: Propagates the signal through the synapse.
-- `plasticity!(c::Synapse, param::SynapseParameter, dt::Float32, T::Time)`: Updates the synapse parameters based on plasticity rules.
+- `forward!(c::Receptors, param::SynapseParameter)`: Propagates the signal through the synapse.
+- `plasticity!(c::Receptors, param::SynapseParameter, dt::Float32, T::Time)`: Updates the synapse parameters based on plasticity rules.
 """
 abstract type AbstractConnection <: AbstractComponent  end
 
@@ -170,13 +170,13 @@ end
 
 function validate_synapse_model(model)
     # Validate the synapse model structure and types
-    @assert typeof(model) <: AbstractConnection "Synapse $(model.name) must inherit from AbstractConnection"
-    @assert typeof(model.param) <: AbstractConnectionParameter "Synapse $(model.name) must inherit from AbstractConnectionParameter"
+    @assert typeof(model) <: AbstractConnection "Receptors $(model.name) must inherit from AbstractConnection"
+    @assert typeof(model.param) <: AbstractConnectionParameter "Receptors $(model.name) must inherit from AbstractConnectionParameter"
 
     # Validate required fields
     required_fields = [:param, :id, :name, :records]
     for field in required_fields
-        @assert hasproperty(model, field) "Synapse  $(model.name) must have a field $(field)"
+        @assert hasproperty(model, field) "Receptors  $(model.name) must have a field $(field)"
     end
 end
 

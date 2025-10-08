@@ -8,7 +8,7 @@
     VFT = Vector{Float32}, ## Float type
     VST = Vector{Vector{Float32}}, ## Synapses types 
     VDT = Vector{Dendrite},
-    ST = SynapseArray,
+    ST = ReceptorArray,
     NMDAT = NMDAVoltageDependency{Float32},
     PST = PostSpike{Float32},
     IT = Int32,
@@ -196,8 +196,8 @@ end
 
 function update_synapses!(
     p::Multipod,
-    dend_syn::SynapseArray,
-    soma_syn::SynapseArray,
+    dend_syn::ReceptorArray,
+    soma_syn::ReceptorArray,
     dt::Float32,
 )
     @unpack N, Nd, ge_s, g_d, he_s, v_d, h_d, hi_s, gi_s = p

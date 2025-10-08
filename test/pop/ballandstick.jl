@@ -1,22 +1,34 @@
 E =let
-    SomaSynapse = Synapse(
-        AMPA = Receptor(E_rev = 0.0, τr = 0.26, τd = 2.0, g0 = 0.73),
-        GABAa = Receptor(E_rev = -70.0, τr = 0.1, τd = 15.0, g0 = 0.38),
-    )
-
-    DendSynapse = Synapse(
-        AMPA = Receptor(E_rev = 0.0, τr = 0.26, τd = 2.0, g0 = 0.73),
-        NMDA = Receptor(E_rev = 0.0, τr = 8, τd = 35.0, g0 = 1.31, nmda = 1.0f0),
-        GABAa = Receptor(E_rev = -70.0, τr = 4.8, τd = 29.0, g0 = 0.27),
-        GABAb = Receptor(E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.0006),
-    )
-
     NMDA = let
         Mg_mM = 1.0mM
         nmda_b = 3.36   # voltage dependence of nmda channels
         nmda_k = -0.077     # Eyal 2018
         NMDAVoltageDependency(mg = Mg_mM/mM, b = nmda_b, k = nmda_k)
     end
+
+    SomaSynapse = 
+        ReceptorSynapse(
+            glu_receptors = [1],
+            gaba_receptors = [2],
+            syn = Receptors(
+                AMPA = Receptor(E_rev = 0.0, τr = 0.26, τd = 2.0, g0 = 0.73),
+                GABAa = Receptor(E_rev = -70.0, τr = 0.1, τd = 15.0, g0 = 0.38),
+            )
+        )
+
+
+    DendSynapse = 
+        ReceptorSynapse(
+            glu_receptors = [1, 2],
+            gaba_receptors = [3, 4],
+            syn = Receptors(
+                AMPA = Receptor(E_rev = 0.0, τr = 0.26, τd = 2.0, g0 = 0.73),
+                NMDA = Receptor(E_rev = 0.0, τr = 8, τd = 35.0, g0 = 1.31, nmda = 1.0f0),
+                GABAa = Receptor(E_rev = -70.0, τr = 4.8, τd = 29.0, g0 = 0.27),
+                GABAb = Receptor(E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.0006),
+            )
+        )
+
 
     dend_neuron = DendNeuronParameter(
         # adex parameters
@@ -37,7 +49,6 @@ E =let
         # synaptic properties
         soma_syn = SomaSynapse,
         dend_syn = DendSynapse,
-        NMDA = NMDA,
 
         # dendrite
         ds = [160um],

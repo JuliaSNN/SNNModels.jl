@@ -40,7 +40,7 @@ abstract type NNChunks end
     LIF_pv::T
 end
 
-@with_kw struct SynapseModels{T<:SNN.Synapse} <: AbstractSynParams
+@with_kw struct SynapseModels{T<:SNN.Receptors} <: AbstractSynParams
     Esyn_dend::T
     Esyn_soma::T
     Isyn_sst::T

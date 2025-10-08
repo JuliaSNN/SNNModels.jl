@@ -245,7 +245,7 @@ function extract_items(
         @assert !haskey(pop, root) "Population $(root) already exists"
         push!(pop, root => v)
     elseif typeof(v) <: AbstractConnection
-        @assert !haskey(syn, root) "Synapse $(root) already exists"
+        @assert !haskey(syn, root) "Receptors $(root) already exists"
         push!(syn, root => v)
     elseif typeof(v) <: AbstractStimulus
         @assert !haskey(stim, root) "Stimulus $(root) already exists"
@@ -268,7 +268,7 @@ function extract_items(
                 @assert !haskey(pop, new_key) "Population $(new_key) already exists"
                 push!(pop, new_key => v)
             elseif typeof(v) <: AbstractConnection
-                @assert !haskey(syn, new_key) "Synapse $(new_key) already exists"
+                @assert !haskey(syn, new_key) "Receptors $(new_key) already exists"
                 push!(syn, new_key => v)
             elseif typeof(v) <: AbstractStimulus
                 @assert !haskey(stim, new_key) "Stimulus $(new_key) already exists"

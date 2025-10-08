@@ -17,7 +17,7 @@ struct PINningSynapseParameter end
 end
 
 """
-[PINing Sparse Synapse](https://www.ncbi.nlm.nih.gov/pubmed/26971945)
+[PINing Sparse Receptors](https://www.ncbi.nlm.nih.gov/pubmed/26971945)
 """
 PINningSynapse
 

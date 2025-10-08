@@ -25,9 +25,22 @@ MilesGabaDend = GABAergic(
     Receptor(E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.006), # τd = 100.0
 )
 
-TripodSomaSynapse = Synapse(DuarteGluSoma, MilesGabaSoma)
-TripodDendSynapse = Synapse(EyalGluDend, MilesGabaDend)
+TripodSomaReceptors = Receptors(DuarteGluSoma, MilesGabaSoma)
+TripodDendReceptors = Receptors(EyalGluDend, MilesGabaDend)
 
+TripodSomaSynapse = ReceptorSynapse(
+    glu_receptors = [1, 2],
+    gaba_receptors = [3, 4],
+    syn = TripodSomaReceptors,
+    NMDA = EyalNMDA,
+)
+
+TripodDendSynapse = ReceptorSynapse(
+    glu_receptors = [1, 2],
+    gaba_receptors = [3, 4],
+    syn = TripodDendReceptors,
+    NMDA = EyalNMDA,
+)
 
 ## Soma parameters
 
@@ -52,8 +65,15 @@ SomaGABA = GABAergic(
     Receptor(E_rev = -70.0, τr = 0.5, τd = 10.0, g0 = 2.0),
     Receptor(E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.006), # τd = 100.0
 )
+
 SomaNMDA = NMDAVoltageDependency()
-SomaSynapse = Synapse(SomaGlu, SomaGABA)
+SomaReceptors = Receptors(SomaGlu, SomaGABA)
+SomaSynapse = ReceptorSynapse(
+    glu_receptors = [1, 2],
+    gaba_receptors = [3, 4],
+    syn = SomaReceptors,
+    NMDA = SomaNMDA,
+)
 
 ## CAN_AHP parameters
 
@@ -65,7 +85,7 @@ Gaba_CANAHP = GABAergic(
     Receptor(E_rev = -70.0, τr = 1, τd = 10ms, g0 = 0.35mS/cm^2),
     Receptor(E_rev = -90.0, τr = 90ms, τd = 160ms, g0 = 5e-4mS/cm^2), # τd = 100.0
 )
-Synapse_CANAHP = Synapse(Glu_CANAHP, Gaba_CANAHP)
+Synapse_CANAHP = Receptors(Glu_CANAHP, Gaba_CANAHP)
 αs_CANAHP = [1.0, 0.275/ms, 1.0, 0.015/ms]
 NMDA_CANAHP = let
     Mg_mM = 1.5mM

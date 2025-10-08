@@ -30,7 +30,7 @@ A parameter struct for the Tripod neuron model, implementing an Adaptive Exponen
 - `FT`: Floating-point type for membrane parameters (default: Float32)
 - `IT`: Integer type for time-related parameters (default: Int64)
 - `DT`: Type for dendritic segment lengths (default: Vector{DendLength})
-- `ST`: Synapse type (default: Synapse)
+- `ST`: Receptors type (default: Receptors)
 - `NMDAT`: NMDA voltage dependency type (default: NMDAVoltageDependency{Float32})
 - `PST`: Post-spike dynamics type (default: PostSpike{Float32})
 - `PT`: Physiology type (default: Physiology)
@@ -38,10 +38,10 @@ A parameter struct for the Tripod neuron model, implementing an Adaptive Exponen
 # Examples
 ```jldoctest
 julia> TripodParameter = DendNeuronParameter(ds = [200um, (200um, 400um)])
-DendNeuronParameter{Float32, Int64, Vector{DendLength}, Synapse, NMDAVoltageDependency{Float32}, PostSpike{Float32}, Physiology}(281.0, 40.0, 25.0, 7.03125, -70.6, -55.6, -50.4, 2.0, 144.0, 4.0, 80.5, 10.0, 1.0, 1, 2, PostSpike{Float32}(10, 30.0), [200.0, (200.0, 400.0)], human_dend, TripodSomaSynapse, TripodDendSynapse, NMDAVoltageDependency{Float32}(0.001, 0.062, 3.57))
+DendNeuronParameter{Float32, Int64, Vector{DendLength}, Receptors, NMDAVoltageDependency{Float32}, PostSpike{Float32}, Physiology}(281.0, 40.0, 25.0, 7.03125, -70.6, -55.6, -50.4, 2.0, 144.0, 4.0, 80.5, 10.0, 1.0, 1, 2, PostSpike{Float32}(10, 30.0), [200.0, (200.0, 400.0)], human_dend, TripodSomaSynapse, TripodDendSynapse, NMDAVoltageDependency{Float32}(0.001, 0.062, 3.57))
 
 julia> BallAndStickParameter = DendNeuronParameter(ds = [(150um, 400um)])
-DendNeuronParameter{Float32, Int64, Vector{DendLength}, Synapse, NMDAVoltageDependency{Float32}, PostSpike{Float32}, Physiology}(281.0, 40.0, 25.0, 7.03125, -70.6, -55.6, -50.4, 2.0, 144.0, 4.0, 80.5, 10.0, 1.0, 1, 2, PostSpike{Float32}(10, 30.0), [(150.0, 400.0)], human_dend, TripodSomaSynapse, TripodDendSynapse, NMDAVoltageDependency{Float32}(0.001, 0.062, 3.57))
+DendNeuronParameter{Float32, Int64, Vector{DendLength}, Receptors, NMDAVoltageDependency{Float32}, PostSpike{Float32}, Physiology}(281.0, 40.0, 25.0, 7.03125, -70.6, -55.6, -50.4, 2.0, 144.0, 4.0, 80.5, 10.0, 1.0, 1, 2, PostSpike{Float32}(10, 30.0), [(150.0, 400.0)], human_dend, TripodSomaSynapse, TripodDendSynapse, NMDAVoltageDependency{Float32}(0.001, 0.062, 3.57))
 ```
 """
 DendNeuronParameter
@@ -53,8 +53,7 @@ DendLength = Union{Float32,Tuple}
     IT = Int64,
     VIT = Vector{Int64},
     DT=Vector{DendLength},
-    ST = SynapseArray,
-    NMDAT = NMDAVoltageDependency{Float32},
+    RT=ReceptorSynapse,
     PST = PostSpike{Float32},
     PT = Physiology,
 } <: AbstractGeneralizedIFParameter
@@ -80,12 +79,9 @@ DendLength = Union{Float32,Tuple}
     ds::DT # = [200um , (200um, 400um)] ## Dendritic segment lengths
     physiology::PT = human_dend
 
-    ## Synapse parameters
-    glu_receptors::VIT = [1, 2]
-    gaba_receptors::VIT = [3, 4]
-    soma_syn::ST = TripodSomaSynapse
-    dend_syn::ST = TripodDendSynapse
-    NMDA::NMDAT = NMDAVoltageDependency(mg = Mg_mM, b = nmda_b, k = nmda_k)
+    ## Receptors parameters
+    soma_syn::RT = TripodSomaSynapse
+    dend_syn::RT = TripodDendSynapse
 end
 
 TripodParameter = DendNeuronParameter(ds = [200um, (200um, 400um)])
@@ -95,11 +91,7 @@ function MulticompartmentNeuron(;
     N::Int = 100,
     name::String = "TripodExc",
     dend = [(150um, 400um), (150um, 400um)],  # dendritic lengths
-    NMDA::NMDAVoltageDependency = NMDAVoltageDependency(
-        b = 3.36,  # NMDA voltage dependency parameter
-        k = -0.077,  # NMDA voltage dependency parameter
-        mg = 1.0f0,  # NMDA voltage dependency parameter
-    ),
+
     # After spike timescales and membrane
     adex = (
         C = 281pF,  # membrane capacitance
@@ -118,13 +110,13 @@ function MulticompartmentNeuron(;
     ),
 
 
-    dend_syn::SynapseArray = Synapse(EyalGluDend, MilesGabaDend), # defines glutamaterbic and gabaergic receptors in the dendrites
-    soma_syn::SynapseArray = Synapse(DuarteGluSoma, MilesGabaSoma),  # connect EyalGluDend to MilesGabaDend
-    postspike=PostSpike(),
+    dend_syn::ReceptorArray = Receptors(EyalGluDend, MilesGabaDend), # defines glutamaterbic and gabaergic receptors in the dendrites
+    soma_syn::ReceptorArray = Receptors(DuarteGluSoma, MilesGabaSoma),  # connect EyalGluDend to MilesGabaDend
+    spike=PostSpike(),
 )
     param = DendNeuronParameter(;
         adex,
-        postspike,
+        spike,
         ds = dend,
         soma_syn = soma_syn,
         dend_syn = dend_syn,
@@ -152,94 +144,37 @@ end
 
 export DendNeuronParameter, TripodParameter, BallAndStickParameter, MulticompartmentNeuron
 
-@inline function update_synapses!(
-    p::P,
-    param::DendNeuronParameter,
-    syn::SynapseArray,
-    glu::Vector{Float32},
-    gaba::Vector{Float32},
-    g::Matrix{Float32},
-    h::Matrix{Float32},
-    dt::Float32,
-) where {P<:AbstractPopulation}
-    @unpack glu_receptors, gaba_receptors = param
-    @unpack N = p
-    @inbounds for n in glu_receptors
-        @unpack τr⁻, τd⁻, α = syn[n]
-        @turbo for i ∈ 1:N
-            h[i, n] += glu[i] * α
-            g[i, n] = exp64(-dt * τd⁻) * (g[i, n] + dt * h[i, n])
-            h[i, n] = exp64(-dt * τr⁻) * (h[i, n])
-        end
-    end
-    @simd for n in gaba_receptors
-        @unpack τr⁻, τd⁻, α = syn[n]
-        @turbo for i ∈ 1:N
-            h[i, n] += gaba[i] * α
-            g[i, n] = exp64(-dt * τd⁻) * (g[i, n] + dt * h[i, n])
-            h[i, n] = exp64(-dt * τr⁻) * (h[i, n])
-        end
-    end
+# @inline function update_synapses!(
+#     p::P,
+#     param::DendNeuronParameter,
+#     syn::ReceptorArray,
+#     glu::Vector{Vector{Float32}},
+#     gaba::Vector{Vector{Float32}},
+#     g::Array{Float32,3},
+#     h::Array{Float32,3},
+#     d::Int,
+#     dt::Float32,
+# ) where {P<:AbstractPopulation}
+#     @unpack glu_receptors, gaba_receptors = param
+#     @unpack N = p
+#     @inbounds for n in glu_receptors
+#         @unpack τr⁻, τd⁻, α = syn[n]
+#         @turbo for i ∈ 1:N
+#             h[d, i, n] += glu[d][i] * α
+#             g[d, i, n] = exp64(-dt * τd⁻) * (g[d, i, n] + dt * h[i, n])
+#             h[d, i, n] = exp64(-dt * τr⁻) * (h[d, i, n])
+#         end
+#     end
+#     @simd for n in gaba_receptors
+#         @unpack τr⁻, τd⁻, α = syn[n]
+#         @turbo for i ∈ 1:N
+#             h[d, i, n] += gaba[d][i] * α
+#             g[d, i, n] = exp64(-dt * τd⁻) * (g[d, i, n] + dt * h[d, i, n])
+#             h[d, i, n] = exp64(-dt * τr⁻) * (h[d, i, n])
+#         end
+#     end
 
-    fill!(glu, 0.0f0)
-    fill!(gaba, 0.0f0)
-end
+#     fill!(glu[d], 0.0f0)
+#     fill!(gaba[d], 0.0f0)
+# end
 
-@inline function update_synapses!(
-    p::P,
-    param::DendNeuronParameter,
-    syn::SynapseArray,
-    glu::Vector{Vector{Float32}},
-    gaba::Vector{Vector{Float32}},
-    g::Array{Float32,3},
-    h::Array{Float32,3},
-    d::Int,
-    dt::Float32,
-) where {P<:AbstractPopulation}
-    @unpack glu_receptors, gaba_receptors = param
-    @unpack N = p
-    @inbounds for n in glu_receptors
-        @unpack τr⁻, τd⁻, α = syn[n]
-        @turbo for i ∈ 1:N
-            h[d, i, n] += glu[d][i] * α
-            g[d, i, n] = exp64(-dt * τd⁻) * (g[d, i, n] + dt * h[i, n])
-            h[d, i, n] = exp64(-dt * τr⁻) * (h[d, i, n])
-        end
-    end
-    @simd for n in gaba_receptors
-        @unpack τr⁻, τd⁻, α = syn[n]
-        @turbo for i ∈ 1:N
-            h[d, i, n] += gaba[d][i] * α
-            g[d, i, n] = exp64(-dt * τd⁻) * (g[d, i, n] + dt * h[d, i, n])
-            h[d, i, n] = exp64(-dt * τr⁻) * (h[d, i, n])
-        end
-    end
-
-    fill!(glu[d], 0.0f0)
-    fill!(gaba[d], 0.0f0)
-end
-
-
-@inline function synaptic_current!(
-    param::DendNeuronParameter,
-    syn::SynapseArray,
-    v::Float32,
-    g,
-    is::Vector{Float32},
-    comp::Int,
-    neuron::Int,
-)
-    @unpack mg, b, k = param.NMDA
-    is[comp] = 0.0f0
-    @inbounds @fastmath begin
-        @simd for n in eachindex(syn)
-            @unpack gsyn, E_rev, nmda = syn[n]
-            is[comp] +=
-                gsyn *
-                g[neuron, n] *
-                (v - E_rev) *
-                (nmda==0.0f0 ? 1.0f0 : 1/(1.0f0 + (mg / b) * exp256(k * v)))
-        end
-    end
-    is[comp] = clamp(is[comp], -1500, 1500)
-end
