@@ -45,7 +45,7 @@ end
 A structure representing a dendritic compartment within a neuron model.
 
 # Fields
-- `Er::FT = -70.6mV`: Resting potential.
+- `El::FT = -70.6mV`: Resting potential.
 - `C::FT = 10pF`: Membrane capacitance.
 - `gax::FT = 10nS`: Axial conductance.
 - `gm::FT = 1nS`: Membrane conductance.
@@ -58,7 +58,7 @@ Dendrite
 
 @snn_kw struct Dendrite{VFT = Vector{Float32}}
     N::Int32 = 100
-    Er::VFT = zeros(N)             # (mV) resting potential
+    El::VFT = zeros(N)             # (mV) resting potential
     l::VFT = zeros(N) # μm distance from next compartment
     d::VFT = zeros(N) # μm dendrite diameter
     C::VFT = zeros(N)
@@ -70,7 +70,7 @@ function create_dendrite(N::Int, l; kwargs...)
     dendrites = Dendrite(N = N)
     for i = 1:N
         dendrite = create_dendrite(l; kwargs...)
-        dendrites.Er[i] = -70.6f0
+        dendrites.El[i] = -70.6f0
         dendrites.l[i] = dendrite.l
         dendrites.d[i] = dendrite.d
         dendrites.C[i] = dendrite.C

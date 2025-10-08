@@ -3,7 +3,7 @@
 @snn_kw struct IF_CANAHPParameter{
     FT = Float32,
     VIT = Vector{Int},
-    ST = SynapseArray,
+    ST = ReceptorArray,
     NMDAT = NMDAVoltageDependency{Float32},
     VFT = Vector{Float32},
 } <: AbstractIFParameter
@@ -16,7 +16,7 @@
     τabs::FT = 3ms # Absolute refractory period
 
     ## Ionic currents
-    gL::FT = 0.05mS/cm^2 # Membrane conductance
+    gl::FT = 0.05mS/cm^2 # Membrane conductance
     VL::FT = -70mV # Leak potential
 
     ΔCa::FT = 0.2uM
@@ -126,7 +126,7 @@ function update_neuron!(p::IF_CANAHP, param::IF_CANAHPParameter, dt::Float32)
     αCAN,
     βCAN,
     VCAN,
-    gL,
+    gl,
     VL,
     Ca0,
     τCa,
@@ -144,7 +144,7 @@ function update_neuron!(p::IF_CANAHP, param::IF_CANAHPParameter, dt::Float32)
         pCAN[i] = (1 - pCAN[i])*(αCAN*Ca[i] + βCAN) - βCAN
         pAHP[i] = (1 - pAHP[i])*(αAHP*Ca[i] + βAHP) - βAHP
         I_ionic = let
-            I_L = gL * area * (v[i] - VL)  # leakage
+            I_L = gl * area * (v[i] - VL)  # leakage
             I_CAN = gCAN * area * pCAN[i] * (v[i] - VCAN) # calcium current
             I_AHP = gAHP * area * pAHP[i] * (v[i] - VAHP) # calcium current
             I_L + I_CAN + I_AHP

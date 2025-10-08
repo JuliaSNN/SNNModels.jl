@@ -2,21 +2,16 @@
 
 @snn_kw mutable struct AdExParameter{FT = Float32} <: AbstractGeneralizedIFParameter
     C::FT = 281pF        #(pF)
-    gL::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
-    τm::FT = C / gL # Membrane time constant
+    gl::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
     Vt::FT = -50mV # Membrane potential threshold
     Vr::FT = -70.6mV # Reset potential
     El::FT = -70.6mV # Resting membrane potential 
-    R::FT = nS / gL # Resistance
+    τm::FT = C / gl # Membrane time constant
+    R::FT = nS / gl # Resistance
     ΔT::FT = 2mV # Slope factor
-    Vspike::FT = 20mV # Spike potential
     τw::FT = 144ms # Adaptation time constant (Spike-triggered adaptation time scale)
     a::FT = 4nS # Subthreshold adaptation parameter
     b::FT = 80.5pA # Spike-triggered adaptation parameter (amount by which the voltage is increased at each threshold crossing)
-    τabs::FT = 1ms # Absolute refractory period
-    ## Dynamic spike threshold
-    At::FT = 10mV # Post spike threshold increase
-    τt::FT = 30ms # Adaptive threshold time scale
 end
 
 ## Generalized integrate and fire
@@ -33,6 +28,7 @@ name::String = "AdEx"
 
     param::GIFT  = AdExParameter()
     synapse::SYNT = DoubleExpSynapse()
+    spike::PostSpike = PostSpike()
 
     N::Int32 = 100 # Number of neurons
     v::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
@@ -54,8 +50,8 @@ name::String = "AdEx"
     # Glu/Gaba conductance
     g::MFT = synapse isa AbstractReceptorParameter ? zeros(N, 4) : zeros(0, 0)
     h::MFT = synapse isa AbstractReceptorParameter ? zeros(N, 4) : zeros(0, 0)
-    glu::VFT = zeros(N)
-    gaba::VFT = zeros(N)
+    glu::VFT = synapse isa AbstractReceptorParameter ? zeros(N) : zeros(0)
+    gaba::VFT = synapse isa AbstractReceptorParameter ? zeros(N) : zeros(0)
 
     records::Dict = Dict()
 end
@@ -74,8 +70,8 @@ function synaptic_target(
 end
 
 
-function Population(param::AdExParameter, synapse::AbstractSynapseParameter; N, kwargs...)
-    return AdEx(;N, param, synapse, kwargs...)
+function Population(param::AdExParameter; synapse::AbstractSynapseParameter, N, spike=PostSpike(), kwargs...)
+    return AdEx(;N, param, synapse, spike, kwargs...)
 end
 
 
@@ -89,7 +85,8 @@ function update_neuron!(
     dt::Float32,
 ) where {P<:AdEx,T<:AbstractGeneralizedIFParameter}
     @unpack N, v, w, fire, θ, I, ξ_het, tabs, syn_curr = p
-    @unpack τm, Vt, Vr, El, R, ΔT, τw, a, b, At, τt, τabs = param
+    @unpack τm, Vt, Vr, El, R, ΔT, τw, a, b =param
+    @unpack At, τA, τabs = p.spike
 
     # @inbounds 
     for i ∈ 1:N
@@ -115,10 +112,10 @@ function update_neuron!(
                 + R * I[i] # external current
             ) / (τm * ξ_het[i])
         # Double exponential
-        θ[i] += dt * (Vt - θ[i]) / τt
+        θ[i] += dt * (Vt - θ[i]) / τA
 
         # Spike
-        fire[i] = v[i] >= param.Vspike
+        fire[i] = v[i] >= 0mV#$param.AP_membrane
         # fire[i] = v[i] > θ[i] + 5.0f0
         v[i] = ifelse(fire[i], 20.0f0, v[i]) # Set membrane potential to spike potential
 

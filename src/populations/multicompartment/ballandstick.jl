@@ -32,7 +32,7 @@ BallAndStick
     VDT = Dendrite{Vector{Float32}},
     IT = Int32,
     FT = Float32,
-    ST = SynapseArray,
+    ST = ReceptorArray,
 } <: AbstractDendriteIF     ## These are compulsory parameters
     name::String = "BallAndStick"
     id::String = randstring(12)
@@ -41,9 +41,9 @@ BallAndStick
     d::VDT = create_dendrite(N, param.ds[1])
 
     # Membrane potential and adaptation
-    v_s::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
+    v_s::VFT = rand_value(N, param.adex.Vt, param.adex.Vr)
     w_s::VFT = zeros(N)
-    v_d::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
+    v_d::VFT = rand_value(N, param.adex.Vt, param.adex.Vr)
     # Synapses
     g_d::MFT = zeros(N, 4)
     h_d::MFT = zeros(N, 4)
@@ -66,7 +66,7 @@ BallAndStick
     # Spike model and threshold
     fire::VBT = zeros(Bool, N)
     after_spike::VFT = zeros(Int, N)
-    θ::VFT = ones(N) * param.Vt
+    θ::VFT = ones(N) * param.adex.Vt
     Δv::VFT = zeros(3)
     Δv_temp::VFT = zeros(3)
     cs::VFT = zeros(2)
@@ -86,20 +86,21 @@ end
 function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
     @unpack N, v_s, w_s, v_d = p
     @unpack fire, θ, after_spike, Δv, Δv_temp = p
-    @unpack Er, up, τabs, BAP, AP_membrane, Vr, Vt, τw, a, b, postspike = param
+    @unpack adex, spike, soma_syn, dend_syn = param
+    @unpack El, Vr, Vt, τw, a, b = adex
+    @unpack AP_membrane, up, τabs, At, τA  = spike 
     @unpack d = p
-    @unpack NMDA, soma_syn, dend_syn = param
     @unpack N, g_s, g_d, h_s, h_d = p
     @unpack glu_d, glu_s, gaba_d, gaba_s = p
 
-    update_synapses!(p, param, soma_syn, glu_s, gaba_s, g_s, h_s, dt)
-    update_synapses!(p, param, dend_syn, glu_d, gaba_d, g_d, h_d, dt)
+    update_synapses!(p, soma_syn, glu_s, gaba_s, g_s, h_s, dt)
+    update_synapses!(p, dend_syn, glu_d, gaba_d, g_d, h_d, dt)
     # update the neurons
     @inbounds for i ∈ 1:N
         if after_spike[i] > τabs
-            v_s[i] = BAP
+            v_s[i] = AP_membrane
             ## backpropagation effect
-            c1 = (BAP - v_d[i]) * d.gax[i] / 100
+            c1 = (AP_membrane - v_d[i]) * d.gax[i] / 100
             ## apply currents
             v_d[i] += dt * c1 / d.C[i]
         elseif after_spike[i] > 0
@@ -120,20 +121,20 @@ function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
             update_ballandstick!(p, Δv, i, param, dt)
             @fastmath v_s[i] += 0.5 * dt * (Δv_temp[1] + Δv[1])
             @fastmath v_d[i] += 0.5 * dt * (Δv_temp[2] + Δv[2])
-            @fastmath w_s[i] += dt * (param.a * (v_s[i] - param.Er) - w_s[i]) / param.τw
+            @fastmath w_s[i] += dt * (a * (v_s[i] - El) - w_s[i]) / τw
         end
     end
 
     # reset firing
     fire .= false
     @inbounds for i ∈ 1:N
-        θ[i] -= dt * (θ[i] - Vt) / postspike.τA
+        θ[i] -= dt * (θ[i] - Vt) / τA
         after_spike[i] -= 1
         if after_spike[i] < 0
             ## spike ?
             if v_s[i] > θ[i] + 10.0f0
                 fire[i] = true
-                θ[i] += postspike.A
+                θ[i] += At
                 v_s[i] = AP_membrane
                 w_s[i] += b ##  *τw
                 after_spike[i] = (up + τabs) / dt
@@ -151,7 +152,7 @@ function update_ballandstick!(
     param::DendNeuronParameter,
     dt::Float32,
 )
-    @unpack NMDA, soma_syn, dend_syn = param
+    @unpack soma_syn, dend_syn = param
     @fastmath @inbounds begin
         @unpack v_d, v_s, w_s, g_s, g_d, θ, d, Is, Id = p
         @unpack is, cs = p
@@ -159,19 +160,19 @@ function update_ballandstick!(
         #compute axial currents
         cs[1] = -((v_d[i] + Δv[2] * dt) - (v_s[i] + Δv[1] * dt)) * d.gax[i]
 
-        synaptic_current!(param, soma_syn, v_s[i] + Δv[1] * dt, g_s, is, 1, i)
-        synaptic_current!(param, dend_syn, v_d[i] + Δv[2] * dt, g_d, is, 2, i)
+        synaptic_current!(soma_syn, v_s[i] + Δv[1] * dt, g_s, is, 1, i)
+        synaptic_current!(dend_syn, v_d[i] + Δv[2] * dt, g_d, is, 2, i)
 
         # update membrane potential
-        @unpack C, gl, Er, ΔT = param
+        @unpack C, gl, El, ΔT = param.adex
         Δv[1] =
             (
                 gl * (
-                    (-v_s[i] + Δv[1] * dt + Er) +
+                    (-v_s[i] + Δv[1] * dt + El) +
                     ΔT * exp64(1 / ΔT * (v_s[i] + Δv[1] * dt - θ[i]))
                 ) - w_s[i] - is[1] - cs[1] + Is[i]
             ) / C
-        Δv[2] = ((-(v_d[i] + Δv[2] * dt) + Er) * d.gm[i] - is[2] + cs[1] + Id[i]) / d.C[i]
+        Δv[2] = ((-(v_d[i] + Δv[2] * dt) + El) * d.gm[i] - is[2] + cs[1] + Id[i]) / d.C[i]
     end
 
 end

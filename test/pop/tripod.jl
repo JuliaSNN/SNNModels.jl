@@ -30,6 +30,7 @@ E =let
         )
 
 
+
     dend_neuron = DendNeuronParameter(
         # adex parameters
         adex = AdExParameter(C = 281pF,
@@ -51,11 +52,11 @@ E =let
         dend_syn = DendSynapse,
 
         # dendrite
-        ds = [160um],
+        ds = [160um, 200um],
         physiology = human_dend,
     )
 
-    E = SNNModels.BallAndStick(N = 1, param = dend_neuron)
+    E = SNNModels.Tripod(N = 1, param = dend_neuron)
 end
 poisson_exc = PoissonLayer(
     10.2Hz,    # Mean firing rate (Hz) 
@@ -73,8 +74,8 @@ poisson_inh = PoissonLayer(
     # μ = 4.0,   # Synaptic strength (nS)
 
 # Create the Poisson layers for excitatory and inhibitory inputs
-stim_exc = Stimulus(poisson_exc, E, :glu, :d,  conn=(μ=0.1, ρ=1), name = "noiseE")
-stim_inh = Stimulus(poisson_inh, E, :gaba, :d,  conn=(μ=0.1, ρ=1), name = "noiseI")
+stim_exc = Stimulus(poisson_exc, E, :glu, :d1,  conn=(μ=0.1, ρ=1), name = "noiseE")
+stim_inh = Stimulus(poisson_inh, E, :gaba, :d1,  conn=(μ=0.1, ρ=1), name = "noiseI")
 
 model = compose(; E, stim_exc, stim_inh, silent=true)
 

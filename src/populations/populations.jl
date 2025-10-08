@@ -10,8 +10,8 @@ plasticity!(
 ) = nothing
 
 include("synapse/synapse.jl")
-include("synapse/synapse_parameters.jl")
 include("synapse/synapses.jl")
+include("synapse/synapse_parameters.jl")
 
 ## Neurons
 include("poisson.jl")

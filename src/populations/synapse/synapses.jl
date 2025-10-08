@@ -8,20 +8,60 @@ abstract type AbstractCurrentParameter <: AbstractSynapseParameter end
 abstract type AbstractDeltaParameter <: AbstractSynapseParameter end
 
 
-## Receptor Synapse updates
+## Receptor Receptors updates
+# NMDA::NMDAVoltageDependency = NMDAVoltageDependency(
+#     b = 3.36,  # NMDA voltage dependency parameter
+#     k = -0.077,  # NMDA voltage dependency parameter
+#     mg = 1.0f0,  # NMDA voltage dependency parameter
+# ),
 @snn_kw struct ReceptorSynapse{
         FT = Float32,
         VIT = Vector{Int},
-        ST = SynapseArray,
+        ST = ReceptorArray,
         NMDAT = NMDAVoltageDependency{Float32},
         VFT = Vector{Float32},
     } <: AbstractReceptorParameter
     ## Synapses
-    NMDA::NMDAT = SomaNMDA
+    NMDA::NMDAT = NMDAVoltageDependency()
     glu_receptors::VIT = [1, 2]
     gaba_receptors::VIT = [3, 4]
-    syn::ST = SomaSynapse
+    syn::ST=SomaReceptors
 end
+
+ReceptorSynapse(syn::ReceptorArray, NMDA::NMDAVoltageDependency{Float32}; kwargs...) = ReceptorSynapse(; kwargs..., syn=syn, NMDA=NMDA)
+
+@inline function update_synapses!(
+    p::P,
+    synapse::ReceptorSynapse,
+    glu::Vector{Float32},
+    gaba::Vector{Float32},
+    g::Matrix{Float32},
+    h::Matrix{Float32},
+    dt::Float32,
+) where {P<:AbstractPopulation}
+    @unpack glu_receptors, gaba_receptors = synapse
+    @unpack N = p
+    @inbounds for n in glu_receptors
+        @unpack τr⁻, τd⁻, α = synapse.syn[n]
+        @turbo for i ∈ 1:N
+            h[i, n] += glu[i] * α
+            g[i, n] = exp64(-dt * τd⁻) * (g[i, n] + dt * h[i, n])
+            h[i, n] = exp64(-dt * τr⁻) * (h[i, n])
+        end
+    end
+    @simd for n in gaba_receptors
+        @unpack τr⁻, τd⁻, α = synapse.syn[n]
+        @turbo for i ∈ 1:N
+            h[i, n] += gaba[i] * α
+            g[i, n] = exp64(-dt * τd⁻) * (g[i, n] + dt * h[i, n])
+            h[i, n] = exp64(-dt * τr⁻) * (h[i, n])
+        end
+    end
+
+    fill!(glu, 0.0f0)
+    fill!(gaba, 0.0f0)
+end
+
 
 function update_synapses!(
     p::P,
@@ -29,31 +69,35 @@ function update_synapses!(
     dt::Float32,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractReceptorParameter}
     @unpack N, g, h, glu, gaba, hi, he = p
-    @unpack glu_receptors, gaba_receptors, syn = synapse
-
-    @inbounds for n in glu_receptors
-        @unpack τr⁻, τd⁻, α = syn[n]
-        @turbo for i ∈ 1:N
-            h[i, n] += (he[i] + glu[i]) * α
-            g[i, n] = exp64(-dt * τd⁻) * (g[i, n] + dt * h[i, n])
-            h[i, n] = exp64(-dt * τr⁻) * (h[i, n])
-        end
-    end
-
-    @inbounds for n in gaba_receptors
-        @unpack τr⁻, τd⁻, α = syn[n]
-        @turbo for i ∈ 1:N
-            h[i, n] += (hi[i] + gaba[i]) * α
-            g[i, n] = exp64(-dt * τd⁻) * (g[i, n] + dt * h[i, n])
-            h[i, n] = exp64(-dt * τr⁻) * (h[i, n])
-        end
-    end
-
-    fill!(gaba, 0.0f0)
-    fill!(glu, 0.0f0)
+    update_synapses!(p, synapse, glu, gaba, g, h, dt)
     fill!(hi, 0.0f0)
     fill!(he, 0.0f0)
 end
+
+
+@inline function synaptic_current!(
+    syn::ReceptorSynapse,
+    v::Float32,
+    g,
+    is::Vector{Float32},
+    comp::Int,
+    neuron::Int,
+)
+    @unpack mg, b, k = syn.NMDA
+    is[comp] = 0.0f0
+    @inbounds @fastmath begin
+        @simd for n in eachindex(syn.syn)
+            @unpack gsyn, E_rev, nmda = syn.syn[n]
+            is[comp] +=
+                gsyn *
+                g[neuron, n] *
+                (v - E_rev) *
+                (nmda==0.0f0 ? 1.0f0 : 1/(1.0f0 + (mg / b) * exp256(k * v)))
+        end
+    end
+    is[comp] = clamp(is[comp], -1500, 1500)
+end
+
 
 @inline function synaptic_current!(
     p::T,
@@ -76,7 +120,7 @@ end
     return
 end
 
-## Double Exponential Synapse updates
+## Double Exponential Receptors updates
 @snn_kw struct DoubleExpSynapse{FT = Float32} <: AbstractDoubleExpParameter
     τre::FT = 1ms # Rise time for excitatory synapses
     τde::FT = 6ms # Decay time for excitatory synapses
@@ -114,7 +158,7 @@ end
     end
 end
 
-## Single Exponential Synapse updates
+## Single Exponential Receptors updates
 @snn_kw struct SingleExpSynapse{FT = Float32} <: AbstractSinExpParameter
     ## Synapses
     τe::FT = 6ms # Decay time for excitatory synapses
@@ -148,7 +192,7 @@ end
     end
 end
 
-## Delta Synapse updates
+## Delta Receptors updates
 @snn_kw struct DeltaSynapse{FT = Float32} <: AbstractDeltaParameter
 end
 
@@ -175,7 +219,7 @@ end
 end
 
 
-## Current Synapse updates
+## Current Receptors updates
 
 @snn_kw struct CurrentSynapse{FT = Float32} <: AbstractCurrentParameter
     τe::FT = 6ms # Rise time for excitatory synapses

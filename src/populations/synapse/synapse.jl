@@ -31,13 +31,13 @@ abstract type AbstractReceptor end
     nmda::T = 0.0f0
 end
 
-SynapseArray = Vector{Receptor{Float32}}
+ReceptorArray = Vector{Receptor{Float32}}
 ReceptorVoltage = Receptor
 
 
 
 """
-Synapse struct represents a synaptic connection with different types of receptors.
+Receptors struct represents a synaptic connection with different types of receptors.
 
 # Fields
 - `AMPA::T`: AMPA receptor
@@ -45,28 +45,28 @@ Synapse struct represents a synaptic connection with different types of receptor
 - `GABAa::T`: GABAa receptor
 - `GABAb::T`: GABAb receptor
 """
-Synapse
+Receptors
 
-function Synapse(;
+function Receptors(;
     AMPA::Receptor{T} = Receptor(),
     NMDA::ReceptorVoltage{T} = ReceptorVoltage(),
     GABAa::Receptor{T} = Receptor(),
     GABAb::Receptor{T} = Receptor(),
 ) where {T<:Float32}
-    return SynapseArray([AMPA, NMDA, GABAa, GABAb])
+    return ReceptorArray([AMPA, NMDA, GABAa, GABAb])
 end
 
-function Synapse(
+function Receptors(
     AMPA::Receptor{T},
     NMDA::ReceptorVoltage{T},
     GABAa::Receptor{T},
     GABAb::Receptor{T},
 ) where {T<:Float32}
-    return SynapseArray([AMPA, NMDA, GABAa, GABAb])
+    return ReceptorArray([AMPA, NMDA, GABAa, GABAb])
 end
 
-function Synapse(args...)
-    return SynapseArray(collect(args))
+function Receptors(args...)
+    return ReceptorArray(collect(args))
 end
 
 """
@@ -98,33 +98,33 @@ GABAergic
 end
 
 """
-Construct a Synapse from Glutamatergic and GABAergic receptors.
+Construct a Receptors from Glutamatergic and GABAergic receptors.
 
 # Arguments
 - `glu::Glutamatergic`: Glutamatergic receptors
 - `gaba::GABAergic`: GABAergic receptors
 
 # Returns
-- `Synapse`: A Synapse object
+- `Receptors`: A Receptors object
 """
-function Synapse(glu::Glutamatergic, gaba::GABAergic)
-    return Synapse(glu.AMPA, glu.NMDA, gaba.GABAa, gaba.GABAb)
+function Receptors(glu::Glutamatergic, gaba::GABAergic)
+    return Receptors(glu.AMPA, glu.NMDA, gaba.GABAa, gaba.GABAb)
 end
 
 export Receptor,
-    Synapse, ReceptorVoltage, GABAergic, Glutamatergic, SynapseArray, NMDAVoltageDependency
+    Receptors, ReceptorVoltage, GABAergic, Glutamatergic, ReceptorArray, NMDAVoltageDependency
 
 """
-Calculate the normalization factor for a synapse.
+Calculate the normalization factor for a receptor.
 
 # Arguments
-- `synapse::Receptor`: The receptor for which to calculate the normalization factor
+- `receptor::Receptor`: The receptor for which to calculate the normalization factor
 
 # Returns
 - `Float32`: The normalization factor
 """
-function norm_synapse(synapse::Receptor)
-    norm_synapse(synapse.τr, synapse.τd)
+function norm_synapse(receptor::Receptor)
+    norm_synapse(receptor.τr, receptor.τd)
 end
 
 """
@@ -184,11 +184,11 @@ end
 export norm_synapse,
     EyalNMDA,
     Receptor,
-    Synapse,
+    Receptors,
     ReceptorVoltage,
     GABAergic,
     Glutamatergic,
-    SynapseArray,
+    ReceptorArray,
     synapsearray,
     NMDAVoltageDependency,
     nmda_gating

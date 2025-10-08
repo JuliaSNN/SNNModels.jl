@@ -22,7 +22,7 @@ struct FLSparseSynapseParameter end
 end
 
 """
-[Force Learning Sparse Synapse](http://www.theswartzfoundation.org/docs/Sussillo-Abbott-Coherent-Patterns-August-2009.pdf)
+[Force Learning Sparse Receptors](http://www.theswartzfoundation.org/docs/Sussillo-Abbott-Coherent-Patterns-August-2009.pdf)
 """
 FLSparseSynapse
 

@@ -20,7 +20,7 @@
 end
 
 """
-[Rate Synapse](https://brian2.readthedocs.io/en/2.0b4/resources/tutorials/2-intro-to-brian-synapses.html)
+[Rate Receptors](https://brian2.readthedocs.io/en/2.0b4/resources/tutorials/2-intro-to-brian-synapses.html)
 """
 SpikeRateSynapse
 

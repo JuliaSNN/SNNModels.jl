@@ -23,7 +23,7 @@ struct FLSynapseParameter end
 end
 
 """
-[Force Learning Full Synapse](http://www.theswartzfoundation.org/docs/Sussillo-Abbott-Coherent-Patterns-August-2009.pdf)
+[Force Learning Full Receptors](http://www.theswartzfoundation.org/docs/Sussillo-Abbott-Coherent-Patterns-August-2009.pdf)
 """
 FLSynapse
 

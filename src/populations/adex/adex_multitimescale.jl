@@ -4,11 +4,11 @@
     VFT = Vector{Float32},
     VIT=Vector{Int},
 } <: AbstractAdExParameter
-    τm::FT = C / gL # Membrane time constant
+    τm::FT = C / gl # Membrane time constant
     Vt::FT = -50mV # Membrane potential threshold
     Vr::FT = -70.6mV # Reset potential
     El::FT = -70.6mV # Resting membrane potential 
-    R::FT = nS / gL # Resistance
+    R::FT = nS / gl # Resistance
     ΔT::FT = 2mV # Slope factor
     Vspike::FT = 20mV # Spike potential
     τw::FT = 144ms # Adaptation time constant (Spike-triggered adaptation time scale)

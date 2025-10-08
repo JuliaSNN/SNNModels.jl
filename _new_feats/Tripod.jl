@@ -10,8 +10,8 @@ using Statistics, SparseArrays
 N = 1
 Tripod_pop = TripodHet(
     N = N,
-    soma_syn = Synapse(DuarteGluSoma, MilesGabaSoma),
-    dend_syn = Synapse(EyalGluDend, MilesGabaDend),
+    soma_syn = Receptors(DuarteGluSoma, MilesGabaSoma),
+    dend_syn = Receptors(EyalGluDend, MilesGabaDend),
     NMDA = EyalNMDA,
     param = AdExSoma(b = 0.0f0, Vr = -50),
 )
