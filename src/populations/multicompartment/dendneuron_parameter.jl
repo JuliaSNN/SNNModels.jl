@@ -110,8 +110,8 @@ function MulticompartmentNeuron(;
     ),
 
 
-    dend_syn::ReceptorArray = Receptors(EyalGluDend, MilesGabaDend), # defines glutamaterbic and gabaergic receptors in the dendrites
-    soma_syn::ReceptorArray = Receptors(DuarteGluSoma, MilesGabaSoma),  # connect EyalGluDend to MilesGabaDend
+    dend_syn::ReceptorSynapse = TripodDendSynapse, # defines glutamaterbic and gabaergic receptors in the dendrites
+    soma_syn::ReceptorSynapse = TripodSomaSynapse,  # connect EyalGluDend to MilesGabaDend
     spike=PostSpike(),
 )
     param = DendNeuronParameter(;
@@ -120,7 +120,6 @@ function MulticompartmentNeuron(;
         ds = dend,
         soma_syn = soma_syn,
         dend_syn = dend_syn,
-        NMDA = NMDA,
     )
 
     if length(dend) == 2

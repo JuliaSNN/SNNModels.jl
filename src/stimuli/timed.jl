@@ -48,6 +48,11 @@ function SpikeTimeParameter(spiketimes::Spiketimes)
     return SpikeTimeStimulusParameter(Float32.(times[order]), neurons[order])
 end
 
+function SpikeTimeParameter(spiketimes::Vector{Vector{Float64}})
+    _spiketimes = [Float32.(t) for t in spiketimes]
+    return SpikeTimeParameter(_spiketimes)
+end
+
 ## SpikeTimeStimulus
 """
     SpikeTimeStimulus{FT, VFT, VBT, DT, VIT} <: AbstractStimulus
@@ -198,6 +203,7 @@ function Stimulus(
         post,
         sym,
         comp;
+        param,
         kwargs...,
     )
 end

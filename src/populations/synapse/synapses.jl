@@ -28,6 +28,8 @@ abstract type AbstractDeltaParameter <: AbstractSynapseParameter end
     syn::ST=SomaReceptors
 end
 
+ReceptorSynapse(syn::ReceptorArray, NMDA::NMDAVoltageDependency{Float32}; kwargs...) = ReceptorSynapse(; kwargs..., syn=syn, NMDA=NMDA)
+
 @inline function update_synapses!(
     p::P,
     synapse::ReceptorSynapse,

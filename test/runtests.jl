@@ -10,7 +10,7 @@ if VERSION > v"1.1"
 end
 #
 
-# @testset "Neurons and stimuli" begin
+@testset "Neurons and stimuli" begin
     include("pop/hh_neuron.jl")
     include("pop/if_neuron.jl")
     include("pop/adex_neuron.jl")
