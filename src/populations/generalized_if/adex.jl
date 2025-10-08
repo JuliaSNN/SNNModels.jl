@@ -70,8 +70,8 @@ function synaptic_target(
 end
 
 
-function Population(param::AdExParameter, synapse::AbstractSynapseParameter; N, kwargs...)
-    return AdEx(;N, param, synapse, kwargs...)
+function Population(param::AdExParameter; synapse::AbstractSynapseParameter, N, spike=PostSpike(), kwargs...)
+    return AdEx(;N, param, synapse, spike, kwargs...)
 end
 
 
