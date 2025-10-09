@@ -1,3 +1,26 @@
+"""
+    IFParameter{FT<:AbstractFloat} <: AbstractGeneralizedIFParameter
+
+A parameter struct for the Leaky Integrate-and-Fire neuron model.
+
+# Fields
+- `C::FT`: Membrane capacitance (default: 281 pF)
+- `gl::FT`: Leak conductance (default: 40 nS)
+- `τm::FT`: Membrane time constant (default: 20 ms)
+- `Vt::FT`: Membrane threshold potential (default: -50 mV)
+- `Vr::FT`: Membrane reset potential (default: -60 mV)
+- `El::FT`: Membrane leak potential (default: -70 mV)
+- `R::FT`: Membrane resistance (calculated as 1/gl)
+- `ΔT::FT`: Slope factor for exponential spiking (default: 2 mV)
+- `a::FT`: Subthreshold adaptation parameter (default: 0.0)
+- `b::FT`: Spike-triggered adaptation current increment (default: 0.0)
+- `τw::FT`: Adaptation time constant (default: 0.0)
+
+This struct implements the Integrate-and-Fire neuron model with optional adaptation currents.
+The parameters are based on the standard Izhikevich model but adapted for generalized integrate-and-fire dynamics.
+"""
+IFParameter
+
 @snn_kw struct IFParameter{FT = Float32} <: AbstractGeneralizedIFParameter
     C::FT = 281pF        #(pF)
     gl::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
@@ -12,6 +35,42 @@
     τw::FT = 0.0 #144ms # adaptation time constant (~Ca-activated K current inactivation)
 end
 
+"""
+    IF{VFT, VBT, GIFT, SYNT} <: AbstractGeneralizedIF
+
+A mutable struct representing a population of Leaky Integrate-and-Fire (LIF) neurons with optional adaptation currents.
+
+
+# Fields
+- `param::IFParameter`: Neuron parameters (default: `IFParameter()`)
+- `synapse<:AbstractSynapseParameter`: Synapse parameters (default: `DoubleExpSynapse()`)
+- `spike::PostSpike`: Post-spike behavior parameters (default: `PostSpike()`)
+
+- `id::String`: Unique identifier for the population (default: random 12-character string)
+- `name::String`: Name of the population (default: "IF")
+- `N::Int32`: Number of neurons in the population (default: 100)
+- `v::VFT`: Membrane potentials (initialized between `Vr` and `Vt`)
+- `ge::VFT`: Excitatory synaptic conductances (default: zeros)
+- `gi::VFT`: Inhibitory synaptic conductances (default: zeros)
+- `he::VFT`: Excitatory synaptic currents (default: zeros)
+- `hi::VFT`: Inhibitory synaptic currents (default: zeros)
+- `tabs::VFT`: Absolute refractory periods (default: zeros)
+- `w::VFT`: Adaptation currents (default: zeros)
+- `fire::VBT`: Spike flags (default: zeros)
+- `I::VFT`: External currents (default: zeros)
+- `syn_curr::VFT`: Total synaptic currents (default: zeros)
+- `records::Dict`: Dictionary for storing simulation records (default: empty)
+- `Δv::VFT`: Temporary storage for Heun integration (default: zeros)
+- `Δv_temp::VFT`: Temporary storage for Heun integration (default: zeros)
+
+# Type Parameters
+- `VFT`: Type of vector for floating-point values (default: `Vector{Float32}`)
+- `VBT`: Type of vector for boolean values (default: `Vector{Bool}`)
+
+This struct represents a population of neurons following the generalized Integrate-and-Fire model with optional adaptation currents.
+It includes all necessary state variables for simulating the neuron dynamics and synaptic interactions.
+"""
+IF
 
 @snn_kw mutable struct IF{
     VFT = Vector{Float32},
@@ -46,10 +105,6 @@ function Population(param::IFParameter; synapse::AbstractSynapseParameter, spike
     return IF(;N, param, synapse, spike, kwargs...)
 end
 
-"""
-    [Integrate-And-Fire Neuron](https://neuronaldynamics.epfl.ch/online/Ch1.S3.html)
-"""
-IF
 
 function update_neuron!(
     p::IF,
