@@ -1,5 +1,4 @@
 ## Set physiology
-@load_units
 struct Physiology
     Ri::Float32 ## in Ω*cm
     Rd::Float32 ## in Ω*cm^2
