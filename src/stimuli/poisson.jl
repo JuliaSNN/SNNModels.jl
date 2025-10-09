@@ -1,4 +1,4 @@
-abstract type PoissonStimulusParameter end
+abstract type PoissonStimulusParameter <: AbstractStimulusParameter end
 
 """
     PoissonVariable

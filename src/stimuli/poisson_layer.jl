@@ -13,7 +13,7 @@
 """
 PoissonLayer
 
-@snn_kw struct PoissonLayer{R = Float32} 
+@snn_kw struct PoissonLayer{R = Float32}  <: AbstractStimulusParameter
     rate::Float32 = 1.0f0  # Default rate in Hz
     N::Int32 = 1
     rates::Vector{R} = fill(Float32.(rate), N)
@@ -26,6 +26,32 @@ function PoissonLayer(rate::R; kwargs...) where {R<:Real}
     return PoissonLayer(; N=N, rate = rate, rates = rates)
 end
 
+"""
+    PoissonStimulusLayer{VFT, VBT, VIT, IT}
+
+A layer representing a Poisson stimulus applied to a postsynaptic population.
+
+# Fields
+- `N::Int`: Number of neurons in the stimulus layer.
+- `id::String`: Unique identifier for the layer.
+- `name::String`: Name of the layer.
+- `param::PoissonLayer`: Parameters for the Poisson stimulus.
+- `g::VFT`: Target conductance for the soma.
+- `colptr::VIT`: Column pointer for sparse connectivity.
+- `rowptr::VIT`: Row pointer for sparse connectivity.
+- `I::VIT`: Row indices for sparse connectivity.
+- `J::VIT`: Column indices for sparse connectivity.
+- `index::VIT`: Indices for sparse connectivity.
+- `W::VFT`: Weights for synaptic connections.
+- `fire::VBT`: Boolean vector indicating which neurons fired.
+- `randcache::VFT`: Random cache for Poisson spike generation.
+- `records::Dict`: Dictionary for storing simulation records.
+- `targets::Dict`: Dictionary specifying target populations.
+
+This layer implements a Poisson stimulus where each neuron fires independently with a given rate,
+and the connectivity is defined by sparse matrix representations.
+"""
+PoissonStimulusLayer
 @snn_kw struct PoissonStimulusLayer{
     VFT = Vector{Float32},
     VBT = Vector{Bool},
@@ -137,4 +163,4 @@ function stimulate!(
     end
 end
 
-export PoissonLayer, stimulate!
+export PoissonLayer, stimulate!, PoissonStimulusLayer, Stimulus

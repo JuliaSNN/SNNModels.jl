@@ -1,6 +1,6 @@
 
 ## Synaptic updates 
-abstract type AbstractSynapseParameter end
+abstract type AbstractSynapseParameter <: AbstractComponent end
 abstract type AbstractSinExpParameter <: AbstractSynapseParameter end
 abstract type AbstractDoubleExpParameter <: AbstractSynapseParameter end
 abstract type AbstractReceptorParameter <: AbstractSynapseParameter end
@@ -14,6 +14,27 @@ abstract type AbstractDeltaParameter <: AbstractSynapseParameter end
 #     k = -0.077,  # NMDA voltage dependency parameter
 #     mg = 1.0f0,  # NMDA voltage dependency parameter
 # ),
+"""
+    ReceptorSynapse{FT,VIT,ST,NMDAT,VFT} <: AbstractReceptorParameter
+
+A synaptic parameter type that models receptor-based synaptic dynamics with NMDA voltage dependence.
+
+# Fields
+- `NMDA::NMDAT`: Parameters for NMDA voltage dependence (default: `NMDAVoltageDependency()`)
+- `glu_receptors::VIT`: Indices of glutamate receptors (default: `[1, 2]`)
+- `gaba_receptors::VIT`: Indices of GABA receptors (default: `[3, 4]`)
+- `syn::ST`: Array of receptor parameters (default: `SomaReceptors`)
+
+# Type Parameters
+- `FT`: Floating point type (default: `Float32`)
+- `VIT`: Vector of integers type (default: `Vector{Int}`)
+- `ST`: Receptor array type (default: `ReceptorArray`)
+- `NMDAT`: NMDA voltage dependency type (default: `NMDAVoltageDependency{Float32}`)
+- `VFT`: Vector of floating point type (default: `Vector{Float32}`)
+
+This type implements receptor-based synaptic dynamics with NMDA voltage dependence, where synaptic currents are calculated based on receptor activation and voltage-dependent NMDA modulation.
+"""
+ReceptorSynapse
 @snn_kw struct ReceptorSynapse{
         FT = Float32,
         VIT = Vector{Int},
@@ -120,7 +141,27 @@ end
     return
 end
 
-## Double Exponential Receptors updates
+"""
+    DoubleExpSynapse{FT} <: AbstractDoubleExpParameter
+
+A synaptic parameter type that models double exponential synaptic dynamics.
+
+# Fields
+- `τre::FT`: Rise time constant for excitatory synapses (default: 1ms)
+- `τde::FT`: Decay time constant for excitatory synapses (default: 6ms)
+- `τri::FT`: Rise time constant for inhibitory synapses (default: 0.5ms)
+- `τdi::FT`: Decay time constant for inhibitory synapses (default: 2ms)
+- `E_i::FT`: Reversal potential for inhibitory synapses (default: -75mV)
+- `E_e::FT`: Reversal potential for excitatory synapses (default: 0mV)
+- `gsyn_e::FT`: Synaptic conductance for excitatory synapses (default: 1.0f0)
+- `gsyn_i::FT`: Synaptic conductance for inhibitory synapses (default: 1.0f0)
+
+# Type Parameters
+- `FT`: Floating point type (default: `Float32`)
+
+This type implements double exponential synaptic dynamics, where synaptic currents are calculated using separate rise and decay time constants for both excitatory and inhibitory synapses.
+"""
+DoubleExpSynapse
 @snn_kw struct DoubleExpSynapse{FT = Float32} <: AbstractDoubleExpParameter
     τre::FT = 1ms # Rise time for excitatory synapses
     τde::FT = 6ms # Decay time for excitatory synapses
@@ -158,7 +199,25 @@ end
     end
 end
 
-## Single Exponential Receptors updates
+"""
+    SingleExpSynapse{FT} <: AbstractSinExpParameter
+
+A synaptic parameter type that models single exponential synaptic dynamics.
+
+# Fields
+- `τe::FT`: Decay time constant for excitatory synapses (default: 6ms)
+- `τi::FT`: Rise time constant for inhibitory synapses (default: 0.5ms)
+- `E_i::FT`: Reversal potential for inhibitory synapses (default: -75mV)
+- `E_e::FT`: Reversal potential for excitatory synapses (default: 0mV)
+- `gsyn_e::FT`: Synaptic conductance for excitatory synapses (default: 1.0f0)
+- `gsyn_i::FT`: Synaptic conductance for inhibitory synapses (default: 1.0f0)
+
+# Type Parameters
+- `FT`: Floating point type (default: `Float32`)
+
+This type implements single exponential synaptic dynamics, where synaptic currents are calculated using separate time constants for both excitatory and inhibitory synapses.
+"""
+SingleExpSynapse
 @snn_kw struct SingleExpSynapse{FT = Float32} <: AbstractSinExpParameter
     ## Synapses
     τe::FT = 6ms # Decay time for excitatory synapses
@@ -168,6 +227,7 @@ end
     gsyn_e::FT = 1.0f0 #norm_synapse(τre, τde) # Synaptic conductance for excitatory synapses
     gsyn_i::FT = 1.0f0 #norm_synapse(τri, τdi) # Synaptic conductance for inhibitory synapses
 end
+
 function update_synapses!(
     p::P,
     synapse::T,
@@ -193,6 +253,20 @@ end
 end
 
 ## Delta Receptors updates
+"""
+    DeltaSynapse{FT} <: AbstractDeltaParameter
+
+A synaptic parameter type that models delta (instantaneous) synaptic dynamics.
+
+# Fields
+None - this type implements instantaneous synaptic dynamics where synaptic inputs are applied directly without any time constants.
+
+# Type Parameters
+- `FT`: Floating point type (default: `Float32`)
+
+This type implements delta synaptic dynamics, where synaptic inputs are applied instantaneously without any time delays or decay. The synaptic current is calculated as the difference between excitatory and inhibitory inputs.
+"""
+DeltaSynapse
 @snn_kw struct DeltaSynapse{FT = Float32} <: AbstractDeltaParameter
 end
 
@@ -221,6 +295,23 @@ end
 
 ## Current Receptors updates
 
+"""
+    CurrentSynapse{FT} <: AbstractCurrentParameter
+
+A synaptic parameter type that models current-based synaptic dynamics.
+
+# Fields
+- `τe::FT`: Decay time constant for excitatory synapses (default: 6ms)
+- `τi::FT`: Decay time constant for inhibitory synapses (default: 2ms)
+- `E_i::FT`: Reversal potential for inhibitory synapses (default: -75mV)
+- `E_e::FT`: Reversal potential for excitatory synapses (default: 0mV)
+
+# Type Parameters
+- `FT`: Floating point type (default: `Float32`)
+
+This type implements current-based synaptic dynamics, where synaptic currents are calculated using separate time constants for both excitatory and inhibitory synapses.
+"""
+CurrentSynapse
 @snn_kw struct CurrentSynapse{FT = Float32} <: AbstractCurrentParameter
     τe::FT = 6ms # Rise time for excitatory synapses
     τi::FT = 2ms # Rise time for inhibitory synapses
@@ -253,17 +344,4 @@ end
 end
 
 
-## Synaptic currents
-
-
-# if nmda > 0.0f0
-#     @simd for neuron ∈ 1:N
-#         syn_curr[i] +=
-#             gsyn * g[i, r] * (v[i] - E_rev) / (1.0f0 + (mg / b) * exp256(k * (v[i])))
-#     end
-# else
-#     @simd for i ∈ 1:N
-#         syn_curr[i] += gsyn * g[i, r] * (v[i] - E_rev)
-#     end
-
-export ReceptorSynapse, DoubleExpSynapse, SingleExpSynapse, CurrentSynapse, DeltaSynapse
+export ReceptorSynapse, DoubleExpSynapse, SingleExpSynapse, CurrentSynapse, DeltaSynapse, AbstractSynapseParameter
