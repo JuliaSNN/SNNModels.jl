@@ -41,9 +41,7 @@ function get_synapse_symbol(synapse::CurrentSynapse, sym::Symbol)
 end
 
 function get_synapse_symbol(synapse::ReceptorSynapse, sym::Symbol) 
-    sym == :glu && return :glu
-    sym == :gaba && return :gaba
-    error("Synapse symbol $sym not found in ReceptorSynapse")
+    return sym
 end
 
 
