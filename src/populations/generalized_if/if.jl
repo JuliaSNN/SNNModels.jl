@@ -105,6 +105,20 @@ function Population(param::IFParameter; synapse::AbstractSynapseParameter, spike
     return IF(;N, param, synapse, spike, kwargs...)
 end
 
+function synaptic_target(
+    targets::Dict,
+    post::T,
+    sym::Symbol,
+    target::Nothing = nothing,
+) where {T<:IF}
+    syn = get_synapse_symbol(post.synapse, sym)
+    sym = Symbol(syn)
+    g = getfield(post, sym)
+    v_post = getfield(post, :v)
+    push!(targets, :sym => sym)
+    return g, v_post
+end
+
 
 function update_neuron!(
     p::IF,

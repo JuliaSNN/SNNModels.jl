@@ -98,9 +98,10 @@ Tripod
 end
 
 function synaptic_target(targets::Dict, post::Tripod, sym::Symbol, target::Symbol)
-    sym = Symbol("$(sym)_$target")
+    syn = get_synapse_symbol(post.param.soma_syn, sym)
+    sym = Symbol("$(syn)_$target")
     v = Symbol("v_$target")
-    g = getfield(post, sym)
+    g = getfield(post,sym )
     hasfield(typeof(post), v) && (v_post = getfield(post, v))
 
     push!(targets, :sym => sym)

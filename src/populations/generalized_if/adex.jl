@@ -115,7 +115,9 @@ function synaptic_target(
     post::T,
     sym::Symbol,
     target::Nothing = nothing,
-) where {T<:AbstractGeneralizedIF}
+) where {T<:AdEx}
+    syn = get_synapse_symbol(post.synapse, sym)
+    sym = Symbol(syn)
     g = getfield(post, sym)
     v_post = getfield(post, :v)
     push!(targets, :sym => sym)

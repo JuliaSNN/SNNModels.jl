@@ -8,6 +8,43 @@ abstract type AbstractCurrentParameter <: AbstractSynapseParameter end
 abstract type AbstractDeltaParameter <: AbstractSynapseParameter end
 
 
+
+get_synapse_symbol(post::AbstractPopulation, sym::Symbol) = sym
+
+get_synapse_symbol(post::T, sym::Symbol) where {T<:AbstractGeneralizedIF} =
+    get_synapse_symbol(post.synapse, sym) # for dendrites, we assume the target is always :d
+
+function get_synapse_symbol(synapse::DoubleExpSynapse, sym::Symbol) 
+    sym == :glu && return :he
+    sym == :gaba && return :hi
+    sym == :he && return :he
+    sym == :hi && return :hi
+    error("Synapse symbol $sym not found in DoubleExpSynapse")
+end
+
+function get_synapse_symbol(synapse::SingleExpSynapse, sym::Symbol) 
+    sym == :glu && return :ge
+    sym == :gaba && return :gi
+    sym == :ge && return :ge
+    sym == :gi && return :gi
+    error("Synapse symbol $sym not found in SingleExpSynapse")
+end
+
+function get_synapse_symbol(synapse::CurrentSynapse, sym::Symbol) 
+    sym == :glu && return :ge
+    sym == :gaba && return :gi
+    sym == :ge && return :ge
+    sym == :gi && return :gi
+    error("Synapse symbol $sym not found in CurrentSynapse")
+end
+
+function get_synapse_symbol(synapse::ReceptorSynapse, sym::Symbol) 
+    sym == :glu && return :glu
+    sym == :gaba && return :gaba
+    error("Synapse symbol $sym not found in ReceptorSynapse")
+end
+
+
 ## Receptor Receptors updates
 # NMDA::NMDAVoltageDependency = NMDAVoltageDependency(
 #     b = 3.36,  # NMDA voltage dependency parameter

@@ -38,5 +38,5 @@ include("multicompartment/tripod.jl")
 include("multicompartment/ballandstick.jl")
 # include("multicompartment/multipod.jl")
 
-
+Population(; param, kwargs...) = Population(param; kwargs...)
 export AbstractDendriteIF, AbstractGeneralizedIF, AbstractGeneralizedIFParameter, Population
