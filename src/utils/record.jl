@@ -491,7 +491,7 @@ function record(p, sym::Symbol; range = false, interval = nothing, interpolate=t
             if !isnothing(interval)
                 @assert interval[1] .>= r[1] "Interval start $(interval[1]) is out of bounds $(r_v[1])"
                 @assert interval[end] .<= r[end] "Interval end $(interval[end]) is out of bounds $(r_v[end])"
-                v_dt = v[:, interval]
+                v_dt = v(:, interval)
                 r = interval
                 ax = map(i-> axes(v_dt, i), 1:(length(size(v))-1)) 
                 v = scale(Interpolations.interpolate(v_dt,  get_interpolator(v_dt)), ax..., r)
