@@ -19,6 +19,8 @@ function get_synapse_symbol(synapse::DoubleExpSynapse, sym::Symbol)
     sym == :gaba && return :hi
     sym == :he && return :he
     sym == :hi && return :hi
+    sym == :ge && return :he
+    sym == :gi && return :hi
     error("Synapse symbol $sym not found in DoubleExpSynapse")
 end
 
