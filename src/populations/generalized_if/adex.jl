@@ -133,7 +133,6 @@ end
 	[Integrate-And-Fire Neuron](https://neuronaldynamics.epfl.ch/online/Ch1.S3.html)
 """
 
-
 function update_neuron!(
     p::P,
     param::T,

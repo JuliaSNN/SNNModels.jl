@@ -104,7 +104,6 @@ function synaptic_target(targets::Dict, post::Tripod, sym::Symbol, target::Symbo
 end
 
 
-
 function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     @fastmath @inbounds begin
         @unpack N, v_s, w_s, v_d1, v_d2 = p
