@@ -64,6 +64,39 @@ snn_kw_str_sentinel_check(x) = :(
     end
 )
 
+function snn_kw_str_sentinel_check_concrete(x; dict) 
+    # @show dict
+    # @show x[1]
+    @assert haskey(dict, x[1]) "Type parameter $(x[1]) defined in the struct is not used in any field"
+    return :(
+        if $(x[1]) isa KwStrSentinel
+        ## if it is longer than 1, set it to Any
+        ## otherwise, x[2] is the default type 
+            $(x[1]) = $(length(x) > 1 ?  :($(dict[x[1]])) : Any)
+
+    end
+    )
+end
+
+function snn_kw_get_concrete_types(x)
+    my_dict = Dict{Symbol,Any}()
+    for field in x
+        if length(field) == 3
+            my_dict[field[2]] = :(typeof($(field[1])))
+        else 
+            if haskey(my_dict, field[2])
+                continue
+            else
+                my_dict[field[2]] = Any
+            end
+        end
+    end
+    return my_dict
+end
+
+
+
+
 "A minimal implementation of `Base.@kwdef` with default type parameter support"
 macro snn_kw(str)
     str_abs = nothing
@@ -119,9 +152,11 @@ macro snn_kw(str)
         str.args[2] = Expr(:(<:), str.args[2], str_abs)
     end
 
+    dict = snn_kw_get_concrete_types(str_fields)
     # Use sentinels to track if type param kwargs are assigned
     ctor_params = snn_kw_str_sentinels.(str_params)
-    ctor_params_bodies = snn_kw_str_sentinel_check.(str_params)
+    # ctor_params_bodies = snn_kw_str_sentinel_check.(str_params)
+    ctor_params_bodies = snn_kw_str_sentinel_check_concrete.(str_params; dict=dict)
 
     # Constructor accepts field values and type params as kwargs
     ctor_kws = Expr(
@@ -138,6 +173,7 @@ macro snn_kw(str)
     ctor_body =
         Expr(:block, ctor_params_bodies..., Expr(:call, ctor_call, first.(str_fields)...))
     ctor = Expr(:function, ctor_sig, ctor_body)
+    
 
     return quote
         $(esc(str))
