@@ -35,7 +35,7 @@ AdExParameter
 end
 
 """
-    AdEx{VFT, MFT, VIT, VBT, GIFT, SYNT} <: AbstractGeneralizedIF
+    AdEx{VFT, MFT,  GIFT, SYNT} <: AbstractGeneralizedIF
 
 A struct representing an Adaptive Exponential Integrate-and-Fire (AdEx) neuron model.
 
@@ -68,43 +68,42 @@ The AdEx model implements the adaptive exponential integrate-and-fire neuron mod
 """
 AdEx
 
-@snn_kw struct AdEx{
-    VFT = Vector{Float32},
-    MFT = Matrix{Float32},
-    VIT = Vector{Int},
-    VBT = Vector{Bool},
-    GIFT<:AbstractGeneralizedIFParameter,
-    SYNT<:AbstractSynapseParameter
-} <: AbstractGeneralizedIF
-name::String = "AdEx"
+@snn_kw struct AdEx{ IT = Int32,
+                    VFT = Vector{Float32},
+                    MFT = Matrix{Float32},
+                    SYNT <: AbstractSynapseParameter,
+                    PST = PostSpike{Float32}
+                    } <: AbstractGeneralizedIF
+
+    name::String = "AdEx"
     id::String = randstring(12)
 
-    param::GIFT  = AdExParameter()
+    param::AdExParameter  = AdExParameter()
     synapse::SYNT = DoubleExpSynapse()
-    spike::PostSpike = PostSpike()
+    spike::PST = PostSpike()
 
-    N::Int32 = 100 # Number of neurons
-    v::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
-    w::VFT = zeros(N) # Adaptation current
-    ξ_het::VFT = ones(N) # Membrane time constant
+    N::IT = Int32(100) # Number of neurons
+    v::VFT = param.Vr .+ rand(Float32, N) .* (param.Vt - param.Vr)
+    w::VFT = zeros(Float32, N) # Adaptation current
+    ξ_het::VFT = ones(Float32, N) # Membrane time constant
 
     fire::VBT = zeros(Bool, N) # Store spikes
-    θ::VFT = ones(N) * param.Vt # Array with membrane potential thresholds
-    tabs::VIT = ones(N) # Membrane time constant
-    I::VFT = zeros(N) # Current
+    θ::VFT = ones(Float32, N) * param.Vt # Array with membrane potential thresholds
+    tabs::VIT = ones(Int, N) # Membrane time constant
+    I::VFT = zeros(Float32, N) # Current
 
     # Two receptors synaptic conductance
-    syn_curr::VFT = zeros(N)
-    ge::VFT = synapse isa AbstractReceptorParameter ? zeros(0) : zeros(N) # Time-dependent conductance
-    gi::VFT = synapse isa AbstractReceptorParameter ? zeros(0) : zeros(N) # Time-dependent conductance
-    he::VFT = zeros(N)
-    hi::VFT = zeros(N)
+    syn_curr::VFT = zeros(Float32, N)
+    ge::VFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N) : zeros(Float32, N) # Time-dependent conductance
+    gi::VFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N) : zeros(Float32, N) # Time-dependent conductance
+    he::VFT = zeros(Float32, N)
+    hi::VFT = zeros(Float32, N)
 
     # Glu/Gaba conductance
-    g::MFT = synapse isa AbstractReceptorParameter ? zeros(N, 4) : zeros(0, 0)
-    h::MFT = synapse isa AbstractReceptorParameter ? zeros(N, 4) : zeros(0, 0)
-    glu::VFT = synapse isa AbstractReceptorParameter ? zeros(N) : zeros(0)
-    gaba::VFT = synapse isa AbstractReceptorParameter ? zeros(N) : zeros(0)
+    g::MFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N, 4) : zeros(Float32, N, 0)
+    h::MFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N, 4) : zeros(Float32, N, 0)
+    glu::VFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N) : zeros(Float32, N)
+    gaba::VFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N) : zeros(Float32, N)
 
     records::Dict = Dict()
 end
@@ -114,8 +113,10 @@ function synaptic_target(
     targets::Dict,
     post::T,
     sym::Symbol,
-    target::Nothing = nothing,
-) where {T<:AbstractGeneralizedIF}
+    target,
+) where {T<:AdEx}
+    syn = get_synapse_symbol(post.synapse, sym)
+    sym = Symbol(syn)
     g = getfield(post, sym)
     v_post = getfield(post, :v)
     push!(targets, :sym => sym)
@@ -124,7 +125,7 @@ end
 
 
 function Population(param::AdExParameter; synapse::AbstractSynapseParameter, N, spike=PostSpike(), kwargs...)
-    return AdEx(;N, param, synapse, spike, kwargs...)
+    return AdEx(;N, param, synapse, spike, SYNT = typeof(synapse), kwargs...)
 end
 
 
@@ -136,13 +137,12 @@ function update_neuron!(
     p::P,
     param::T,
     dt::Float32,
-) where {P<:AdEx,T<:AbstractGeneralizedIFParameter}
+) where {P<:AdEx,T<:AdExParameter}
     @unpack N, v, w, fire, θ, I, ξ_het, tabs, syn_curr = p
     @unpack τm, Vt, Vr, El, R, ΔT, τw, a, b =param
     @unpack At, τA, τabs = p.spike
 
-    # @inbounds 
-    for i ∈ 1:N
+    @inbounds for i ∈ 1:N
         # Reset membrane potential after spike
         v[i] = ifelse(fire[i], Vr, v[i])
 

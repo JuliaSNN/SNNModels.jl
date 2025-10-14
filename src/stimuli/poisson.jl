@@ -12,11 +12,11 @@ abstract type PoissonStimulusParameter <: AbstractStimulusParameter end
 """
 PoissonVariable
 
-@snn_kw struct PoissonVariable{VFT} <: PoissonStimulusParameter
-    variables::Dict{Symbol,Any}
+@snn_kw struct PoissonVariable{FT = Float32, VDT = Dict{Symbol,Any}} <: PoissonStimulusParameter
+    variables::VDT
     rate::Function
-    μ::Float32 = 1.0f0
-    active::Vector{Bool} = [true]
+    μ::FT = 1.0f0
+    active::VBT = [true]
 end
 
 """
@@ -34,7 +34,7 @@ PoissonFixed
 @snn_kw struct PoissonFixed{R = Float32} <: PoissonStimulusParameter
     rate::R = 0
     μ::R = 1.0f0
-    active::Vector{Bool} = [true]
+    active::VBT = [true]
 end
 
 
@@ -50,19 +50,16 @@ end
 """
 PoissonInterval
 
-@snn_kw struct PoissonInterval{R = Float32} <: PoissonStimulusParameter
+@snn_kw struct PoissonInterval{R = Float32, VVFT = Vector{Vector{Float32}}} <: PoissonStimulusParameter
     rate::R
-    intervals::Vector{Vector{R}}
+    intervals::VVFT
     μ::R = 1.0f0
-    active::Vector{Bool} = [true]
+    active::VBT = [true]
 end
 
 
 @snn_kw struct PoissonStimulus{
     VFT = Vector{Float32},
-    VBT = Vector{Bool},
-    VIT = Vector{Int},
-    IT = Int32,
 } <: AbstractStimulus
     id::String = randstring(12)
     name::String = "Poisson"

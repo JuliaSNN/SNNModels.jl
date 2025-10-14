@@ -12,6 +12,7 @@ plasticity!(
 include("synapse/synapse.jl")
 include("synapse/synapses.jl")
 include("synapse/synapse_parameters.jl")
+include("synapse/synaptic_targets.jl")
 
 ## Neurons
 include("poisson.jl")
@@ -38,5 +39,5 @@ include("multicompartment/tripod.jl")
 include("multicompartment/ballandstick.jl")
 # include("multicompartment/multipod.jl")
 
-
+Population(; param, kwargs...) = Population(param; kwargs...)
 export AbstractDendriteIF, AbstractGeneralizedIF, AbstractGeneralizedIFParameter, Population

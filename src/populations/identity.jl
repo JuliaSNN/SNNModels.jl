@@ -1,6 +1,6 @@
 struct IdentityParam <: AbstractPopulationParameter end
 
-@snn_kw mutable struct Identity{VFT = Vector{Float32},VBT = Vector{Bool},IT = Int32} <:
+@snn_kw mutable struct Identity{VFT = Vector{Float32}, IT = Int32} <:
                        AbstractPopulation
     name::String = "identity"
     id::String = randstring(12)

@@ -5,14 +5,14 @@ abstract type LTPParameter <: PlasticityParameter end
 abstract type STPVariables <: PlasticityVariables end
 abstract type STPParameter <: PlasticityParameter end
 
-@snn_kw struct NoLTP{VB = Vector{Bool}} <: LTPParameter
-    active::VB = [false]
+@snn_kw struct NoLTP <: LTPParameter
+    active::VBT = [false]
 end
-@snn_kw struct NoSTP{VB = Vector{Bool}} <: STPParameter
-    active::VB = [false]
+@snn_kw struct NoSTP <: STPParameter
+    active::VBT = [false]
 end
-@snn_kw struct NoVariables{VB = Vector{Bool}} <: PlasticityVariables
-    active::VB = [false]
+@snn_kw struct NoVariables <: PlasticityVariables
+    active::VBT = [false]
 end
 
 struct LTP <: LTPParameter end

@@ -43,16 +43,9 @@ The model includes synaptic conductances for both soma and dendrites, and suppor
 Tripod
 @snn_kw struct Tripod{
     MFT = Matrix{Float32},
-    VIT = Vector{Int32},
-    VST = Vector{Symbol},
     VFT = Vector{Float32},
-    VBT = Vector{Bool},
     VDT = Dendrite{Vector{Float32}},
     IT = Int32,
-    FT = Float32,
-    ST = ReceptorArray,
-    NMDAT = NMDAVoltageDependency{Float32},
-    PST = PostSpike{Float32},
 } <: AbstractDendriteIF
     id::String = randstring(12)
     name::String = "Tripod"
@@ -98,9 +91,10 @@ Tripod
 end
 
 function synaptic_target(targets::Dict, post::Tripod, sym::Symbol, target::Symbol)
-    sym = Symbol("$(sym)_$target")
+    syn = get_synapse_symbol(post.param.soma_syn, sym)
+    sym = Symbol("$(syn)_$target")
     v = Symbol("v_$target")
-    g = getfield(post, sym)
+    g = getfield(post,sym )
     hasfield(typeof(post), v) && (v_post = getfield(post, v))
 
     push!(targets, :sym => sym)
@@ -129,10 +123,10 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
         for i ∈ 1:N
             # implementation of the absolute refractory period with backpropagation (up) and after spike (τabs)
             if after_spike[i] > (τabs + up - up) / dt # backpropagation
-                v_s[i] = BAP
+                v_s[i] = AP_membrane
                 ## backpropagation effect
-                c1 = (BAP - v_d1[i]) * d1.gax[i]
-                c2 = (BAP - v_d2[i]) * d2.gax[i]
+                c1 = (v_s[i] - v_d1[i]) * d1.gax[i]
+                c2 = (v_s[i] - v_d2[i]) * d2.gax[i]
                 ## apply currents
                 v_d1[i] += dt * c1 / d1.C[i]
                 v_d2[i] += dt * c2 / d2.C[i]
@@ -195,6 +189,7 @@ end
         @unpack d1, d2 = p
         @unpack is, cs = p
         @unpack soma_syn, dend_syn = param
+        @unpack C, gl, El, ΔT = param.adex
 
 
         #compute axial currents
@@ -206,7 +201,6 @@ end
         synaptic_current!(dend_syn, v_d2[i] + Δv[3] * dt, g_d2, is, 3, i)
 
         # update membrane potential
-        @unpack C, gl, El, ΔT = param.adex
         Δv[1] =
             1/C * (
                 + gl * (-v_s[i] + Δv[1] * dt + El) +

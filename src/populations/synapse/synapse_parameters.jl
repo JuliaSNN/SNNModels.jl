@@ -1,11 +1,12 @@
 ## Soma synapse parameters
 
 EyalNMDA = let
-    Mg_mM = 1.0mM
-    nmda_b = 3.36   # voltage dependence of nmda channels
-    nmda_k = -0.077     # Eyal 2018
+    Mg_mM = Float32(1.0mM)
+    nmda_b = 3.36f0   # voltage dependence of nmda channels
+    nmda_k = -0.077f0     # Eyal 2018
     NMDAVoltageDependency(mg = Mg_mM/mM, b = nmda_b, k = nmda_k)
 end
+
 
 ## Tripod
 MilesGabaSoma =
@@ -45,9 +46,9 @@ TripodDendSynapse = ReceptorSynapse(
 ## Soma parameters
 
 SomaNMDA = let
-    Mg_mM = 1.0mM
-    nmda_b = 3.57   # voltage dependence of nmda channels
-    nmda_k = -0.062     # Eyal 2018
+    Mg_mM = 1.0mM |> Float32
+    nmda_b = 3.57f0   # voltage dependence of nmda channels
+    nmda_k = -0.062f0     # Eyal 2018
     NMDAVoltageDependency(mg = Mg_mM/mM, b = nmda_b, k = nmda_k)
 end
 SomaGlu = Glutamatergic(
@@ -88,9 +89,9 @@ Gaba_CANAHP = GABAergic(
 Synapse_CANAHP = Receptors(Glu_CANAHP, Gaba_CANAHP)
 αs_CANAHP = [1.0, 0.275/ms, 1.0, 0.015/ms]
 NMDA_CANAHP = let
-    Mg_mM = 1.5mM
-    nmda_b = 3.57
-    nmda_k = -0.063
+    Mg_mM = 1.5mM |> Float32
+    nmda_b = 3.57f0
+    nmda_k = -0.063f0
     NMDAVoltageDependency(mg = Mg_mM/mM, b = nmda_b, k = nmda_k)
 end
 

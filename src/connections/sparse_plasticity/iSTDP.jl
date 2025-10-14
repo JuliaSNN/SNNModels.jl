@@ -30,7 +30,7 @@ end
     Npre::IT
     tpost::VFT = zeros(Npost) # postsynaptic spiking time 
     tpre::VFT = zeros(Npre) # presynaptic spiking time
-    active::Vector{Bool} = [true]
+    active::VBT = [true]
 end
 
 function plasticityvariables(param::T, Npre, Npost) where {T<:iSTDPParameter}

@@ -116,10 +116,10 @@ A mutable struct representing time.
 """
 Time
 
-@snn_kw mutable struct Time{VFT = Vector{Float32},VIT = Vector{Int32},FT = Float32}
-    t::VFT = [0.0f0]
-    tt::VIT = Int32[0]
-    dt::FT = 0.125f0
+@kwdef mutable struct Time
+    t::Vector{Float32} = [0.0f0]
+    tt::Vector{Int32} = Int32[0]
+    dt::Float32 = 0.125f0
 end
 
 function Time(time::Number)
@@ -134,6 +134,10 @@ export AbstractConnection, AbstractPopulation, AbstractStimulus
 
 
 NetworkModel = NamedTuple
+
+VBT = Vector{Bool}
+VIT = Vector{Int}
+# VDT =Dict{Symbol,Any}
 
 
 function isa_model(model)

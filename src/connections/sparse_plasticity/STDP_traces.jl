@@ -36,7 +36,7 @@ end
     Npre::IT                       # Number of pre-synaptic neurons
     tpre::VFT = zeros(Npre)           # Pre-synaptic spike trace
     tpost::VFT = zeros(Npost)          # Post-synaptic spike trace
-    active::Vector{Bool} = [true]
+    active::VBT = [true]
 end
 
 # Function to initialize plasticity variables

@@ -2,7 +2,7 @@
 @snn_kw mutable struct SpikeRateSynapse{
     VIT = Vector{Int32},
     VFT = Vector{Float32},
-    VBT = Vector{Bool},
+    VBT = VBT,
 } <: AbstractConnection
     id::String = randstring(12)
     param::RateSynapseParameter = RateSynapseParameter()

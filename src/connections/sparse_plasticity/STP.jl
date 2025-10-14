@@ -33,7 +33,7 @@ end
     u::VFT = zeros(Npre) # presynaptic state
     x::VFT = ones(Npre)  # presynaptic state
     _ρ::VFT = ones(Npre) # presynaptic state
-    active::Vector{Bool} = [true]
+    active::VBT = [true]
 end
 
 plasticityvariables(param::MarkramSTPParameter, Npre, Npost) =

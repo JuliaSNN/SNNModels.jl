@@ -48,17 +48,16 @@ DendNeuronParameter
 
 DendLength = Union{Float32,Tuple}
 
+
 @snn_kw struct DendNeuronParameter{
-    FT = Float32,
-    IT = Int64,
-    VIT = Vector{Int64},
     DT=Vector{DendLength},
-    RT=ReceptorSynapse,
+    RT=ReceptorSynapseType,
     PST = PostSpike{Float32},
-    PT = Physiology,
+    PT = Physiology{Float32},
+    AdExT = AdExParameter{Float32}
 } <: AbstractGeneralizedIFParameter
     # AdEx model
-    adex::AdExParameter = AdExParameter(
+    adex::AdExT = AdExParameter(
             C = 281pF,
             gl  = 40nS,
             R = 0.025GΩ,
@@ -86,6 +85,16 @@ end
 
 TripodParameter = DendNeuronParameter(ds = [200um, (200um, 400um)])
 BallAndStickParameter = DendNeuronParameter(ds = [(150um, 400um)])
+
+function Population(param::T; kwargs...) where {T<:DendNeuronParameter}
+    if length(param.ds) == 2
+        return Tripod(;param, kwargs...)
+    elseif length(param.ds) == 1
+        return BallAndStick(;param, kwargs...)
+    else
+        error("Dendritic segments must be either 1 (BallAndStick) or 2 (Tripod).")
+    end
+end
 
 function MulticompartmentNeuron(;
     N::Int = 100,

@@ -18,9 +18,9 @@ A parameter type for current stimuli that generates noisy current inputs.
 """
 CurrentNoise
 
-@snn_kw struct CurrentNoise{VFT = Vector{Float32}} <: CurrentParameter
+@snn_kw struct CurrentNoise{VFT = Vector{Float32}, DT = Distribution{Univariate,Continuous}} <: CurrentParameter
     I_base::VFT = zeros(Float32, 0)
-    I_dist::Distribution{Univariate,Continuous} = Normal(0.0, 0.0)
+    I_dist::DT = Normal(0.0, 0.0)
     α::VFT = ones(Float32, 0)
 end
 
@@ -73,10 +73,7 @@ A stimulus that applies current to neurons.
 """
 CurrentStimulus
 @snn_kw struct CurrentStimulus{
-    FT = Float32,
     VFT = Vector{Float32},
-    DT = Distribution{Univariate,Continuous},
-    VIT = Vector{Int},
 } <: AbstractStimulus
     param::CurrentParameter
     name::String = "Current"

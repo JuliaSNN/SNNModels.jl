@@ -99,11 +99,7 @@ A spike time stimulus structure for spiking neural networks. This stimulus type 
 SpikeTimeStimulus
 
 @snn_kw struct SpikeTimeStimulus{
-    FT = Float32,
     VFT = Vector{Float32},
-    VBT = Vector{Bool},
-    DT = Distribution{Univariate,Continuous},
-    VIT = Vector{Int},
 } <: AbstractStimulus
     N::Int
     name::String = "SpikeTime"

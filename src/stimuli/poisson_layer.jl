@@ -13,11 +13,11 @@
 """
 PoissonLayer
 
-@snn_kw struct PoissonLayer{R = Float32}  <: AbstractStimulusParameter
-    rate::Float32 = 1.0f0  # Default rate in Hz
+@snn_kw struct PoissonLayer{FT = Float32, VFT = Vector{Float32}}  <: AbstractStimulusParameter
+    rate::FT = 1.0f0  # Default rate in Hz
     N::Int32 = 1
-    rates::Vector{R} = fill(Float32.(rate), N)
-    active::Vector{Bool} = [true]
+    rates::VFT = fill(Float32.(rate), N)
+    active::VBT = [true]
 end
 
 function PoissonLayer(rate::R; kwargs...) where {R<:Real}
@@ -54,9 +54,6 @@ and the connectivity is defined by sparse matrix representations.
 PoissonStimulusLayer
 @snn_kw struct PoissonStimulusLayer{
     VFT = Vector{Float32},
-    VBT = Vector{Bool},
-    VIT = Vector{Int},
-    IT = Int32,
 } <: AbstractStimulus
     N::Int
     id::String = randstring(12)

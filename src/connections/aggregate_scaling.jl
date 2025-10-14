@@ -1,8 +1,8 @@
-@snn_kw struct AggregateScalingParameter{FT = Float32} <: NormParam
+@snn_kw struct AggregateScalingParameter{FT = Float32, VFT = Vector{Float32}} <: NormParam
     τ::FT = 10ms
     τa::FT
     τe::FT
-    Y::Vector{FT}
+    Y::VFT
     Wmin::FT = 0.5pF
     Wmax::FT = 250pF
 end
@@ -22,9 +22,6 @@ end
 
 @snn_kw struct AggregateScaling{
     VFT = Vector{Float32},
-    VIT = Vector{Int32},
-    VBT = Vector{Bool},
-    MFT = Matrix{Float32},
     VST = Vector{<:AbstractSparseSynapse},
 } <: AbstractNormalization
     N::Int32 = 0

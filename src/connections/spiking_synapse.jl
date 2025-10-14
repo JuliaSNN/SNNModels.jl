@@ -1,7 +1,6 @@
 @snn_kw mutable struct SpikingSynapse{
     VIT = Vector{Int32},
     VFT = Vector{Float32},
-    VBT = Vector{Bool},
 } <: AbstractSpikingSynapse
     id::String = randstring(12)
     name::String = "SpikingSynapse"
@@ -28,7 +27,6 @@ end
 @snn_kw mutable struct SpikingSynapseDelay{
     VIT = Vector{Int32},
     VFT = Vector{Float32},
-    VBT = Vector{Bool},
 } <: AbstractSpikingSynapse
     id::String = randstring(12)
     name::String = "SpikingSynapseDelay"

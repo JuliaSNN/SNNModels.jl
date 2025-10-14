@@ -5,8 +5,8 @@ struct FLSparseSynapseParameter end
     name::String = "FLSparseSynapse"
     id::String = randstring(12)
     param::FLSparseSynapseParameter = FLSparseSynapseParameter()
-    colptr::Vector{Int32} # column pointer of sparse W
-    I::Vector{Int32}      # postsynaptic index of W
+    colptr::VIT # column pointer of sparse W
+    I::VIT      # postsynaptic index of W
     W::VFT  # synaptic weight
     rI::VFT # postsynaptic rate
     rJ::VFT # presynaptic rate

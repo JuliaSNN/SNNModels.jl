@@ -1,8 +1,8 @@
 E =let
     NMDA = let
-        Mg_mM = 1.0mM
-        nmda_b = 3.36   # voltage dependence of nmda channels
-        nmda_k = -0.077     # Eyal 2018
+        Mg_mM = 1mM
+        nmda_b = 3.36f0   # voltage dependence of nmda channels
+        nmda_k = -0.077f0    # Eyal 2018
         NMDAVoltageDependency(mg = Mg_mM/mM, b = nmda_b, k = nmda_k)
     end
 

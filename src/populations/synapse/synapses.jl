@@ -8,6 +8,47 @@ abstract type AbstractCurrentParameter <: AbstractSynapseParameter end
 abstract type AbstractDeltaParameter <: AbstractSynapseParameter end
 
 
+
+get_synapse_symbol(post::AbstractPopulation, sym::Symbol) = sym
+
+get_synapse_symbol(post::T, sym::Symbol) where {T<:AbstractGeneralizedIF} =
+    get_synapse_symbol(post.synapse, sym) # for dendrites, we assume the target is always :d
+
+function get_synapse_symbol(synapse::T, sym::Symbol) where {T<:AbstractDoubleExpParameter}
+    sym == :glu && return :he
+    sym == :gaba && return :hi
+    sym == :he && return :he
+    sym == :hi && return :hi
+    sym == :ge && return :he
+    sym == :gi && return :hi
+    error("Synapse symbol $sym not found in DoubleExpSynapse")
+end
+
+function get_synapse_symbol(synapse::T, sym::Symbol) where {T<:AbstractSinExpParameter}
+    sym == :glu && return :ge
+    sym == :gaba && return :gi
+    sym == :ge && return :ge
+    sym == :gi && return :gi
+    error("Synapse symbol $sym not found in SingleExpSynapse")
+end
+
+function get_synapse_symbol(synapse::T, sym::Symbol) where {T<:AbstractDeltaParameter}
+    sym == :glu && return :ge
+    sym == :gaba && return :gi
+    sym == :ge && return :ge
+    sym == :gi && return :gi
+    error("Synapse symbol $sym not found in CurrentSynapse")
+end
+
+function get_synapse_symbol(synapse::T, sym::Symbol) where {T<:AbstractCurrentParameter}
+    return sym
+end
+
+function get_synapse_symbol(synapse::T, sym::Symbol) where {T<:AbstractReceptorParameter}
+    return sym
+end
+
+
 ## Receptor Receptors updates
 # NMDA::NMDAVoltageDependency = NMDAVoltageDependency(
 #     b = 3.36,  # NMDA voltage dependency parameter
@@ -36,11 +77,9 @@ This type implements receptor-based synaptic dynamics with NMDA voltage dependen
 """
 ReceptorSynapse
 @snn_kw struct ReceptorSynapse{
-        FT = Float32,
         VIT = Vector{Int},
-        ST = ReceptorArray,
+        ST = Vector{Receptor{Float32}},
         NMDAT = NMDAVoltageDependency{Float32},
-        VFT = Vector{Float32},
     } <: AbstractReceptorParameter
     ## Synapses
     NMDA::NMDAT = NMDAVoltageDependency()
@@ -48,6 +87,12 @@ ReceptorSynapse
     gaba_receptors::VIT = [3, 4]
     syn::ST=SomaReceptors
 end
+
+ReceptorSynapseType = ReceptorSynapse{
+        Vector{Int},
+        Vector{Receptor{Float32}},
+        NMDAVoltageDependency{Float32},
+    }
 
 ReceptorSynapse(syn::ReceptorArray, NMDA::NMDAVoltageDependency{Float32}; kwargs...) = ReceptorSynapse(; kwargs..., syn=syn, NMDA=NMDA)
 
@@ -266,9 +311,7 @@ None - this type implements instantaneous synaptic dynamics where synaptic input
 
 This type implements delta synaptic dynamics, where synaptic inputs are applied instantaneously without any time delays or decay. The synaptic current is calculated as the difference between excitatory and inhibitory inputs.
 """
-DeltaSynapse
-@snn_kw struct DeltaSynapse{FT = Float32} <: AbstractDeltaParameter
-end
+struct DeltaSynapse <: AbstractDeltaParameter end
 
 @inline function update_synapses!(
     p::P,

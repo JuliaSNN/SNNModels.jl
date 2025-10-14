@@ -1,47 +1,3 @@
-"""
-    sim!(
-        P::Vector{TN},
-        C::Vector{TS};
-        dt = 0.1f0,
-        duration = 10.0f0,
-        pbar = false,
-    ) where {TN <: AbstractPopulation, TS<:AbstractConnection }
-
-Simulates the spiking neural network for a specified duration by repeatedly calling `sim!` function.
-
-**Arguments**
-- `P::Vector{TN}`: Vector of neurons in the network.
-- `C::Vector{TS}`: Vector of synapses in the network.
-- `dt::Float32`: Time step for the simulation. Default value is `0.1f0`.
-- `duration::Float32`: Duration of the simulation. Default value is `10.0f0`.
-- `pbar::Bool`: Flag indicating whether to display a progress bar during the simulation. Default value is `false`.
-
-**Details**
-- The function creates a range of time steps from `0.0f0` to `duration-dt` with a step size of `dt`.
-- If `pbar` is `true`, the function creates a progress bar using the `ProgressBar` function with the time step range. Otherwise, it uses the time step range directly.
-- The function iterates over the time steps and calls the `sim!` function with `P`, `C`, and `dt`.
-
-"""
-function sim!(
-    P::Vector{TP},
-    C::Vector{TC} = [EmptySynapse()],
-    S::Vector{TS} = [EmptyStimulus()];
-    dt = 0.125f0,
-    duration = 10.0f0,
-    pbar = false,
-    time = Time(),
-) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
-    dt = Float32(dt)
-    duration = Float32(duration)
-    dts = 0.0f0:dt:(duration-dt)
-    pbar = pbar ? ProgressBar(dts) : dts
-    for t in pbar
-        sim!(P, C, S, dt, time)
-    end
-    return time
-end
-
-
 
 """
     train!(
@@ -121,47 +77,6 @@ end
 train!(model::NamedTuple, duration::R = 1s; kwargs...) where {R<:Real} =
     train!(; model, duration, kwargs...)
 
-sim!(model::NamedTuple, duration::R = 1s; kwargs...) where {R<:Real} =
-    train!(; model, duration, kwargs...)
-
-function sim!(args...; model = (time = Time(), name = "Model"), kwargs...)
-    pop, syn, stim = _args_model(args, model)
-    mytime = sim!(pop, syn, stim; time = model.time, kwargs...)
-    update_time!(model.time, mytime)
-    return get_time(model.time)
-    # sim!(collect(model.pop), collect(model.syn), collect(model.stim); kwargs...)
-end
-
-
-
-function initialize!(; kwargs...)
-    train!(; kwargs...)
-end
-
-#########
-
-function sim!(
-    P::Vector{TP},
-    C::Vector{TC},
-    S::Vector{TS},
-    dt::Float32,
-    T::Time,
-) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
-    record_zero!(P, C, S, T)
-    update_time!(T, dt)
-    for s in S
-        stimulate!(s, getfield(s, :param), T, dt)
-        record!(s, T)
-    end
-    for p in P
-        integrate!(p, getfield(p, :param), dt)
-        record!(p, T)
-    end
-    for c in C
-        forward!(c, getfield(c, :param))
-        record!(c, T)
-    end
-end
 
 function train!(
     P::Vector{TP},
@@ -200,5 +115,94 @@ function record_zero!(P, C, S, T)
         record!(s, T)
     end
 end
+##
+
+"""
+    sim!(
+        P::Vector{TN},
+        C::Vector{TS};
+        dt = 0.1f0,
+        duration = 10.0f0,
+        pbar = false,
+    ) where {TN <: AbstractPopulation, TS<:AbstractConnection }
+
+Simulates the spiking neural network for a specified duration by repeatedly calling `sim!` function.
+
+**Arguments**
+- `P::Vector{TN}`: Vector of neurons in the network.
+- `C::Vector{TS}`: Vector of synapses in the network.
+- `dt::Float32`: Time step for the simulation. Default value is `0.1f0`.
+- `duration::Float32`: Duration of the simulation. Default value is `10.0f0`.
+- `pbar::Bool`: Flag indicating whether to display a progress bar during the simulation. Default value is `false`.
+
+**Details**
+- The function creates a range of time steps from `0.0f0` to `duration-dt` with a step size of `dt`.
+- If `pbar` is `true`, the function creates a progress bar using the `ProgressBar` function with the time step range. Otherwise, it uses the time step range directly.
+- The function iterates over the time steps and calls the `sim!` function with `P`, `C`, and `dt`.
+
+"""
+function sim!(
+    P::Vector{TP},
+    C::Vector{TC} = [EmptySynapse()],
+    S::Vector{TS} = [EmptyStimulus()];
+    dt = 0.125f0,
+    duration = 10.0f0,
+    pbar = false,
+    time = Time(),
+) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
+    dt = Float32(dt)
+    duration = Float32(duration)
+    dts = 0.0f0:dt:(duration-dt)
+    pbar = pbar ? ProgressBar(dts) : dts
+    for t in pbar
+        sim!(P, C, S, dt, time)
+    end
+    return time
+end
+
+
+
+
+sim!(model::NamedTuple, duration::R = 1s; kwargs...) where {R<:Real} =
+    sim!(; model, duration, kwargs...)
+
+function sim!(args...; model = (time = Time(), name = "Model"), kwargs...)
+    pop, syn, stim = _args_model(args, model)
+    mytime = sim!(pop, syn, stim; time = model.time, kwargs...)
+    update_time!(model.time, mytime)
+    return get_time(model.time)
+    # sim!(collect(model.pop), collect(model.syn), collect(model.stim); kwargs...)
+end
+
+
+function sim!(
+    P::Vector{TP},
+    C::Vector{TC},
+    S::Vector{TS},
+    dt::Float32,
+    T::Time,
+) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
+    record_zero!(P, C, S, T)
+    update_time!(T, dt)
+    for s in S
+        stimulate!(s, getfield(s, :param), T, dt)
+        record!(s, T)
+    end
+    for p in P
+        integrate!(p, getfield(p, :param), dt)
+        record!(p, T)
+    end
+    for c in C
+        forward!(c, getfield(c, :param))
+        record!(c, T)
+    end
+end
+
+
+function initialize!(; kwargs...)
+    train!(; kwargs...)
+end
+
+#########
 
 export sim!, train!

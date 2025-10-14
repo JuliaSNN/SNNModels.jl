@@ -1,12 +1,12 @@
 ## Set physiology
-struct Physiology
-    Ri::Float32 ## in Ω*cm
-    Rd::Float32 ## in Ω*cm^2
-    Cd::Float32 ## in pF/cm^2
+struct Physiology{T}
+    Ri::T ## in Ω*cm
+    Rd::T ## in Ω*cm^2
+    Cd::T ## in pF/cm^2
 end
 
-human_dend = Physiology(200 * Ω * cm, 38907 * Ω * cm^2, 0.5μF / cm^2)
-mouse_dend = Physiology(200 * Ω * cm, 1700Ω * cm^2, 1μF / cm^2)
+human_dend = Physiology(200 * Ω * cm, 38907 * Ω * cm^2, 0.5μF / cm^2|>Float32)
+mouse_dend = Physiology(200 * Ω * cm, 1700Ω * cm^2, 1μF / cm^2 |> Float32)
 
 export human_dend, mouse_dend
 

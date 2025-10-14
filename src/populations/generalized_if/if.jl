@@ -72,37 +72,60 @@ It includes all necessary state variables for simulating the neuron dynamics and
 """
 IF
 
-@snn_kw mutable struct IF{
+@snn_kw struct IF{
+    IT = Int32,
     VFT = Vector{Float32},
-    VBT = Vector{Bool},
-    GIFT<:AbstractGeneralizedIFParameter,
-    SYNT<:AbstractSynapseParameter
+    MFT = Matrix{Float32},
+    SYNT <: AbstractSynapseParameter,
+    PST = PostSpike{Float32},
 } <: AbstractGeneralizedIF
 
-    param::GIFT = IFParameter()
+    param::IFParameter = IFParameter()
     synapse::SYNT = DoubleExpSynapse()
-    spike::PostSpike = PostSpike()
+    spike::PST = PostSpike()
 
     id::String = randstring(12)
     name::String = "IF"
-    N::Int32 = 100
-    v::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
-    ge::VFT = zeros(N)
-    gi::VFT = zeros(N)
-    he::VFT = zeros(N)
-    hi::VFT = zeros(N)
-    tabs::VFT = zeros(N)
-    w::VFT = zeros(N)
-    fire::VBT = zeros(Bool, N)
-    I::VFT = zeros(N)
-    syn_curr::VFT = zeros(N) # Synaptic current
+
+    N::IT = 100 # Number of neurons
+    v::VFT = param.Vr .+ rand(Float32, N) .* (param.Vt - param.Vr)
+    w::VFT = zeros(Float32, N) # Adaptation current
+    fire::VBT = zeros(Bool, N) # Store spikes
+    tabs::VIT = ones(Int, N) # Membrane time constant
+    I::VFT = zeros(Float32, N) # Current
+
+    # Two receptors synaptic conductance
+    syn_curr::VFT = zeros(Float32, N)
+    ge::VFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N) : zeros(Float32, N) # Time-dependent conductance
+    gi::VFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N) : zeros(Float32, N) # Time-dependent conductance
+    he::VFT = zeros(Float32, N)
+    hi::VFT = zeros(Float32, N)
+
+    # Glu/Gaba conductance
+    g::MFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N, 4) : zeros(Float32, N, 0)
+    h::MFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N, 4) : zeros(Float32, N, 0)
+    glu::VFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N) : zeros(Float32, N)
+    gaba::VFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N) : zeros(Float32, N)
+
     records::Dict = Dict()
-    Δv::VFT = zeros(Float32, N)
-    Δv_temp::VFT = zeros(Float32, N)
 end
 
 function Population(param::IFParameter; synapse::AbstractSynapseParameter, spike::PostSpike, N, kwargs...)
-    return IF(;N, param, synapse, spike, kwargs...)
+    return IF(;N, param, synapse, spike, SYNT =typeof(synapse), kwargs...)
+end
+
+function synaptic_target(
+    targets::Dict,
+    post::T,
+    sym::Symbol,
+    target::Nothing = nothing,
+) where {T<:IF}
+    syn = get_synapse_symbol(post.synapse, sym)
+    sym = Symbol(syn)
+    g = getfield(post, sym)
+    v_post = getfield(post, :v)
+    push!(targets, :sym => sym)
+    return g, v_post
 end
 
 

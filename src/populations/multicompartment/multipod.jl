@@ -1,8 +1,6 @@
 # Multipod
 
 @snn_kw struct Multipod{
-    VBT = Vector{Bool},
-    VIT = Vector{Int},
     TFT = Array{Float32,3}, ## Float type
     MFT = Matrix{Float32}, ## Float type
     VFT = Vector{Float32}, ## Float type

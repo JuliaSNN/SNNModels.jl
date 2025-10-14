@@ -25,14 +25,9 @@ This is a struct representing a spiking neural network model that include two de
 BallAndStick
 @snn_kw struct BallAndStick{
     MFT = Matrix{Float32},
-    VIT = Vector{Int32},
-    VST = Vector{Symbol},
     VFT = Vector{Float32},
-    VBT = Vector{Bool},
     VDT = Dendrite{Vector{Float32}},
     IT = Int32,
-    FT = Float32,
-    ST = ReceptorArray,
 } <: AbstractDendriteIF     ## These are compulsory parameters
     name::String = "BallAndStick"
     id::String = randstring(12)

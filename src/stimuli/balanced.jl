@@ -18,13 +18,13 @@ The parameter β controls the noise in the firing rate, with higher values leadi
 """
 BalancedParameter
 
-@snn_kw struct BalancedParameter{VFT}
-    kIE::Float32 = 1.0
-    β::Float32 = 0.0
-    τ::Float32 = 50.0ms
-    r0::Float32 = 1kHz
-    w::Float32 = 1.0
-    wIE::Float32 = 1.0
+@snn_kw struct BalancedParameter{FT = Float32} <: AbstractParameter
+    kIE::FT = 1.0
+    β::FT = 0.0
+    τ::FT = 50.0ms
+    r0::FT = 1kHz
+    w::FT = 1.0
+    wIE::FT = 1.0
     same_input::Bool = false
 end
 
@@ -58,8 +58,6 @@ BalancedStimulus
 
 @snn_kw struct BalancedStimulus{
     VFT = Vector{Float32},
-    VBT = Vector{Bool},
-    VIT = Vector{Int},
     IT = Int32,
 } <: AbstractStimulus
     id::String = randstring(12)

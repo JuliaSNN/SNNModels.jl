@@ -47,7 +47,7 @@ end
     to_y::VFT = zeros(Npost)        # Pre-synaptic spike trace
     tr_x::VFT = zeros(Npre)         # Post-synaptic spike trace
     tr_y::VFT = zeros(Npre)         # Post-synaptic spike trace
-    active::Vector{Bool} = [true]
+    active::VBT = [true]
 end
 
 function plasticityvariables(param::T, Npre, Npost) where {T<:STDPStructuredParameter}

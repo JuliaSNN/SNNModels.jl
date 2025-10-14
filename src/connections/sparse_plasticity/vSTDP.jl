@@ -27,7 +27,7 @@ vSTDPParameter
     τx::FT = 15ms
     Wmax::FT = 30.0pF
     Wmin::FT = 0.1pF
-    active::Vector{Bool} = [true]
+    active::VBT = [true]
 end
 
 @snn_kw struct vSTDPVariables{VFT = Vector{Float32},IT = Int} <: LTPVariables
@@ -37,7 +37,7 @@ end
     u::VFT = zeros(Npost) # presynaptic spiking time
     v::VFT = zeros(Npost) # postsynaptic spiking time
     x::VFT = zeros(Npost) # postsynaptic spiking time
-    active::Vector{Bool} = [true]
+    active::VBT = [true]
 end
 
 function plasticityvariables(param::T, Npre, Npost) where {T<:vSTDPParameter}
