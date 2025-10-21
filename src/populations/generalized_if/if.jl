@@ -75,9 +75,9 @@ IF
 @snn_kw struct IF{
     IT = Int32,
     VFT = Vector{Float32},
-    MFT = Matrix{Float32},
-    SYNT <: AbstractSynapseParameter,
     PST = PostSpike{Float32},
+    SYNT <: AbstractSynapseParameter,
+    SYNV <: AbstractSynapseVariable,
 } <: AbstractGeneralizedIF
 
     param::IFParameter = IFParameter()
@@ -96,16 +96,10 @@ IF
 
     # Two receptors synaptic conductance
     syn_curr::VFT = zeros(Float32, N)
-    ge::VFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N) : zeros(Float32, N) # Time-dependent conductance
-    gi::VFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N) : zeros(Float32, N) # Time-dependent conductance
-    he::VFT = zeros(Float32, N)
-    hi::VFT = zeros(Float32, N)
-
-    # Glu/Gaba conductance
-    g::MFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N, 4) : zeros(Float32, N, 0)
-    h::MFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N, 4) : zeros(Float32, N, 0)
-    glu::VFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N) : zeros(Float32, N)
-    gaba::VFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N) : zeros(Float32, N)
+    synvars::SYNV = synaptic_variables(synapse, N) # Synaptic variables for receptor model
+    # Synaptic targets
+    glu::VFT = zeros(Float32, N)
+    gaba::VFT = zeros(Float32, N)
 
     records::Dict = Dict()
 end
@@ -166,8 +160,6 @@ function update_neuron!(
         end
     end
 end
-
-
 
 export IF, IFParameter
 

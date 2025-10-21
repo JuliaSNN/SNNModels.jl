@@ -34,6 +34,8 @@ AdExParameter
     b::FT = 80.5pA # Spike-triggered adaptation parameter (amount by which the voltage is increased at each threshold crossing)
 end
 
+
+
 """
     AdEx{VFT, MFT,  GIFT, SYNT} <: AbstractGeneralizedIF
 
@@ -48,7 +50,6 @@ A struct representing an Adaptive Exponential Integrate-and-Fire (AdEx) neuron m
 - `N::Int32`: Number of neurons in the population (default: 100)
 - `v::VFT`: Membrane potential (initialized randomly between `Vr` and `Vt`)
 - `w::VFT`: Adaptation current (initialized to zeros)
-- `ξ_het::VFT`: Heterogeneity factor for membrane time constant (initialized to ones)
 - `fire::VBT`: Spike flags (initialized to false)
 - `θ::VFT`: Membrane potential thresholds (initialized to `Vt`)
 - `tabs::VIT`: Absolute refractory period counters (initialized to ones)
@@ -68,42 +69,36 @@ The AdEx model implements the adaptive exponential integrate-and-fire neuron mod
 """
 AdEx
 
-@snn_kw struct AdEx{ IT = Int32,
+@snn_kw struct AdEx{IT = Int32,
                     VFT = Vector{Float32},
-                    MFT = Matrix{Float32},
+                    PST <: PostSpike,
                     SYNT <: AbstractSynapseParameter,
-                    PST = PostSpike{Float32}
+                    SYNV <: AbstractSynapseVariable,
+                    AdExt <: AdExParameter,
                     } <: AbstractGeneralizedIF
 
     name::String = "AdEx"
     id::String = randstring(12)
 
-    param::AdExParameter  = AdExParameter()
+    param::AdExt = AdExParameter()
     synapse::SYNT = DoubleExpSynapse()
     spike::PST = PostSpike()
 
-    N::IT = Int32(100) # Number of neurons
+    N::IT = 100 # Number of neurons
     v::VFT = param.Vr .+ rand(Float32, N) .* (param.Vt - param.Vr)
     w::VFT = zeros(Float32, N) # Adaptation current
-    ξ_het::VFT = ones(Float32, N) # Membrane time constant
 
     fire::VBT = zeros(Bool, N) # Store spikes
-    θ::VFT = ones(Float32, N) * param.Vt # Array with membrane potential thresholds
+    θ::VFT = ones(Float32, N) .* param.Vt # Array with membrane potential thresholds
     tabs::VIT = ones(Int, N) # Membrane time constant
     I::VFT = zeros(Float32, N) # Current
 
     # Two receptors synaptic conductance
     syn_curr::VFT = zeros(Float32, N)
-    ge::VFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N) : zeros(Float32, N) # Time-dependent conductance
-    gi::VFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N) : zeros(Float32, N) # Time-dependent conductance
-    he::VFT = zeros(Float32, N)
-    hi::VFT = zeros(Float32, N)
-
-    # Glu/Gaba conductance
-    g::MFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N, 4) : zeros(Float32, N, 0)
-    h::MFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N, 4) : zeros(Float32, N, 0)
-    glu::VFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N) : zeros(Float32, N)
-    gaba::VFT = synapse isa AbstractReceptorParameter ? zeros(Float32, N) : zeros(Float32, N)
+    synvars::SYNV = synaptic_variables(synapse, N) # Synaptic variables for receptor model
+    # Synaptic targets
+    glu::VFT = zeros(Float32, N)
+    gaba::VFT = zeros(Float32, N)
 
     records::Dict = Dict()
 end
@@ -137,8 +132,8 @@ function update_neuron!(
     p::P,
     param::T,
     dt::Float32,
-) where {P<:AdEx,T<:AdExParameter}
-    @unpack N, v, w, fire, θ, I, ξ_het, tabs, syn_curr = p
+) where {P<:AdEx,T<:AdExParameter{Float32}}
+    @unpack N, v, w, fire, θ, I, tabs, syn_curr = p
     @unpack τm, Vt, Vr, El, R, ΔT, τw, a, b =param
     @unpack At, τA, τabs = p.spike
 
@@ -147,11 +142,9 @@ function update_neuron!(
         v[i] = ifelse(fire[i], Vr, v[i])
 
         # Absolute refractory period
-        if tabs[i] > 0
-            fire[i] = false
-            tabs[i] -= 1
-            continue
-        end
+        fire[i] = false
+        tabs[i] -= 1
+        tabs[i] > 0 && continue
 
         # Adaptation current 
         w[i] += dt * (a * (v[i] - El) - w[i]) / τw
@@ -163,23 +156,52 @@ function update_neuron!(
                 - R * syn_curr[i] # excitatory synapses
                 - R * w[i] # adaptation
                 + R * I[i] # external current
-            ) / (τm * ξ_het[i])
-        # Double exponential
+            ) / (τm[i])
+
         θ[i] += dt * (Vt - θ[i]) / τA
-
-        # Spike
         fire[i] = v[i] >= 0mV#$param.AP_membrane
-        # fire[i] = v[i] > θ[i] + 5.0f0
         v[i] = ifelse(fire[i], 20.0f0, v[i]) # Set membrane potential to spike potential
-
-        # Spike-triggered adaptation
         w[i] = ifelse(fire[i], w[i] + b, w[i])
         θ[i] = ifelse(fire[i], θ[i] + At, θ[i])
-
-        # Absolute refractory period
         tabs[i] = ifelse(fire[i], round(Int, τabs / dt), tabs[i])
-        # increase adaptation current
     end
 end
+
+
+function update_neuron!(
+    p::P,
+    param::T,
+    dt::Float32,
+) where {P<:AdEx,T<:AdExParameter{Vector{Float32}}}
+    @unpack N, v, w, fire, θ, I, tabs, syn_curr = p
+    @unpack τm, Vt, Vr, El, R, ΔT, τw, a, b =param
+    @unpack At, τA, τabs = p.spike
+
+    @inbounds for i ∈ 1:N 
+        v[i] = ifelse(fire[i], Vr[i], v[i])
+        # Absolute refractory period
+        fire[i] = false
+        tabs[i] -= 1
+        tabs[i] > 0 && continue
+
+        w[i] += dt * (a[i] * (v[i] - El[i]) - w[i]) / τw[i]
+        v[i] +=
+            dt * (
+                -(v[i] - El[i])  # leakage
+                + (ΔT[i] < 0.0f0 ? 0.0f0 : ΔT[i] * exp((v[i] - θ[i]) / ΔT[i])) # exponential term
+                - R[i] * syn_curr[i] # excitatory synapses
+                - R[i] * w[i] # adaptation
+                + R[i] * I[i] # external current
+            ) / (τm[i])
+
+        θ[i] += dt * (Vt[i] - θ[i]) / τA
+        fire[i] = v[i] >= 0mV#$param.AP_membrane
+        v[i] = ifelse(fire[i], 20.0f0, v[i]) # Set membrane potential to spike potential
+        w[i] = ifelse(fire[i], w[i] + b[i], w[i])
+        θ[i] = ifelse(fire[i], θ[i] + At, θ[i])
+        tabs[i] = ifelse(fire[i], round(Int, τabs / dt), tabs[i])
+    end
+end 
+
 
 export AdEx, AdExParameter

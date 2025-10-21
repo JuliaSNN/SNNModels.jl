@@ -170,10 +170,11 @@ NMDAVoltageDependency struct represents the voltage dependence of NMDA receptors
 - `mg::T`: Magnesium concentration (default: 1.0)
 """
 NMDAVoltageDependency
-@kwdef struct NMDAVoltageDependency{T<:Real}
-    b::T = nmda_b |> Float32
-    k::T = nmda_k |> Float32
-    mg::T = Mg_mM |> Float32
+
+@snn_kw struct NMDAVoltageDependency{T = Float32}
+    b::T = nmda_b
+    k::T = nmda_k
+    mg::T = Mg_mM
 end
 
 function nmda_gating(v, NMDA::NMDAVoltageDependency)

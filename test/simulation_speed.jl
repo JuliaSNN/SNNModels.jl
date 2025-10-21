@@ -4,7 +4,6 @@ using BenchmarkTools
 
 E = Population(AdExParameter(), N=100, synapse=DoubleExpSynapse(), spike=PostSpike())
 
-E = Tripod()
 poisson_exc = PoissonLayer(
     10.2Hz,    # Mean firing rate (Hz) 
     N = 1000, # Neurons in the Poisson Layer
@@ -32,8 +31,7 @@ model = compose(; E, stim_exc, stim_inh, silent=true)
 # @profview sim!(model, 50s)
 @btime sim!(model, 10s)
 #   
-#   332.853 ms (1039501 allocations: 48.82 MiB)
-
+#   240.436 ms (799501 allocations: 15.86 MiB) on DellTower
 ##
 
 using SNNModels
@@ -67,5 +65,5 @@ stim_inh = Stimulus(poisson_inh, E, :gaba, :d1, conn=inh_conn, name = "noiseI")
 model = compose(; E, stim_exc, stim_inh, silent=true)
 @profview sim!(model, 50s)
 @btime sim!(model, 10s)
-#   856.443 ms (799501 allocations: 15.86 MiB) 
+#   735.852 ms (799501 allocations: 15.86 MiB) on DellTower
 ##

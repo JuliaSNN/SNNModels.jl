@@ -42,9 +42,9 @@ The model includes synaptic conductances for both soma and dendrites, and suppor
 """
 Tripod
 @snn_kw struct Tripod{
-    MFT = Matrix{Float32},
     VFT = Vector{Float32},
     VDT = Dendrite{Vector{Float32}},
+    SYNV<: AbstractSynapseVariable,
     IT = Int32,
 } <: AbstractDendriteIF
     id::String = randstring(12)
@@ -64,13 +64,9 @@ Tripod
     I_d::VFT = zeros(N)
 
     # Synapses dendrites
-    g_d1::MFT = zeros(N, 4)
-    g_d2::MFT = zeros(N, 4)
-    h_d1::MFT = zeros(N, 4)
-    h_d2::MFT = zeros(N, 4)
-    # Synapses soma
-    g_s::MFT = zeros(N, 4)
-    h_s::MFT = zeros(N, 4)
+    synvars_s::SYNV = synaptic_variables(param.soma_syn, N)
+    synvars_d1::SYNV = synaptic_variables(param.dend_syn, N)
+    synvars_d2::SYNV = synaptic_variables(param.dend_syn, N)
 
     glu_d1::VFT = zeros(N) #! target
     gaba_d1::VFT = zeros(N) #! target
@@ -113,13 +109,13 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
         @unpack AP_membrane, up, τabs, At, τA  = spike 
         @unpack d1, d2 = p
         @unpack soma_syn, dend_syn = param
-        @unpack N, g_d1, g_d2, h_d1, h_d2, g_s, h_s = p
+        @unpack N, synvars_s, synvars_d1, synvars_d2 = p
         @unpack glu_d1, glu_d2, glu_s, gaba_d1, gaba_d2, gaba_s = p
 
         # Update all synaptic conductance
-        update_synapses!(p, soma_syn, glu_s, gaba_s, g_s, h_s, dt)
-        update_synapses!(p, dend_syn, glu_d1, gaba_d1, g_d1, h_d1, dt)
-        update_synapses!(p, dend_syn, glu_d2, gaba_d2, g_d2, h_d2, dt)
+        update_synapses!(p, soma_syn, glu_s, gaba_s, synvars_s, dt)
+        update_synapses!(p, dend_syn, glu_d1, gaba_d1, synvars_d1, dt)
+        update_synapses!(p, dend_syn, glu_d2, gaba_d2, synvars_d2, dt)
         for i ∈ 1:N
             # implementation of the absolute refractory period with backpropagation (up) and after spike (τabs)
             if after_spike[i] > (τabs + up - up) / dt # backpropagation
@@ -185,20 +181,20 @@ end
 
     @fastmath @inbounds begin
         @unpack v_d1, v_d2, v_s, I_d, I, w_s, θ = p
-        @unpack g_d1, g_d2, g_s = p
         @unpack d1, d2 = p
         @unpack is, cs = p
         @unpack soma_syn, dend_syn = param
         @unpack C, gl, El, ΔT = param.adex
+        @unpack synvars_s, synvars_d1, synvars_d2 = p
 
 
         #compute axial currents
         cs[1] = -((v_d1[i] + Δv[2] * dt) - (v_s[i] + Δv[1] * dt)) * d1.gax[i]
         cs[2] = -((v_d2[i] + Δv[3] * dt) - (v_s[i] + Δv[1] * dt)) * d2.gax[i]
 
-        synaptic_current!(soma_syn, v_s[i] + Δv[1] * dt, g_s, is, 1, i)
-        synaptic_current!(dend_syn, v_d1[i] + Δv[2] * dt, g_d1, is, 2, i)
-        synaptic_current!(dend_syn, v_d2[i] + Δv[3] * dt, g_d2, is, 3, i)
+        synaptic_current!(soma_syn, v_s[i] + Δv[1] * dt, synvars_s, is, 1, i)
+        synaptic_current!(dend_syn, v_d1[i] + Δv[2] * dt, synvars_d1, is, 2, i)
+        synaptic_current!(dend_syn, v_d2[i] + Δv[3] * dt, synvars_d2, is, 3, i)
 
         # update membrane potential
         Δv[1] =

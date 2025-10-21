@@ -24,9 +24,9 @@ This is a struct representing a spiking neural network model that include two de
 """
 BallAndStick
 @snn_kw struct BallAndStick{
-    MFT = Matrix{Float32},
     VFT = Vector{Float32},
     VDT = Dendrite{Vector{Float32}},
+    SYNV<: AbstractSynapseVariable,
     IT = Int32,
 } <: AbstractDendriteIF     ## These are compulsory parameters
     name::String = "BallAndStick"
@@ -40,11 +40,8 @@ BallAndStick
     w_s::VFT = zeros(N)
     v_d::VFT = rand_value(N, param.adex.Vt, param.adex.Vr)
     # Synapses
-    g_d::MFT = zeros(N, 4)
-    h_d::MFT = zeros(N, 4)
-    # Synapses soma
-    g_s::MFT = zeros(N, 4)
-    h_s::MFT = zeros(N, 4)
+    synvars_s::SYNV = synaptic_variables(param.soma_syn, N)
+    synvars_d::SYNV = synaptic_variables(param.dend_syn, N)
 
     ## Ext input
     Is::VFT = zeros(N)
@@ -85,11 +82,11 @@ function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
     @unpack El, Vr, Vt, τw, a, b = adex
     @unpack AP_membrane, up, τabs, At, τA  = spike 
     @unpack d = p
-    @unpack N, g_s, g_d, h_s, h_d = p
+    @unpack N, synvars_s, synvars_d = p
     @unpack glu_d, glu_s, gaba_d, gaba_s = p
 
-    update_synapses!(p, soma_syn, glu_s, gaba_s, g_s, h_s, dt)
-    update_synapses!(p, dend_syn, glu_d, gaba_d, g_d, h_d, dt)
+    update_synapses!(p, soma_syn, glu_s, gaba_s, synvars_s, dt)
+    update_synapses!(p, dend_syn, glu_d, gaba_d, synvars_d, dt)
     # update the neurons
     @inbounds for i ∈ 1:N
         if after_spike[i] > τabs
@@ -149,14 +146,15 @@ function update_ballandstick!(
 )
     @unpack soma_syn, dend_syn = param
     @fastmath @inbounds begin
-        @unpack v_d, v_s, w_s, g_s, g_d, θ, d, Is, Id = p
+        @unpack v_d, v_s, w_s, θ, d, Is, Id = p
         @unpack is, cs = p
+        @unpack synvars_s, synvars_d = p
 
         #compute axial currents
         cs[1] = -((v_d[i] + Δv[2] * dt) - (v_s[i] + Δv[1] * dt)) * d.gax[i]
 
-        synaptic_current!(soma_syn, v_s[i] + Δv[1] * dt, g_s, is, 1, i)
-        synaptic_current!(dend_syn, v_d[i] + Δv[2] * dt, g_d, is, 2, i)
+        synaptic_current!(soma_syn, v_s[i] + Δv[1] * dt, synvars_s, is, 1, i)
+        synaptic_current!(dend_syn, v_d[i] + Δv[2] * dt, synvars_d, is, 2, i)
 
         # update membrane potential
         @unpack C, gl, El, ΔT = param.adex
