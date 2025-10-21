@@ -9,6 +9,21 @@ plasticity!(
     T::Time,
 ) = nothing
 
+function heterogeneous(param::T, N::Int; kwargs...) where {T<:AbstractGeneralizedIFParameter}
+    # ξ_het = ones(Float32, N)
+    _type = typeof(param)
+    het_dict = Dict{Symbol, Vector{Float32}}()
+    for fields in fieldnames(_type)
+        if haskey(kwargs, fields)
+            het_dict[fields] = rand(kwargs[fields], N)
+        else
+            het_dict[fields] = fill(getfield(param, fields), N)
+        end
+    end
+    # het_dict = het_dict |> dict2ntuple
+    return getfield(SNNModels, nameof(_type))(; het_dict..., FT = Vector{Float32})
+end
+
 include("synapse/synapse.jl")
 include("synapse/synapses.jl")
 include("synapse/synapse_parameters.jl")
@@ -40,4 +55,4 @@ include("multicompartment/ballandstick.jl")
 # include("multicompartment/multipod.jl")
 
 Population(; param, kwargs...) = Population(param; kwargs...)
-export AbstractDendriteIF, AbstractGeneralizedIF, AbstractGeneralizedIFParameter, Population
+export AbstractDendriteIF, AbstractGeneralizedIF, AbstractGeneralizedIFParameter, Population, integrate!, plasticity!, heterogeneous
