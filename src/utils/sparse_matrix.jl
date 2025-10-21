@@ -1,7 +1,7 @@
-function connect!(c, j, i, μ = 1e-6)
+function connect!(c, j, i, μ = randn(Float32))
     W = matrix(c)
-    W[i, j] = μ * randn(Float32)
-    replace_sparse_matrix!(c, W)
+    W[i, j] = μ 
+    update_sparse_matrix!(c, W)
     return nothing
 end
 
@@ -61,9 +61,17 @@ function update_weights!(
     end
 end
 
+
+##
+
+function presynaptic_idxs(c::C, i::Int)  where {C<:AbstractConnection}
+    @unpack rowptr, index, J, W = c
+    rowptr[i]:(rowptr[i+1]-1)
+end
+
 function presynaptic(c::C) where {C<:AbstractConnection}
     @unpack rowptr, index, J, W = c
-    [J[index[rowptr[j]:(rowptr[j+1]-1)]] for j in 1:length(rowptr)-1]
+    [J[index[rowptr[i]:(rowptr[i+1]-1)]] for i in 1:length(rowptr)-1]
 end
 
 function presynaptic(c::C, i::Int) where {C<:AbstractConnection}
@@ -71,18 +79,25 @@ function presynaptic(c::C, i::Int) where {C<:AbstractConnection}
     J[index[rowptr[i]:(rowptr[i+1]-1)]]
 end
 
-function presynaptic(c::C, js::AbstractVector) where {C<:AbstractConnection}
+function presynaptic(c::C, is::AbstractVector) where {C<:AbstractConnection}
     @unpack rowptr, index, J, W = c
     presyn = Vector{Vector{Int}}()
-    for j in js
-        push!(presyn, J[index[rowptr[j]:(rowptr[j+1]-1)]])
+    for i in is
+        push!(presyn, J[index[rowptr[i]:(rowptr[i+1]-1)]])
     end
     return presyn
 end
 
+##
+
+function postsynaptic_idxs(c::C, j::Int) where {C<:AbstractConnection}
+    @unpack colptr, I, index = c
+    colptr[j]:(colptr[j+1]-1)
+end
+
 function postsynaptic(c::C) where {C<:AbstractConnection}
     @unpack colptr, I, index = c
-    [I[colptr[i]:(colptr[i+1]-1)] for i in 1:length(colptr)-1]
+    [I[colptr[j]:(colptr[j+1]-1)] for j in 1:length(colptr)-1]
 end
 
 function postsynaptic(c::C, j::Int) where {C<:AbstractConnection}
@@ -113,41 +128,12 @@ function indices(c::C, js::AbstractVector, is::AbstractVector) where {C<:Abstrac
     return indices
 end
 
-# function set_plasticity!(synapse::AbstractConnection, bool::Bool)
-#     synapse.param.active[1] = bool
-# end
-# function has_plasticity(synapse::AbstractConnection)
-#     synapse.param.active[1] |> Bool
-# end
-
-function replace_sparse_matrix!(c::S, W::SparseMatrixCSC) where {S<:AbstractConnection}
-    rowptr, colptr, I, J, index, W = dsparse(W)
-    @assert length(rowptr) == length(c.rowptr) "Rowptr length mismatch"
-    @assert length(colptr) == length(c.colptr) "Colptr length mismatch"
-
-    resize!(c.I, length(I))
-    resize!(c.J, length(I))
-    resize!(c.W, length(I))
-    resize!(c.index, length(I))
-
-    @assert length(c.I) ==
-            length(c.J) ==
-            length(c.index) ==
-            length(c.W) ==
-            length(I) ==
-            length(J) ==
-            length(index) ==
-            length(W) "Length mismatch"
-
-    @inbounds @simd for i in eachindex(I)
-        c.I[i] = I[i]
-        c.J[i] = J[i]
-        c.W[i] = W[i]
-        c.index[i] = index[i]
-    end
-    return nothing
+function set_plasticity!(synapse::AbstractConnection, bool::Bool)
+    synapse.param.active[1] = bool
 end
-
+function has_plasticity(synapse::AbstractConnection)
+    synapse.param.active[1] |> Bool
+end
 # """function dsparse
 
 using SpecialFunctions, Roots
@@ -178,16 +164,17 @@ function sparse_matrix(Npre, Npost; w=nothing, dist=:Normal, μ=1, σ=0, ρ=noth
 
     my_dist = getfield(Distributions, dist)
     w = rand(my_dist(μ, σ), Npost, Npre) # Construct a random dense matrix with dimensions post.N x pre.N
-    if rule == :Fixed
+    if rule == :FixedOut
         # Set to zero a fraction (1-ρ)*Npost of the weights in each column
         for pre in 1:Npre
             targets = ρ > 0 ?  sample(1:Npost, round(Int, (1-ρ)*Npost); replace=false) : 1:Npost
             w[targets, pre] .= 0
         end
-        # for post in 1:Npost
-        #     pres = ρ > 0 ?  sample(1:Npre, round(Int, (1-ρ)*Npre); replace=false) : 1:Npre
-        #     w[post, pres] .= 0
-        # end
+    elseif rule == :FixedIn || rule ==:Fixed
+        for post in 1:Npost
+            pres = ρ > 0 ?  sample(1:Npre, round(Int, (1-ρ)*Npre); replace=false) : 1:Npre
+            w[post, pres] .= 0
+        end
     elseif rule == :Bernoulli
         # Set to zero each weight with probability (1-ρ)
         w[[n for n in eachindex(w[:]) if rand() < 1-ρ]] .= 0
@@ -218,6 +205,108 @@ function sparse_matrix(Npre, Npost, conn::AbstractMatrix)
     @assert size(w) == (Npost, Npre) "The size of the synaptic weight is not correct: $(size(w)) != ($Npost, $Npre)"
     return sparse(w)
 end
+
+
+function update_sparse_matrix!(c::S, W::SparseMatrixCSC) where {S<:AbstractConnection}
+    rowptr, colptr, I, J, index, W = dsparse(W)
+    @assert length(rowptr) == length(c.rowptr) "Rowptr length mismatch"
+    @assert length(colptr) == length(c.colptr) "Colptr length mismatch"
+
+    resize!(c.I, length(I))
+    resize!(c.J, length(I))
+    resize!(c.W, length(I))
+    resize!(c.index, length(I))
+
+    @assert length(c.I) ==
+            length(c.J) ==
+            length(c.index) ==
+            length(c.W) ==
+            length(I) ==
+            length(J) ==
+            length(index) ==
+            length(W) "Length mismatch"
+
+    @inbounds @simd for i in eachindex(I)
+        c.I[i] = I[i]
+        c.J[i] = J[i]
+        c.W[i] = W[i]
+        c.index[i] = index[i]
+    end
+    c.colptr = colptr
+    c.rowptr = rowptr
+    return nothing
+end
+
+function update_sparse_matrix!(c::S) where {S<:AbstractConnection}
+    rowptr, colptr, I, J, index, W = sparse(c.I, c.J, c.W) |> dsparse
+
+    @inbounds @simd for i in eachindex(I)
+        c.I[i] = I[i]
+        c.J[i] = J[i]
+        c.W[i] = W[i]
+        c.index[i] = index[i]
+    end
+    c.colptr = colptr
+    c.rowptr = rowptr
+    return nothing
+end
+
+                      
+
+"""
+    synaptic_turnover!(C::SpikingSynapse; p_rewire=0.05, p_pre = x->rand(), p_new = x->rand(), μ = 3.0)
+
+Perform synaptic turnover on a spiking synapse connection matrix.
+
+# Arguments
+- `C::SpikingSynapse`: The spiking synapse connection to modify
+- `p_rewire::Float64=0.05`: Probability threshold for rewiring existing connections
+- `p_pre::Function=x->rand()`: Function that returns probability for each presynaptic connection `s` to be rewired 
+- `p_new::Function=x->rand()`: Function that returns probability for selecting new postsynaptic neurons
+- `μ::Float64=3.0`: Weight value for new connections
+
+# Description
+This function implements synaptic turnover by:
+1. Generating random thresholds for presynaptic and postsynaptic neurons
+2. Identifying plausible new connections for each presynaptic neuron
+3. Selecting connections to rewire based on the probability thresholds
+4. Replacing the selected connections with new ones
+5. Updating the sparse matrix structure
+
+The function modifies the connection matrix in-place and updates its sparse matrix representation.
+"""
+function synaptic_turnover!(C::SpikingSynapse; 
+                p_rewire=0.05, 
+                p_pre = x->rand(), 
+                p_new = x->rand(),
+                μ = 3.0
+                )
+    pre_tt = rand(Uniform(0,1), length(C.fireJ))
+    post_tt = rand(Uniform(0,1), length(C.fireI))
+    all_post= Set(1:length(C.fireI))
+    new_connections =  map(postsynaptic(C)) do pre
+        plausible = setdiff(all_post, pre) |> collect 
+        plausible[sortperm(p_new.(plausible))]
+    end
+
+    rep_connections = Int[]
+    rep_neurons = Int[]
+    pre_tt .* post_tt
+    @unpack rowptr, colptr, I, J, index, W, fireJ = C
+    for j in eachindex(fireJ)
+        for s in postsynaptic_idxs(C, j)
+            p_pre(s) > p_rewire && continue
+            push!(rep_connections, s)
+            push!(rep_neurons, pop!(new_connections[j]))
+        end
+    end
+    for (s, new_post) in zip(rep_connections, rep_neurons)
+        C.I[s] = new_post
+        C.W[s] = μ
+    end
+    update_sparse_matrix!(C)
+end
+
 
 
 
@@ -252,9 +341,14 @@ export dsparse,
     matrix,
     extract_items,
     sparse_matrix,
-    replace_sparse_matrix!,
     indices,
     update_weights!,
     presynaptic,
     postsynaptic,
-    connect!
+    connect!,
+    set_plasticity!,
+    has_plasticity,
+    update_sparse_matrix!,
+    presynaptic_idxs,
+    postsynaptic_idxs
+

@@ -51,7 +51,7 @@ end
     @unpack glu, gaba = p
     @unpack N, ge, gi = synvars
     @unpack τe, τi = param
-    @fastmath @inbounds for i ∈ 1:N
+    @fastmath @inbounds @simd for i ∈ 1:N
         ge[i] += glu[i]
         gi[i] += gaba[i]
         ge[i] += dt * (-ge[i] / τe)
