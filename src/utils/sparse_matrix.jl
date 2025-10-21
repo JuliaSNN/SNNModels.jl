@@ -267,7 +267,7 @@ Perform synaptic turnover on a spiking synapse connection matrix.
 
 # Description
 This function implements synaptic turnover by:
-1. Generating random thresholds for presynaptic and postsynaptic neurons
+1. Generating thresholds for selecting connections to rewire. 
 2. Identifying plausible new connections for each presynaptic neuron
 3. Selecting connections to rewire based on the probability thresholds
 4. Replacing the selected connections with new ones
@@ -275,12 +275,11 @@ This function implements synaptic turnover by:
 
 The function modifies the connection matrix in-place and updates its sparse matrix representation.
 """
-function synaptic_turnover!(C::SpikingSynapse; 
-                p_rewire=0.05, 
-                p_pre = x->rand(), 
+function synaptic_turnover!(C::S; 
+                p_rewire = x->rand() .< 0.05, 
                 p_new = x->rand(),
                 μ = 3.0
-                )
+                ) where {S <: AbstractConnection}
     pre_tt = rand(Uniform(0,1), length(C.fireJ))
     post_tt = rand(Uniform(0,1), length(C.fireI))
     all_post= Set(1:length(C.fireI))
@@ -295,7 +294,7 @@ function synaptic_turnover!(C::SpikingSynapse;
     @unpack rowptr, colptr, I, J, index, W, fireJ = C
     for j in eachindex(fireJ)
         for s in postsynaptic_idxs(C, j)
-            p_pre(s) > p_rewire && continue
+            !p_rewire(s) && continue
             push!(rep_connections, s)
             push!(rep_neurons, pop!(new_connections[j]))
         end
@@ -350,5 +349,6 @@ export dsparse,
     has_plasticity,
     update_sparse_matrix!,
     presynaptic_idxs,
-    postsynaptic_idxs
+    postsynaptic_idxs,
+    synaptic_turnover!
 
