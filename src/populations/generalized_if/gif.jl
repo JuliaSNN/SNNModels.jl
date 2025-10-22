@@ -15,7 +15,7 @@ function update_synapses!(
     synapse::T,
     synvars::SYN,
     dt::Float32,
-) where {P<:AbstractGeneralizedIF,T<:AbstractReceptorParameter,SYN<:AbstractSynapseVariable}
+) where {P<:AbstractGeneralizedIF,T<:AbstractSynapseParameter,SYN<:AbstractSynapseVariable}
     @unpack N, glu, gaba = p
     update_synapses!(p, synapse, glu, gaba, synvars, dt)
 end

@@ -18,8 +18,8 @@
     N::IT = 100
     param::DendNeuronParameter = BallAndStickParameter()
     adex::SOMAT = AdExParameter()
-    dend_syn::SYND = TripodDendSynapse()
-    soma_syn::SYNS = TripodSomaSynapse()
+    dend_syn::SYND = TripodDendSynapse
+    soma_syn::SYNS = TripodSomaSynapse
     spike::PST = PostSpike()
 
     # Membrane potential and adaptation

@@ -58,8 +58,8 @@ Tripod
     N::IT = 100
     param::DendNeuronParameter = TripodParameter()
     adex::SOMAT = AdExParameter()
-    soma_syn::SYNS = TripodSomaSynapse()
-    dend_syn::SYND = TripodDendSynapse()
+    soma_syn::SYNS = TripodSomaSynapse
+    dend_syn::SYND = TripodDendSynapse
     spike::PST = PostSpike()
     d1::VDT = create_dendrite(N, param.ds[1])
     d2::VDT = create_dendrite(N, param.ds[2])

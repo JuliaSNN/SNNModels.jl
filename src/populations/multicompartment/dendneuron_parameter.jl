@@ -71,7 +71,7 @@ struct Multipod <: AbstractDendriticTree end
     type::NT = TripodNeuron()
 end
 
-function TripodParameter(
+function TripodParameter(;
         ds = [(200um, 400um), (200um, 400um)],
         type = TripodNeuron(),
         physiology = human_dend,
@@ -85,7 +85,7 @@ function TripodParameter(
     )
 end
 
-function BallAndStickParameter(
+function BallAndStickParameter(;
         ds = [(150um, 400um)],
         type = BallAndStickNeuron(),
         physiology = human_dend,
@@ -101,8 +101,6 @@ end
 
 function Population(param::T; kwargs...) where {T<:DendNeuronParameter}
     if param.type isa TripodNeuron
-        @show keys(kwargs)
-        @show param
         return Tripod(;param, kwargs...)
     elseif param.type isa BallAndStickNeuron
         return BallAndStick(;param, kwargs...)
@@ -110,6 +108,8 @@ function Population(param::T; kwargs...) where {T<:DendNeuronParameter}
         error("Dendritic segments must be either 1 (BallAndStick) or 2 (Tripod).")
     end
 end
+
+export BallAndStickParameter, TripodParameter, DendNeuronParameter
 
 # function MulticompartmentNeuron(;
 #     N::Int = 100,
@@ -165,7 +165,6 @@ end
 #     end
 # end
 
-export DendNeuronParameter, TripodParameter, BallAndStickParameter, MulticompartmentNeuron
 
     # AdEx model
     # adex::AdExT = AdExParameter(
