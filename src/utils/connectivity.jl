@@ -1,9 +1,9 @@
 abstract type AbstractConnectivity end
 
-Connectivity = Union{NamedTuple, AbstractMatrix}
+Connectivity = Union{NamedTuple,AbstractMatrix}
 
-function NormalConnection(μ=1.0f0, σ=0.0f0; kwargs...)
-    return (;dist=Distribution.Normal, μ=μ, σ=σ, kwargs...)
+function NormalConnection(μ = 1.0f0, σ = 0.0f0; kwargs...)
+    return (; dist = Distribution.Normal, μ = μ, σ = σ, kwargs...)
 end
 
 # @snn_kw struct SynapticConn{T} <: AbstractConnectivity

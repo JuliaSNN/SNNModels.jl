@@ -3,7 +3,7 @@
 
 Abstract type representing parameters for current stimuli.
 """
-abstract type CurrentParameter end
+abstract type CurrentParameter <: AbstractStimulusParameter end
 
 
 """
@@ -18,7 +18,10 @@ A parameter type for current stimuli that generates noisy current inputs.
 """
 CurrentNoise
 
-@snn_kw struct CurrentNoise{VFT = Vector{Float32}, DT = Distribution{Univariate,Continuous}} <: CurrentParameter
+@snn_kw struct CurrentNoise{
+    VFT = Vector{Float32},
+    DT = Distribution{Univariate,Continuous},
+} <: CurrentParameter
     I_base::VFT = zeros(Float32, 0)
     I_dist::DT = Normal(0.0, 0.0)
     α::VFT = ones(Float32, 0)
@@ -72,9 +75,7 @@ A stimulus that applies current to neurons.
 - `targets::Dict`: Dictionary describing the targets of the stimulus.
 """
 CurrentStimulus
-@snn_kw struct CurrentStimulus{
-    VFT = Vector{Float32},
-} <: AbstractStimulus
+@snn_kw struct CurrentStimulus{VFT = Vector{Float32}} <: AbstractStimulus
     param::CurrentParameter
     name::String = "Current"
     id::String = randstring(12)
@@ -132,7 +133,12 @@ Construct a `CurrentStimulus` with the given parameters and postsynaptic populat
 - `sym`: Symbol for the input current field (default: :I).
 - `kwargs`: Additional keyword arguments.
 """
-function Stimulus(param::CurrentParameter, post::T, sym::Symbol = :I; kwargs...) where {T<:AbstractPopulation}
+function Stimulus(
+    param::CurrentParameter,
+    post::T,
+    sym::Symbol = :I;
+    kwargs...,
+) where {T<:AbstractPopulation}
     return CurrentStimulus(post, sym; param, kwargs...)
 end
 
@@ -158,8 +164,4 @@ function stimulate!(p, param::CurrentNoise, time::Time, dt::Float32)
     end
 end
 
-export CurrentStimulus,
-    CurrentParameter,
-    stimulate!,
-    CurrentNoise
-
+export CurrentStimulus, CurrentParameter, stimulate!, CurrentNoise

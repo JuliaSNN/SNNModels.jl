@@ -21,12 +21,14 @@ A parameter structure for spike time stimulus in spiking neural networks. Users 
 """
 SpikeTimeStimulusParameter
 
-@snn_kw struct SpikeTimeStimulusParameter{VFT = Vector{Float32},VIT = Vector{Int}} <:AbstractStimulusParameter
+@snn_kw struct SpikeTimeStimulusParameter{VFT = Vector{Float32},VIT = Vector{Int}} <:
+               AbstractStimulusParameter
     spiketimes::VFT=[]
     neurons::VIT=[]
 end
 
-SpikeTimeParameter(; neurons=Int[], spiketimes=Float32[]) = SpikeTimeStimulusParameter(spiketimes, neurons)
+SpikeTimeParameter(; neurons = Int[], spiketimes = Float32[]) =
+    SpikeTimeStimulusParameter(spiketimes, neurons)
 
 function SpikeTimeParameter(spiketimes::VFT, neurons::Vector{Int}) where {VFT<:Vector}
     @assert length(spiketimes) == length(neurons) "spiketimes and neurons must have the same length"
@@ -98,9 +100,7 @@ A spike time stimulus structure for spiking neural networks. This stimulus type 
 """
 SpikeTimeStimulus
 
-@snn_kw struct SpikeTimeStimulus{
-    VFT = Vector{Float32},
-} <: AbstractStimulus
+@snn_kw struct SpikeTimeStimulus{VFT = Vector{Float32}} <: AbstractStimulus
     N::Int
     name::String = "SpikeTime"
     id::String = randstring(12)
@@ -179,13 +179,13 @@ This constructor creates a 1-to-1 connection between presynaptic and postsynapti
 """
 function SpikeTimeStimulusIdentity(
     post::T,
-    sym::Symbol, 
+    sym::Symbol,
     comp = nothing;
     param::SpikeTimeStimulusParameter,
     kwargs...,
 ) where {T<:AbstractPopulation}
     conn = LinearAlgebra.I(post.N) |> Matrix
-    return SpikeTimeStimulus(post, sym, comp; conn, N=post.N, param = param, kwargs...)
+    return SpikeTimeStimulus(post, sym, comp; conn, N = post.N, param = param, kwargs...)
 end
 
 function Stimulus(
@@ -195,13 +195,7 @@ function Stimulus(
     comp = nothing;
     kwargs...,
 ) where {T<:AbstractPopulation}
-    return SpikeTimeStimulus(
-        post,
-        sym,
-        comp;
-        param,
-        kwargs...,
-    )
+    return SpikeTimeStimulus(post, sym, comp; param, kwargs...)
 end
 
 """
@@ -387,7 +381,8 @@ This function returns the highest neuron index present in the parameter structur
 - This function does not modify the parameter structure
 - The maximum neuron index is determined by finding the maximum value in the `neurons` vector
 """
-max_neuron(param::SpikeTimeStimulusParameter) = isempty(param.neurons) ? 0 : maximum(param.neurons)
+max_neuron(param::SpikeTimeStimulusParameter) =
+    isempty(param.neurons) ? 0 : maximum(param.neurons)
 
 
 

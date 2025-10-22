@@ -305,7 +305,7 @@ function monitor!(
                 continue
             end
         else
-            if hasproperty(obj, variables) 
+            if hasproperty(obj, variables)
                 if hasproperty(getfield(obj, variables), sym)
                     typ = typeof(getfield(getfield(obj, variables), sym))
                     key = Symbol(variables, "_", sym)
@@ -323,7 +323,7 @@ function monitor!(
         end
         @debug "Monitoring :$(key) in $(obj.name)"
 
-        if haskey(obj.records, key) 
+        if haskey(obj.records, key)
             @warn "Key $key already being monitored in $(obj.name)"
             continue
         end
@@ -346,11 +346,12 @@ function monitor!(objs::NamedTuple, keys::Vector; sr = 200Hz, kwargs...)
     end
 end
 
-monitor!(obj, keys::Symbol; kwargs...) = monitor!(obj, [keys]; kwargs...) 
+monitor!(obj, keys::Symbol; kwargs...) = monitor!(obj, [keys]; kwargs...)
 
-monitor!(obj, keys::Tuple; kwargs...) = monitor!(obj, [keys]; kwargs...) 
+monitor!(obj, keys::Tuple; kwargs...) = monitor!(obj, [keys]; kwargs...)
 
-monitor!(objs, keys, variables::Symbol; kwargs...) = monitor!(objs, keys; variables=variables, kwargs...)
+monitor!(objs, keys, variables::Symbol; kwargs...) =
+    monitor!(objs, keys; variables = variables, kwargs...)
 
 """
     interpolated_record(p, sym)
@@ -396,7 +397,8 @@ function add_endtime!(model::NamedTuple)
                v isa AbstractStimulus ||
                v isa AbstractConnection
                 # @info "Adding end time for $(v.name)"
-                !haskey(v.records, :end_time) && (v.records[:end_time] = Dict{Symbol,Float32}())
+                !haskey(v.records, :end_time) &&
+                    (v.records[:end_time] = Dict{Symbol,Float32}())
                 for (key, val) in v.records
                     if !haskey(v.records[:end_time], key)
                         # @info "Adding end time for $key"
@@ -418,7 +420,8 @@ function add_starttime!(model::NamedTuple)
                v isa AbstractStimulus ||
                v isa AbstractConnection
                 # @info "Adding start time for $(v.name)"
-                !haskey(v.records, :start_time) && (v.records[:start_time] = Dict{Symbol,Float32}())
+                !haskey(v.records, :start_time) &&
+                    (v.records[:start_time] = Dict{Symbol,Float32}())
                 for (key, val) in v.records
                     if !haskey(v.records[:start_time], key)
                         # @info "Adding start time for $key"
@@ -474,7 +477,14 @@ v, r = record(p, :fire; range = true, interval = (0.0, 1.0))
 # Record spike times for a population p
 spikes = record(p, :spiketimes)
 """
-function record(p, sym::Symbol; range = false, interval = nothing, interpolate=true, kwargs...)
+function record(
+    p,
+    sym::Symbol;
+    range = false,
+    interval = nothing,
+    interpolate = true,
+    kwargs...,
+)
     if sym == :fire
         @assert !isnothing(interval) "Range must be provided for firing rate recording"
         v, r = firing_rate(p, interval; interpolate, kwargs...)
@@ -482,19 +492,23 @@ function record(p, sym::Symbol; range = false, interval = nothing, interpolate=t
         return spiketimes(p)
     else
         # not interpolate
-        if !interpolate 
+        if !interpolate
             v = getvariable(p, sym)
             r = interval
-        # interpolate
+            # interpolate
         else
-            v, r =  interpolated_record(p, sym)
+            v, r = interpolated_record(p, sym)
             if !isnothing(interval)
                 @assert interval[1] .>= r[1] "Interval start $(interval[1]) is out of bounds $(r_v[1])"
                 @assert interval[end] .<= r[end] "Interval end $(interval[end]) is out of bounds $(r_v[end])"
                 v_dt = v(:, interval)
                 r = interval
-                ax = map(i-> axes(v_dt, i), 1:(length(size(v))-1)) 
-                v = scale(Interpolations.interpolate(v_dt,  get_interpolator(v_dt)), ax..., r)
+                ax = map(i -> axes(v_dt, i), 1:(length(size(v))-1))
+                v = scale(
+                    Interpolations.interpolate(v_dt, get_interpolator(v_dt)),
+                    ax...,
+                    r,
+                )
             end
         end
     end
@@ -507,7 +521,8 @@ end
 
 
 
-record(p, sym::Symbol, interval::R; kwargs...) where {R<:AbstractRange}= record(p, sym; interval, kwargs...)
+record(p, sym::Symbol, interval::R; kwargs...) where {R<:AbstractRange} =
+    record(p, sym; interval, kwargs...)
 
 
 
@@ -610,7 +625,7 @@ function _clean(z)
         if isa(val, Dict)
             _clean(val)
         else
-            try 
+            try
                 empty!(val)
             catch e
                 # @warn "Could not clear records for $key"

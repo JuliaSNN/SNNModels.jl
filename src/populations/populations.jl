@@ -1,6 +1,3 @@
-abstract type AbstractGeneralizedIFParameter <: AbstractPopulationParameter end
-abstract type AbstractGeneralizedIF <: AbstractPopulation end
-
 integrate!(p::AbstractPopulation, param::AbstractPopulationParameter, dt::Float32) = nothing
 plasticity!(
     p::AbstractPopulation,
@@ -9,10 +6,9 @@ plasticity!(
     T::Time,
 ) = nothing
 
-include("synapse/synapse.jl")
-include("synapse/synapses.jl")
-include("synapse/synapse_parameters.jl")
-include("synapse/synaptic_targets.jl")
+## Spikes
+abstract type AbstractSpikeParameter end
+include("spike/postspike.jl")
 
 ## Neurons
 include("poisson.jl")
@@ -22,7 +18,15 @@ include("morrislecar.jl")
 include("rate.jl")
 include("identity.jl")
 
-## IF
+## gIF and synapses
+abstract type AbstractGeneralizedIFParameter <: AbstractPopulationParameter end
+abstract type AbstractGeneralizedIF <: AbstractPopulation end
+
+## Synapses
+include("synapse/synapse.jl")
+include("synapse/synapses.jl")
+include("synapse/synapse_parameters.jl")
+include("synapse/synaptic_targets.jl")
 
 include("generalized_if/gif.jl")
 include("generalized_if/if.jl")
@@ -39,5 +43,34 @@ include("multicompartment/tripod.jl")
 include("multicompartment/ballandstick.jl")
 # include("multicompartment/multipod.jl")
 
+## Population constructor
 Population(; param, kwargs...) = Population(param; kwargs...)
-export AbstractDendriteIF, AbstractGeneralizedIF, AbstractGeneralizedIFParameter, Population
+
+## Heterogeneous populations
+function heterogeneous(
+    param::T,
+    N::Int;
+    kwargs...,
+) where {T<:AbstractGeneralizedIFParameter}
+    # ξ_het = ones(Float32, N)
+    _type = typeof(param)
+    het_dict = Dict{Symbol,Vector{Float32}}()
+    for fields in fieldnames(_type)
+        if haskey(kwargs, fields)
+            het_dict[fields] = rand(kwargs[fields], N)
+        else
+            het_dict[fields] = fill(getfield(param, fields), N)
+        end
+    end
+    # het_dict = het_dict |> dict2ntuple
+    return getfield(SNNModels, nameof(_type))(; het_dict..., FT = Vector{Float32})
+end
+
+
+export AbstractDendriteIF,
+    AbstractGeneralizedIF,
+    AbstractGeneralizedIFParameter,
+    Population,
+    integrate!,
+    plasticity!,
+    heterogeneous

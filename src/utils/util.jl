@@ -1,5 +1,5 @@
 
-rand_value(N, p1, p2) = minimum([p1,p2]) .+ rand(N) .* abs(p1-p2)
+rand_value(N, p1, p2) = minimum([p1, p2]) .+ rand(N) .* abs(p1-p2)
 
 @inline function exp32(x::R) where {R<:Real}
     x = ifelse(x < -10.0f0, -32.0f0, x)
@@ -311,5 +311,3 @@ export compose,
     exp256,
     name,
     str_name
-
-

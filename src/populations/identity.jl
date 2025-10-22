@@ -1,7 +1,18 @@
 struct IdentityParam <: AbstractPopulationParameter end
 
-@snn_kw mutable struct Identity{VFT = Vector{Float32}, IT = Int32} <:
-                       AbstractPopulation
+"""
+    Identity{VFT, IT} <: AbstractPopulation
+
+A simple population type that acts as an identity function, passing input directly to output.
+
+# Fields
+- `VFT`: Vector type for storing floating-point values (default: `Vector{Float32}`)
+- `IT`: Integer type for storing population size (default: `Int32`)
+
+This population type is useful for testing and as a building block in more complex networks.
+"""
+Identity
+@snn_kw mutable struct Identity{VFT = Vector{Float32},IT = Int32} <: AbstractPopulation
     name::String = "identity"
     id::String = randstring(12)
     param::IdentityParam = IdentityParam()

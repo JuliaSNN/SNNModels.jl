@@ -64,17 +64,17 @@ snn_kw_str_sentinel_check(x) = :(
     end
 )
 
-function snn_kw_str_sentinel_check_concrete(x; dict) 
+function snn_kw_str_sentinel_check_concrete(x; dict)
     # @show dict
     # @show x[1]
     @assert haskey(dict, x[1]) "Type parameter $(x[1]) defined in the struct is not used in any field"
     return :(
         if $(x[1]) isa KwStrSentinel
-        ## if it is longer than 1, set it to Any
-        ## otherwise, x[2] is the default type 
-            $(x[1]) = $(length(x) > 1 ?  :($(dict[x[1]])) : Any)
+            ## if it is longer than 1, set it to Any
+            ## otherwise, x[2] is the default type 
+            $(x[1]) = $(length(x) > 1 ? :($(dict[x[1]])) : Any)
 
-    end
+        end
     )
 end
 
@@ -83,7 +83,7 @@ function snn_kw_get_concrete_types(x)
     for field in x
         if length(field) == 3
             my_dict[field[2]] = :(typeof($(field[1])))
-        else 
+        else
             if haskey(my_dict, field[2])
                 continue
             else
@@ -156,7 +156,7 @@ macro snn_kw(str)
     # Use sentinels to track if type param kwargs are assigned
     ctor_params = snn_kw_str_sentinels.(str_params)
     # ctor_params_bodies = snn_kw_str_sentinel_check.(str_params)
-    ctor_params_bodies = snn_kw_str_sentinel_check_concrete.(str_params; dict=dict)
+    ctor_params_bodies = snn_kw_str_sentinel_check_concrete.(str_params; dict = dict)
 
     # Constructor accepts field values and type params as kwargs
     ctor_kws = Expr(
@@ -173,7 +173,7 @@ macro snn_kw(str)
     ctor_body =
         Expr(:block, ctor_params_bodies..., Expr(:call, ctor_call, first.(str_fields)...))
     ctor = Expr(:function, ctor_sig, ctor_body)
-    
+
 
     return quote
         $(esc(str))
@@ -254,7 +254,12 @@ macro update(base, update_expr)
 end
 
 # Deep merge function for named tuples
-function update_with_merge(base_config::NamedTuple, path::Vector{Symbol}, value, full_path=nothing)
+function update_with_merge(
+    base_config::NamedTuple,
+    path::Vector{Symbol},
+    value,
+    full_path = nothing,
+)
     full_path = isnothing(full_path) ? path : full_path
     if length(path) == 1
         # If it's the final field, update the value
@@ -263,8 +268,10 @@ function update_with_merge(base_config::NamedTuple, path::Vector{Symbol}, value,
         return merge(base_config, (path[1] => value,))
     else
         key = path[1]
-        if !haskey(base_config, key) 
-            @warn("Field $key in $(join(full_path,".")) does not exist, assign it to an empty NamedTuple")
+        if !haskey(base_config, key)
+            @warn(
+                "Field $key in $(join(full_path,".")) does not exist, assign it to an empty NamedTuple"
+            )
             base_config = merge(base_config, (key => NamedTuple(),))
             # updated_sub = update_with_merge(base_config, path, value)
             # sub = (;tmp=nothing)
@@ -274,7 +281,9 @@ function update_with_merge(base_config::NamedTuple, path::Vector{Symbol}, value,
             # Recursively update the nested subfield
             updated_sub = update_with_merge(sub, path[2:end], value, full_path)
         else
-            @warn("Field $key in $(join(full_path,".")) is not a NamedTuple. Overwriting $key with a new NamedTuple.")
+            @warn(
+                "Field $key in $(join(full_path,".")) is not a NamedTuple. Overwriting $key with a new NamedTuple."
+            )
             updated_sub = update_with_merge(NamedTuple(), path[2:end], value, full_path)
         end
 
@@ -312,14 +321,14 @@ macro update!(base, update_expr)
         end
         pushfirst!(fields, lhs)  # Add the first part
         field_syms = [Symbol(f) for f in fields]
-        current_config =  :(update_with_merge($base, $field_syms, $rhs))
+        current_config = :(update_with_merge($base, $field_syms, $rhs))
     end
     return Expr(:(=), esc(base), :($current_config))
 end
 
 #
 
-function pretty_nt_print(value, indent=0)
+function pretty_nt_print(value, indent = 0)
     if isa(value, NamedTuple)
         println("{")
         for (subfield, subvalue) in pairs(value)

@@ -277,11 +277,11 @@ function spatial_activity(points, activity; N, L, grid_size = (x = [0, 0.1], y =
 
     time_indices = Vector{}()
     if isa(N, Number)
-        for t = 1:num_values ÷ N
+        for t = 1:(num_values÷N)
             push!(time_indices, (1+(t-1)*N):(t*N-1))
         end
     elseif isa(N, AbstractVector)
-        for t = eachindex(N)
+        for t in eachindex(N)
             push!(time_indices, N[t])
         end
     else
@@ -296,7 +296,7 @@ function spatial_activity(points, activity; N, L, grid_size = (x = [0, 0.1], y =
     spatial_avg = Array{Any,3}(undef, x_range, y_range, length(time_indices))
     spatial_avg[:].=0
     for t in eachindex(time_indices)
-        interval =  time_indices[t]
+        interval = time_indices[t]
 
         for j = 1:x_range
             for k = 1:y_range
