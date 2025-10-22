@@ -125,29 +125,38 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     fill!(Δv_temp, 0.0f0)
     fill!(fire, false)
 
+    @info "First step"
     update_neuron!(p, param, Δv, dt)
     Δv_temp .= Δv
 
-    # @views synaptic_current!(p, soma_syn,  synvars_s, v_s + Δv[:,1] * dt, is[:,1])
-    # @views synaptic_current!(p, dend_syn, synvars_d1, v_d1 + Δv[:,2] * dt, is[:,2])
-    # @views synaptic_current!(p, dend_syn, synvars_d2, v_d2 + Δv[:,3] * dt, is[:,3])
-    # clamp!(is, -1500, 1500)
-    # update_neuron!(p, param, Δv, dt)
+    @info "Second step"
+    update_neuron!(p, param, Δv, dt)
     # @show Δv.+Δv_temp
 
     @show Δv
     @inbounds for i ∈ 1:N
-        v_s[i]  += 0.5 * dt * (Δv_temp[i, 1] + Δv[i, 1])
-        v_d1[i] += 0.5 * dt * (Δv_temp[i, 2] + Δv[i, 2])
-        v_d2[i] += 0.5 * dt * (Δv_temp[i, 3] + Δv[i, 3])
-        w_s[i]  += 0.5 * dt * (Δv_temp[i, 4] + Δv[i, 4])
-
-        fire[i] = v_s[i] >= -10mV
-        v_s[i]  = ifelse(fire[i], AP_membrane, v_s[i]) 
-        w_s[i]  = ifelse(fire[i], w_s[i] + b, w_s[i])
-        θ[i]    = ifelse(fire[i], θ[i] + At, θ[i])
-        tabs[i] = ifelse(fire[i], round(Int, (up + τabs) / dt), tabs[i])
-        @show v_s, v_d1, v_d2
+        tabs[i] -= 1
+        θ[i]    += dt * (Vt - θ[i]) / τA
+        if tabs[i] > τabs / dt # backpropagation period
+            v_s[i] = AP_membrane
+            v_d1 = ((-(v_d1[i] * dt) + El) * d1.gm[i] - is[2] + I_d[i]) / d1.C[i]
+            v_d2 = ((-(v_d2[i] * dt) + El) * d2.gm[i] - is[3] + I_d[i]) / d2.C[i]
+        elseif tabs[i] > 0 # absolute refractory period
+            v_s[i] = Vr
+            v_d1 = ((-(v_d1[i] * dt) + El) * d1.gm[i] - is[2] + I_d[i]) / d1.C[i]
+            v_d2 = ((-(v_d2[i] * dt) + El) * d2.gm[i] - is[3] + I_d[i]) / d2.C[i]
+        elseif tabs[i] <= 0
+            fire[i] = v_s[i] .+ Δv[i, 1] * dt >= -10mV
+            Δv[i, 1]   = ifelse(fire[i], AP_membrane - v_s[i] , Δv[i,1]) 
+            v_s[i]  = ifelse(fire[i], AP_membrane, v_s[i]) 
+            w_s[i]  = ifelse(fire[i], w_s[i] + b, w_s[i])
+            θ[i]    = ifelse(fire[i], θ[i] + At, θ[i])
+            tabs[i] = ifelse(fire[i], round(Int, (up + τabs) / dt), tabs[i])
+            fire[i] && continue
+            v_s[i]  += 0.5 * dt * (Δv_temp[i, 1] + Δv[i, 1])
+            v_d1[i] += 0.5 * dt * (Δv_temp[i, 2] + Δv[i, 2])
+            v_d2[i] += 0.5 * dt * (Δv_temp[i, 3] + Δv[i, 3])
+            w_s[i]  += 0.5 * dt * (Δv_temp[i, 4] + Δv[i, 4])
     end
 end
 
@@ -165,37 +174,29 @@ end
     @unpack C, gl, El, ΔT, Vt, Vr, a, b, τw = adex
     @unpack synvars_s, synvars_d1, synvars_d2 = p
 
-    @fastmath @inbounds for i ∈ 1:p.N
-    end
 
     @views synaptic_current!(p, soma_syn,  synvars_s, v_s[:], is[:,1])
     @views synaptic_current!(p, dend_syn, synvars_d1, v_d1[:], is[:,2])
     @views synaptic_current!(p, dend_syn, synvars_d2, v_d2[:], is[:,3])
-    clamp!(is, -1500, 1500)
+    clamp!(is, -1000, 1000)
 
     @fastmath @inbounds for i ∈ 1:p.N
-        tabs[i] -= 1
-        θ[i]    += dt * (Vt - θ[i]) / τA
-        if tabs[i] > (τabs + up) / dt # backpropagation period
-            continue
-        elseif tabs[i] > 0 # absolute refractory period
-            v_s[i] = Vr
-            continue
-        else
-            ic[1] = -((v_d1[i] + Δv[i,2] * dt) - (v_s[i] + Δv[i,1] * dt)) * d1.gax[i]
-            ic[2] = -((v_d2[i] + Δv[i,3] * dt) - (v_s[i] + Δv[i,1] * dt)) * d2.gax[i]
-            Δv[i, 2] = ((-(v_d1[i] + Δv[i,2] * dt) + El) * d1.gm[i] - is[2] + ic[1] + I_d[i]) / d1.C[i]
-            Δv[i, 3] = ((-(v_d2[i] + Δv[i,3] * dt) + El) * d2.gm[i] - is[3] + ic[2] + I_d[i]) / d2.C[i]
-            @show "Integration"
-            Δv[i,1] =
-                1/C * (
-                    + gl * (-(v_s[i] + Δv[i, 1] * dt) + El) 
-                    + ΔT * exp64(1 / ΔT * (v_s[i] + Δv[i, 1] * dt - θ[i])) - w_s[i]  # adaptation
-                    - is[i, 1]   # synapses
-                    - sum(ic)*1 # axial currents
-                    + I[i]  # external current
-                )
-            Δv[i, 4] = (a * (v_s[i] +Δv[i, 1] - El) - (w_s[i]+Δv[i, 4])) / τw
+        ic[1] = -((v_d1[i] + Δv[i,2] * dt) - (v_s[i] + Δv[i,1] * dt)) * d1.gax[i]
+        ic[2] = -((v_d2[i] + Δv[i,3] * dt) - (v_s[i] + Δv[i,1] * dt)) * d2.gax[i]
+        Δv[i, 2] = ((-(v_d1[i] + Δv[i,2] * dt) + El) * d1.gm[i] - is[2] + ic[1] + I_d[i]) / d1.C[i]
+        Δv[i, 3] = ((-(v_d2[i] + Δv[i,3] * dt) + El) * d2.gm[i] - is[3] + ic[2] + I_d[i]) / d2.C[i]
+        Δv[i,1] =
+            1/C * (
+                + gl * (-(v_s[i] + Δv[i, 1] * dt) + El) 
+                + ΔT * exp256(1 / ΔT * (v_s[i] + Δv[i, 1] * dt - θ[i])) - w_s[i]  # adaptation
+                - is[i, 1]   # synapses
+                - sum(ic)*1 # axial currents
+                + I[i]  # external current
+            )
+        Δv[i, 4] = (a * (v_s[i]- El) - (w_s[i])) / τw
+        
+        if fire[i]
+            @show "Δv soma: ", Δv[i,1]
             @show "Firing: ", fire[i]
         end
     end
