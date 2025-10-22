@@ -108,7 +108,7 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     @unpack fire, θ, tabs = p
     @unpack Δv, Δv_temp, is = p
 
-    @unpack synvars_s, synvars_d1, synvars_d2 = p
+    @unpack synvars_s, synvars_d1, synvars_d2, d1, d2, I_d = p
     @unpack glu_d1, glu_d2, glu_s, gaba_d1, gaba_d2, gaba_s = p
 
     @unpack spike, adex,  soma_syn, dend_syn = param
@@ -125,15 +125,11 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     fill!(Δv_temp, 0.0f0)
     fill!(fire, false)
 
-    @info "First step"
     update_neuron!(p, param, Δv, dt)
     Δv_temp .= Δv
-
-    @info "Second step"
     update_neuron!(p, param, Δv, dt)
     # @show Δv.+Δv_temp
 
-    @show Δv
     @inbounds for i ∈ 1:N
         tabs[i] -= 1
         θ[i]    += dt * (Vt - θ[i]) / τA
@@ -157,6 +153,7 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
             v_d1[i] += 0.5 * dt * (Δv_temp[i, 2] + Δv[i, 2])
             v_d2[i] += 0.5 * dt * (Δv_temp[i, 3] + Δv[i, 3])
             w_s[i]  += 0.5 * dt * (Δv_temp[i, 4] + Δv[i, 4])
+        end
     end
 end
 
@@ -194,11 +191,6 @@ end
                 + I[i]  # external current
             )
         Δv[i, 4] = (a * (v_s[i]- El) - (w_s[i])) / τw
-        
-        if fire[i]
-            @show "Δv soma: ", Δv[i,1]
-            @show "Firing: ", fire[i]
-        end
     end
 end
 
