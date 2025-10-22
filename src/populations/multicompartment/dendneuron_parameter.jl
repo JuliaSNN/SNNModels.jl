@@ -52,11 +52,6 @@ struct TripodNeuron <: AbstractDendriticTree end
 struct BallAndStickNeuron <: AbstractDendriticTree end
 struct Multipod <: AbstractDendriticTree end
 
-    # RT=ReceptorSynapseType,
-    # AdExT = AdExParameter{Float32}
-
-[(:s=>:d1), (:s=>:d2)] |> typeof
-
 @snn_kw struct DendNeuronParameter{
     DT=Vector{DendLength},
     GT=Vector{Pair{Symbol,Symbol}},

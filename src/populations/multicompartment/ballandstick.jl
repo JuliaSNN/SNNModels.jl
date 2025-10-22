@@ -93,10 +93,10 @@ function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
         θ[i]    += dt * (Vt - θ[i]) / τA
         if tabs[i] > τabs / dt # backpropagation period
             v_s[i] = AP_membrane
-            v_d[i] = ((-(v_d[i] * dt) + El) * d.gm[i] - is[2]) / d.C[i]
+            v_d[i] += dt * (v_s[i] - v_d[i]) * d.gax[i] / d.C[i]
         elseif tabs[i] > 0 # absolute refractory period
             v_s[i] = Vr
-            v_d[i] = ((-(v_d[i] * dt) + El) * d1.gm[i] - is[2]) / d.C[i]
+            v_d[i] += dt * (v_s[i] - v_d[i]) * d.gax[i] / d.C[i]
         elseif tabs[i] <= 0
             fire[i] = v_s[i] .+ Δv[i, 1] * dt >= -10mV
             Δv[i, 1]   = ifelse(fire[i], AP_membrane - v_s[i] , Δv[i,1]) 
