@@ -132,7 +132,7 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     # @views synaptic_current!(p, dend_syn, synvars_d1, v_d1 + Δv[:,2] * dt, is[:,2])
     # @views synaptic_current!(p, dend_syn, synvars_d2, v_d2 + Δv[:,3] * dt, is[:,3])
     # clamp!(is, -1500, 1500)
-    update_neuron!(p, param, Δv, dt)
+    # update_neuron!(p, param, Δv, dt)
     # @show Δv.+Δv_temp
 
     @show Δv
@@ -142,6 +142,11 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
         v_d2[i] += 0.5 * dt * (Δv_temp[i, 3] + Δv[i, 3])
         w_s[i]  += 0.5 * dt * (Δv_temp[i, 4] + Δv[i, 4])
 
+        fire[i] = v_s[i] >= -10mV
+        v_s[i]  = ifelse(fire[i], AP_membrane, v_s[i]) 
+        w_s[i]  = ifelse(fire[i], w_s[i] + b, w_s[i])
+        θ[i]    = ifelse(fire[i], θ[i] + At, θ[i])
+        tabs[i] = ifelse(fire[i], round(Int, (up + τabs) / dt), tabs[i])
         @show v_s, v_d1, v_d2
     end
 end
@@ -161,20 +166,14 @@ end
     @unpack synvars_s, synvars_d1, synvars_d2 = p
 
     @fastmath @inbounds for i ∈ 1:p.N
-        fire[i] = v_s[i] >= -10mV
-        v_s[i]  = ifelse(fire[i], AP_membrane, v_s[i]) 
-        w_s[i]  = ifelse(fire[i], w_s[i] + b, w_s[i])
-        θ[i]    = ifelse(fire[i], θ[i] + At, θ[i])
-        tabs[i] = ifelse(fire[i], round(Int, (up + τabs) / dt), tabs[i])
     end
 
     @views synaptic_current!(p, soma_syn,  synvars_s, v_s[:], is[:,1])
     @views synaptic_current!(p, dend_syn, synvars_d1, v_d1[:], is[:,2])
     @views synaptic_current!(p, dend_syn, synvars_d2, v_d2[:], is[:,3])
-    clamp!(is, -1000, 1000)
+    clamp!(is, -1500, 1500)
 
     @fastmath @inbounds for i ∈ 1:p.N
-
         tabs[i] -= 1
         θ[i]    += dt * (Vt - θ[i]) / τA
         if tabs[i] > (τabs + up) / dt # backpropagation period
