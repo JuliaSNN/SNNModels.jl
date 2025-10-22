@@ -92,64 +92,30 @@ end
     fill!(gaba, 0.0f0)
 end
 
-function update_synapses!(
-    p::P,
-    synapse::T,
-    synvars::ReceptorSynapseVars,
-    dt::Float32,
-) where {P<:AbstractGeneralizedIF,T<:AbstractReceptorParameter}
-    @unpack N, glu, gaba = p
-    @unpack g, h = synvars
-    update_synapses!(p, synapse, glu, gaba, synvars, dt)
-    fill!(glu, 0.0f0)
-    fill!(gaba, 0.0f0)
-end
-
-@inline function synaptic_current!(
-    syn::ReceptorSynapse,
-    v::Float32,
-    synvars::ReceptorSynapseVars,
-    is::Vector{Float32},
-    comp::Int,
-    neuron::Int,
-)
-    @unpack mg, b, k = syn.NMDA
-    @unpack g = synvars
-    is[comp] = 0.0f0
-    @inbounds @fastmath begin
-        @simd for n in eachindex(syn.syn)
-            @unpack gsyn, E_rev, nmda = syn.syn[n]
-            is[comp] +=
-                gsyn *
-                g[neuron, n] *
-                (v - E_rev) *
-                (nmda==0.0f0 ? 1.0f0 : 1/(1.0f0 + (mg / b) * exp256(k * v)))
-        end
-    end
-    is[comp] = clamp(is[comp], -1500, 1500)
-end
-
 @inline function synaptic_current!(
     p::T,
     synapse::P,
     synvars::ReceptorSynapseVars,
-) where {T<:AbstractGeneralizedIF,P<:AbstractReceptorParameter}
-    @unpack N, v, syn_curr = p
+    v::VT1, # membrane potential
+    syncurr::VT2, # synaptic current
+) where {T<:AbstractGeneralizedIF,P<:AbstractReceptorParameter, VT1 <:AbstractVector, VT2 <:AbstractVector}
+    @unpack N = p
     @unpack g, h = synvars
     @unpack syn, NMDA = synapse
     @unpack mg, b, k = NMDA
-    fill!(syn_curr, 0.0f0)
-    @inbounds @fastmath for n in eachindex(syn)
+    fill!(syncurr, 0.0f0)
+    # @inbounds @fastmath 
+    for n in eachindex(syn)
         @unpack gsyn, E_rev, nmda = syn[n]
         for neuron ∈ 1:N
-            syn_curr[neuron] +=
+            syncurr[neuron] +=
                 gsyn *
                 g[neuron, n] *
                 (v[neuron] - E_rev) *
                 (nmda==0.0f0 ? 1.0f0 : 1/(1.0f0 + (mg / b) * exp256(k * v[neuron])))
         end
     end
-    return
+    # @show syncurr
 end
 
 export ReceptorSynapse

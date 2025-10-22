@@ -57,13 +57,14 @@ end
 function update_synapses!(
     p::P,
     synapse::T,
+    glu::Vector{Float32},
+    gaba::Vector{Float32},
     synvars::DoubleExpSynapseVars,
     dt::Float32,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractDoubleExpParameter}
-    @unpack glu, gaba = p
     @unpack N, ge, gi, he, hi = synvars
     @unpack τde, τre, τdi, τri = synapse
-    @inbounds for i ∈ 1:N
+    @inbounds @simd for i ∈ 1:N
         he[i] += glu[i]
         hi[i] += gaba[i]
         ge[i] += dt * (-ge[i] / τde + he[i])
@@ -75,16 +76,19 @@ function update_synapses!(
     fill!(gaba, 0f0)
 end
 
+
 @inline function synaptic_current!(
-    p::P,
-    param::T,
-    synvars::DoubleExpSynapseVars
-) where {P<:AbstractGeneralizedIF,T<:AbstractDoubleExpParameter}
-    @unpack gsyn_e, gsyn_i, E_e, E_i = param
-    @unpack N, v, syn_curr = p
+    p::T,
+    synapse::DoubleExpSynapse,
+    synvars::DoubleExpSynapseVars,
+    v::VT1, # membrane potential
+    syncurr::VT2, # synaptic current
+) where {T<:AbstractPopulation, VT1 <:AbstractVector, VT2 <:AbstractVector}
+    @unpack gsyn_e, gsyn_i, E_e, E_i = synapse
+    @unpack N = p
     @unpack ge, gi = synvars
     @inbounds @simd for i ∈ 1:N
-        syn_curr[i] = ge[i] * (v[i] - E_e) * gsyn_e + gi[i] * (v[i] - E_i) * gsyn_i
+        syncurr[i] = ge[i] * (v[i] - E_e) * gsyn_e + gi[i] * (v[i] - E_i) * gsyn_i
     end
 end
 

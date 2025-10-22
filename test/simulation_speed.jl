@@ -39,9 +39,9 @@ using SNNModels
 
 Random.seed!(1234)
 
-dend_neuron = SNN.DendNeuronParameter(; spike = SNN.PostSpike(At=10, τA=30ms, up=100))
+dend_neuron = SNN.DendNeuronParameter(; spike = SNN.PostSpike(At=0, τA=30ms, up=1))
 E = SNNModels.Population(dend_neuron, N=1)
-E  = SNN.Tripod(N=1)
+# E  = SNN.Tripod(N=1)
 
 poisson_exc = PoissonLayer(
     10.2Hz,    # Mean firing rate (Hz) 
@@ -74,9 +74,9 @@ SNN.monitor!(E, [:fire, :v_d1, :v_s, :v_d2])
 #
 sim!(model, 5s)
 SNN.raster(model.pop,[4s, 5s])
-SNN.vecplot(E, :v_d1, neurons=1, r=1s:5s)
-SNN.vecplot(E, :v_d2, neurons=1, r=1s:5s)
-SNN.vecplot(E, :v_s, neurons=1, r=4s:5s, add_spikes=true)
+SNN.vecplot(E, :v_d1, neurons=1, r=4s:5s)
+SNN.vecplot(E, :v_d2, neurons=1, r=4s:5s)
+SNN.vecplot(E, :v_s, neurons=1, r=3.7s:5s, add_spikes=true)
 ##
 
 @profview sim!(model, 50s)
