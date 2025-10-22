@@ -75,7 +75,7 @@ DendLength = Union{Float32,Tuple}
     spike::PST = PostSpike(At = 10, τA = 30ms)
 
     ## Dend parameters
-    ds::DT # = [200um , (200um, 400um)] ## Dendritic segment lengths
+    ds::DT = [200um , (200um, 400um)] ## Dendritic segment lengths
     physiology::PT = human_dend
 
     ## Receptors parameters
@@ -99,7 +99,7 @@ end
 function MulticompartmentNeuron(;
     N::Int = 100,
     name::String = "TripodExc",
-    dend = [(150um, 400um), (150um, 400um)],  # dendritic lengths
+    ds = [(150um, 400um), (150um, 400um)],  # dendritic lengths
 
     # After spike timescales and membrane
     adex = (
@@ -126,9 +126,9 @@ function MulticompartmentNeuron(;
     param = DendNeuronParameter(;
         adex,
         spike,
-        ds = dend,
-        soma_syn = soma_syn,
-        dend_syn = dend_syn,
+        ds,
+        soma_syn,
+        dend_syn,
     )
 
     if length(dend) == 2
