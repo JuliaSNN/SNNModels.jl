@@ -83,10 +83,10 @@ Tripod
     records::Dict = Dict()
 
     ## Temporary variables for integration
-    Δv::MFT = zeros(N, 3)
-    Δv_temp::MFT = zeros(N, 3)
+    Δv::MFT = zeros(N, 4)
+    Δv_temp::MFT = zeros(N, 4)
     is::MFT = zeros(N, 3)
-    ic::VFT = zeros(N)
+    ic::VFT = zeros(2)
 end
 
 function synaptic_target(targets::Dict, post::Tripod, sym::Symbol, target::Symbol)
@@ -111,7 +111,7 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     @unpack synvars_s, synvars_d1, synvars_d2 = p
     @unpack glu_d1, glu_d2, glu_s, gaba_d1, gaba_d2, gaba_s = p
 
-    @unpack spike, adex, soma_syn, dend_syn = param
+    @unpack spike, adex,  soma_syn, dend_syn = param
     @unpack AP_membrane, up, τabs, At, τA  = spike 
     @unpack El, Vr, Vt, τw, a, b = adex
 
@@ -123,31 +123,26 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     ## Heun integration
     fill!(Δv, 0.0f0)
     fill!(Δv_temp, 0.0f0)
-    @views synaptic_current!(p, soma_syn,  synvars_s, v_s[:], is[:,1])
-    @views synaptic_current!(p, dend_syn, synvars_d1, v_d1[:], is[:,2])
-    @views synaptic_current!(p, dend_syn, synvars_d2, v_d2[:], is[:,3])
-    clamp!(is, -1000, 1000)
+    fill!(fire, false)
+
     update_neuron!(p, param, Δv, dt)
     Δv_temp .= Δv
 
-    @views synaptic_current!(p, soma_syn,  synvars_s, v_s + Δv[:,1] * dt, is[:,1])
-    @views synaptic_current!(p, dend_syn, synvars_d1, v_d1 + Δv[:,2] * dt, is[:,2])
-    @views synaptic_current!(p, dend_syn, synvars_d2, v_d2 + Δv[:,3] * dt, is[:,3])
-    clamp!(is, -1500, 1500)
+    # @views synaptic_current!(p, soma_syn,  synvars_s, v_s + Δv[:,1] * dt, is[:,1])
+    # @views synaptic_current!(p, dend_syn, synvars_d1, v_d1 + Δv[:,2] * dt, is[:,2])
+    # @views synaptic_current!(p, dend_syn, synvars_d2, v_d2 + Δv[:,3] * dt, is[:,3])
+    # clamp!(is, -1500, 1500)
     update_neuron!(p, param, Δv, dt)
-    @show Δv.+Δv_temp
+    # @show Δv.+Δv_temp
 
+    @show Δv
     @inbounds for i ∈ 1:N
         v_s[i]  += 0.5 * dt * (Δv_temp[i, 1] + Δv[i, 1])
         v_d1[i] += 0.5 * dt * (Δv_temp[i, 2] + Δv[i, 2])
         v_d2[i] += 0.5 * dt * (Δv_temp[i, 3] + Δv[i, 3])
-        w_s[i] += dt * (a * (v_s[i] - El) - w_s[i]) / τw
+        w_s[i]  += 0.5 * dt * (Δv_temp[i, 4] + Δv[i, 4])
 
-        fire[i] = v_s[i] >= 0mV
-        v_s[i] = ifelse(fire[i], AP_membrane, v_s[i]) 
-        w_s[i] = ifelse(fire[i], w_s[i] + b, w_s[i])
-        θ[i] = ifelse(fire[i], θ[i] + At, θ[i])
-        tabs[i] = ifelse(fire[i], round(Int, (up + τabs) / dt), tabs[i])
+        @show v_s, v_d1, v_d2
     end
 end
 
@@ -157,45 +152,52 @@ end
     Δv::Matrix{Float32},
     dt::Float32,
 )
-    @unpack v_d1, v_d2, v_s, I_d, I, w_s, θ, tabs = p
+    @unpack v_d1, v_d2, v_s, I_d, I, w_s, θ, tabs, fire = p
     @unpack d1, d2 = p
     @unpack is, ic = p
-    @unpack adex, spike = param
+    @unpack adex, spike, soma_syn, dend_syn = param
     @unpack AP_membrane, up, τabs, At, τA  = spike 
-    @unpack C, gl, El, ΔT, Vt, Vr = adex
+    @unpack C, gl, El, ΔT, Vt, Vr, a, b, τw = adex
     @unpack synvars_s, synvars_d1, synvars_d2 = p
 
     @fastmath @inbounds for i ∈ 1:p.N
-        θ[i] += dt * (Vt - θ[i]) / τA
-        if tabs[i] > (τabs + up - up) / dt # backpropagation period
-            v_s[i] = AP_membrane
-            ## apply currents
-            v_d1[i] += dt * (v_s[i] - v_d1[i]) * d1.gax[i] / d1.C[i]
-            v_d2[i] += dt * (v_s[i] - v_d2[i]) * d2.gax[i] / d2.C[i]
+        fire[i] = v_s[i] >= -10mV
+        v_s[i]  = ifelse(fire[i], AP_membrane, v_s[i]) 
+        w_s[i]  = ifelse(fire[i], w_s[i] + b, w_s[i])
+        θ[i]    = ifelse(fire[i], θ[i] + At, θ[i])
+        tabs[i] = ifelse(fire[i], round(Int, (up + τabs) / dt), tabs[i])
+    end
+
+    @views synaptic_current!(p, soma_syn,  synvars_s, v_s[:], is[:,1])
+    @views synaptic_current!(p, dend_syn, synvars_d1, v_d1[:], is[:,2])
+    @views synaptic_current!(p, dend_syn, synvars_d2, v_d2[:], is[:,3])
+    clamp!(is, -1000, 1000)
+
+    @fastmath @inbounds for i ∈ 1:p.N
+
+        tabs[i] -= 1
+        θ[i]    += dt * (Vt - θ[i]) / τA
+        if tabs[i] > (τabs + up) / dt # backpropagation period
+            continue
         elseif tabs[i] > 0 # absolute refractory period
             v_s[i] = Vr
-            v_d1[i] += dt * (Vr - v_d1[i]) * d1.gax[i] / d1.C[i]
-            v_d2[i] += dt * (Vr - v_d2[i]) * d2.gax[i] / d2.C[i]
+            continue
         else
-            tabs[i] > 0 && continue
-            #compute axial currents
             ic[1] = -((v_d1[i] + Δv[i,2] * dt) - (v_s[i] + Δv[i,1] * dt)) * d1.gax[i]
             ic[2] = -((v_d2[i] + Δv[i,3] * dt) - (v_s[i] + Δv[i,1] * dt)) * d2.gax[i]
-
-            # update membrane potential
-            Δv[1] =
+            Δv[i, 2] = ((-(v_d1[i] + Δv[i,2] * dt) + El) * d1.gm[i] - is[2] + ic[1] + I_d[i]) / d1.C[i]
+            Δv[i, 3] = ((-(v_d2[i] + Δv[i,3] * dt) + El) * d2.gm[i] - is[3] + ic[2] + I_d[i]) / d2.C[i]
+            @show "Integration"
+            Δv[i,1] =
                 1/C * (
-                    + gl * (-(v_s[i] + Δv[i, 1] * dt) + El) +
-                    ΔT * exp64(1 / ΔT * (v_s[i] + Δv[i, 1] * dt - θ[i])) - w_s[i]  # adaptation
+                    + gl * (-(v_s[i] + Δv[i, 1] * dt) + El) 
+                    + ΔT * exp64(1 / ΔT * (v_s[i] + Δv[i, 1] * dt - θ[i])) - w_s[i]  # adaptation
                     - is[i, 1]   # synapses
-                    - sum(ic) # axial currents
+                    - sum(ic)*1 # axial currents
                     + I[i]  # external current
                 )
-
-            Δv[2] =
-                ((-(v_d1[i] + Δv[i,2] * dt) + El) * d1.gm[i] - is[2] + ic[1] + I_d[i]) / d1.C[i]
-            Δv[3] =
-                ((-(v_d2[i] + Δv[i,3] * dt) + El) * d2.gm[i] - is[3] + ic[2] + I_d[i]) / d2.C[i]
+            Δv[i, 4] = (a * (v_s[i] +Δv[i, 1] - El) - (w_s[i]+Δv[i, 4])) / τw
+            @show "Firing: ", fire[i]
         end
     end
 end

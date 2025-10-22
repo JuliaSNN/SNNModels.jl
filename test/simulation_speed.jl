@@ -37,7 +37,11 @@ model = compose(; E, stim_exc, stim_inh, silent=true)
 using SNNModels
 @load_units
 
-E = SNNModels.Tripod(N=1)
+Random.seed!(1234)
+
+dend_neuron = SNN.DendNeuronParameter(; spike = SNN.PostSpike(At=10, τA=30ms, up=1))
+E = SNNModels.Population(dend_neuron, N=1)
+E  = SNN.Tripod(N=1)
 
 poisson_exc = PoissonLayer(
     10.2Hz,    # Mean firing rate (Hz) 
@@ -51,7 +55,7 @@ poisson_inh = PoissonLayer(
 exc_conn = 
 (
     p = 1.0f0,  # Probability of connecting to a neuron
-    μ = 10.0,  # Synaptic strength (nS)
+    μ = 7.0,  # Synaptic strength (nS)
 )
 inh_conn = ( 
     p = 1.0f0,   # Probability of connecting to a neuron
@@ -65,11 +69,14 @@ stim_inh2 = Stimulus(poisson_inh, E, :gaba, :d2, conn=inh_conn, name = "noiseI")
 
 model = compose(; E, stim_exc1, stim_inh1, stim_exc2, stim_inh2, silent=true)
 SNN.monitor!(E, [:fire, :v_d1, :v_s, :v_d2])
+
+# sim!(model, 0.01s)
+#
 sim!(model, 5s)
-SNN.raster(model.pop,    [4s, 5s])
+SNN.raster(model.pop,[4s, 5s])
 SNN.vecplot(E, :v_d1, neurons=1, r=1s:5s)
 SNN.vecplot(E, :v_d2, neurons=1, r=1s:5s)
-SNN.vecplot(E, :v_s, neurons=1, r=1s:5s)
+SNN.vecplot(E, :v_s, neurons=1, r=4s:5s, add_spikes=true)
 ##
 
 @profview sim!(model, 50s)
