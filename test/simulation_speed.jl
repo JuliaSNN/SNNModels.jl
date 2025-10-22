@@ -37,6 +37,8 @@ model = compose(; E, stim_exc, stim_inh, silent=true)
 using SNNModels
 @load_units
 
+Random.seed!(1234)
+
 E = SNNModels.Tripod(N=1)
 
 poisson_exc = PoissonLayer(
@@ -51,7 +53,7 @@ poisson_inh = PoissonLayer(
 exc_conn = 
 (
     p = 1.0f0,  # Probability of connecting to a neuron
-    μ = 10.0,  # Synaptic strength (nS)
+    μ = 7.0,  # Synaptic strength (nS)
 )
 inh_conn = ( 
     p = 1.0f0,   # Probability of connecting to a neuron
