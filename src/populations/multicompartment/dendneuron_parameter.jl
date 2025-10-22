@@ -37,120 +37,154 @@ A parameter struct for the Tripod neuron model, implementing an Adaptive Exponen
 
 # Examples
 ```jldoctest
-julia> TripodParameter = DendNeuronParameter(ds = [200um, (200um, 400um)])
-DendNeuronParameter{Float32, Int64, Vector{DendLength}, Receptors, NMDAVoltageDependency{Float32}, PostSpike{Float32}, Physiology}(281.0, 40.0, 25.0, 7.03125, -70.6, -55.6, -50.4, 2.0, 144.0, 4.0, 80.5, 10.0, 1.0, 1, 2, PostSpike{Float32}(10, 30.0), [200.0, (200.0, 400.0)], human_dend, TripodSomaSynapse, TripodDendSynapse, NMDAVoltageDependency{Float32}(0.001, 0.062, 3.57))
+# julia> TripodParameter = DendNeuronParameter(ds = [200um, (200um, 400um)])
+# DendNeuronParameter{Float32, Int64, Vector{DendLength}, Receptors, NMDAVoltageDependency{Float32}, PostSpike{Float32}, Physiology}(281.0, 40.0, 25.0, 7.03125, -70.6, -55.6, -50.4, 2.0, 144.0, 4.0, 80.5, 10.0, 1.0, 1, 2, PostSpike{Float32}(10, 30.0), [200.0, (200.0, 400.0)], human_dend, TripodSomaSynapse, TripodDendSynapse, NMDAVoltageDependency{Float32}(0.001, 0.062, 3.57))
 
-julia> BallAndStickParameter = DendNeuronParameter(ds = [(150um, 400um)])
-DendNeuronParameter{Float32, Int64, Vector{DendLength}, Receptors, NMDAVoltageDependency{Float32}, PostSpike{Float32}, Physiology}(281.0, 40.0, 25.0, 7.03125, -70.6, -55.6, -50.4, 2.0, 144.0, 4.0, 80.5, 10.0, 1.0, 1, 2, PostSpike{Float32}(10, 30.0), [(150.0, 400.0)], human_dend, TripodSomaSynapse, TripodDendSynapse, NMDAVoltageDependency{Float32}(0.001, 0.062, 3.57))
+# julia> BallAndStickParameter = DendNeuronParameter(ds = [(150um, 400um)])
+# DendNeuronParameter{Float32, Int64, Vector{DendLength}, Receptors, NMDAVoltageDependency{Float32}, PostSpike{Float32}, Physiology}(281.0, 40.0, 25.0, 7.03125, -70.6, -55.6, -50.4, 2.0, 144.0, 4.0, 80.5, 10.0, 1.0, 1, 2, PostSpike{Float32}(10, 30.0), [(150.0, 400.0)], human_dend, TripodSomaSynapse, TripodDendSynapse, NMDAVoltageDependency{Float32}(0.001, 0.062, 3.57))
 ```
 """
 DendNeuronParameter
 
 DendLength = Union{Float32,Tuple}
+abstract type AbstractDendriticTree end
+struct TripodNeuron <: AbstractDendriticTree end
+struct BallAndStickNeuron <: AbstractDendriticTree end
+struct Multipod <: AbstractDendriticTree end
 
+    # RT=ReceptorSynapseType,
+    # AdExT = AdExParameter{Float32}
+
+[(:s=>:d1), (:s=>:d2)] |> typeof
 
 @snn_kw struct DendNeuronParameter{
     DT=Vector{DendLength},
-    RT=ReceptorSynapseType,
-    PST = PostSpike{Float32},
+    GT=Vector{Pair{Symbol,Symbol}},
     PT = Physiology{Float32},
-    AdExT = AdExParameter{Float32}
+    NT <: AbstractDendriticTree
 } <: AbstractGeneralizedIFParameter
-    # AdEx model
-    adex::AdExT = AdExParameter(
-            C = 281pF,
-            gl  = 40nS,
-            R = 0.025GΩ,
-            τm  = 7ms,
-            El  = -70.6mV,     
-            Vr  = -55.6mV,
-            Vt  = -50.4mV,
-            ΔT  = 2mV,
-            τw  = 144ms,
-            a = 4nS,
-            b = 80.5pA,
-    )
-
-    # After spike timescales and membrane
-    spike::PST = PostSpike(At = 10, τA = 30ms)
 
     ## Dend parameters
-    ds::DT = [200um , (200um, 400um)] ## Dendritic segment lengths
+    ds::DT = [(200um, 400um) , (200um, 400um)] ## Dendritic segment lengths
     physiology::PT = human_dend
-
-    ## Receptors parameters
-    soma_syn::RT = TripodSomaSynapse
-    dend_syn::RT = TripodDendSynapse
+    geometry::GT = [(:s=>:d1), (:s=>:d2)]  ## Geometry between soma and dendrites
+    type::NT = TripodNeuron()
 end
 
-TripodParameter = DendNeuronParameter(ds = [200um, (200um, 400um)])
-BallAndStickParameter = DendNeuronParameter(ds = [(150um, 400um)])
+function TripodParameter(
+        ds = [(200um, 400um), (200um, 400um)],
+        type = TripodNeuron(),
+        physiology = human_dend,
+        geometry = [(:s=>:d1), (:s=>:d2)],
+        )
+    return DendNeuronParameter(
+        ds = ds,
+        type = type,
+        physiology = physiology,
+        geometry = geometry,
+    )
+end
+
+function BallAndStickParameter(
+        ds = [(150um, 400um)],
+        type = BallAndStickNeuron(),
+        physiology = human_dend,
+        geometry = [(:s=>:d)],
+        )
+    return DendNeuronParameter(
+        ds = ds,
+        type = type,
+        physiology = physiology,
+        geometry = geometry,
+    )
+end
 
 function Population(param::T; kwargs...) where {T<:DendNeuronParameter}
-    if length(param.ds) == 2
+    if param.type isa TripodNeuron
+        @show keys(kwargs)
+        @show param
         return Tripod(;param, kwargs...)
-    elseif length(param.ds) == 1
+    elseif param.type isa BallAndStickNeuron
         return BallAndStick(;param, kwargs...)
     else
         error("Dendritic segments must be either 1 (BallAndStick) or 2 (Tripod).")
     end
 end
 
-function MulticompartmentNeuron(;
-    N::Int = 100,
-    name::String = "TripodExc",
-    ds = [(150um, 400um), (150um, 400um)],  # dendritic lengths
+# function MulticompartmentNeuron(;
+#     N::Int = 100,
+#     name::String = "TripodExc",
+#     ds = [(150um, 400um), (150um, 400um)],  # dendritic lengths
 
-    # After spike timescales and membrane
-    adex = (
-        C = 281pF,  # membrane capacitance
-        gl = 40nS,  # leak conductance
-        τm = 281pF / 40nS,  # membrane time constant
-        Vt = -50.4mV,  # threshold potential
-        Vr = -55.6mV,  # resting potential
-        El = -70.6mV,  # reset potential
-        R = (1 / 40)GΩ,  # membrane resistance
+#     # After spike timescales and membrane
+#     adex = (
+#         C = 281pF,  # membrane capacitance
+#         gl = 40nS,  # leak conductance
+#         τm = 281pF / 40nS,  # membrane time constant
+#         Vt = -50.4mV,  # threshold potential
+#         Vr = -55.6mV,  # resting potential
+#         El = -70.6mV,  # reset potential
+#         R = (1 / 40)GΩ,  # membrane resistance
 
-        ΔT = 2mV,  # slope factor
-        τw = 144ms,  # adaptation time constant
-        a = 4nS,  # subthreshold adaptation conductance
-        b = 80.5pA,  # spike-triggered adaptation current
-        τabs = 2ms,  # absolute refractory period
-    ),
+#         ΔT = 2mV,  # slope factor
+#         τw = 144ms,  # adaptation time constant
+#         a = 4nS,  # subthreshold adaptation conductance
+#         b = 80.5pA,  # spike-triggered adaptation current
+#         τabs = 2ms,  # absolute refractory period
+#     ),
 
 
-    dend_syn::ReceptorSynapse = TripodDendSynapse, # defines glutamaterbic and gabaergic receptors in the dendrites
-    soma_syn::ReceptorSynapse = TripodSomaSynapse,  # connect EyalGluDend to MilesGabaDend
-    spike=PostSpike(),
-)
-    param = DendNeuronParameter(;
-        adex,
-        spike,
-        ds, 
-        soma_syn,
-        dend_syn,
-    )
+#     dend_syn::ReceptorSynapse = TripodDendSynapse, # defines glutamaterbic and gabaergic receptors in the dendrites
+#     soma_syn::ReceptorSynapse = TripodSomaSynapse,  # connect EyalGluDend to MilesGabaDend
+#     spike=PostSpike(),
+# )
+#     param = DendNeuronParameter(;
+#         adex,
+#         spike,
+#         ds, 
+#         soma_syn,
+#         dend_syn,
+#     )
 
-    if length(dend) == 2
-        return Tripod(
-            N = N,
-            param = param,
-            d1 = create_dendrite(N, dend[1]),
-            d2 = create_dendrite(N, dend[2]),
-            name = name,
-        )
-    end
-    if length(dend) == 1
-        return BallAndStick(
-            N = N,
-            param = param,
-            d = create_dendrite(N, dend[1]),
-            name = name,
-        )
-    end
-end
+#     if length(dend) == 2
+#         return Tripod(
+#             N = N,
+#             param = param,
+#             d1 = create_dendrite(N, dend[1]),
+#             d2 = create_dendrite(N, dend[2]),
+#             name = name,
+#         )
+#     end
+#     if length(dend) == 1
+#         return BallAndStick(
+#             N = N,
+#             param = param,
+#             d = create_dendrite(N, dend[1]),
+#             name = name,
+#         )
+#     end
+# end
 
 export DendNeuronParameter, TripodParameter, BallAndStickParameter, MulticompartmentNeuron
+
+    # AdEx model
+    # adex::AdExT = AdExParameter(
+    #         C = 281pF,
+    #         gl  = 40nS,
+    #         R = 0.025GΩ,
+    #         τm  = 7ms,
+    #         El  = -70.6mV,     
+    #         Vr  = -55.6mV,
+    #         Vt  = -50.4mV,
+    #         ΔT  = 2mV,
+    #         τw  = 144ms,
+    #         a = 4nS,
+    #         b = 80.5pA,
+    # )
+
+    # # After spike timescales and membrane
+    # spike::PST = PostSpike(At = 10, τA = 30ms)
+
 
 # @inline function update_synapses!(
 #     p::P,

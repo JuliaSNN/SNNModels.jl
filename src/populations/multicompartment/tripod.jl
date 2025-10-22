@@ -1,5 +1,4 @@
 
-
 """
     Tripod
 
@@ -45,29 +44,38 @@ Tripod
     VFT = Vector{Float32},
     MFT = Matrix{Float32},
     VDT = Dendrite{Vector{Float32}},
-    SYNV<: AbstractSynapseVariable,
+    SYNS <: AbstractSynapseParameter,
+    SYND <: AbstractSynapseParameter,
+    SYNSV <: AbstractSynapseVariable,
+    SYNDV <: AbstractSynapseVariable,
+    SOMAT <: AbstractGeneralizedIFParameter,
+    PST <: AbstractSpikeParameter,
     IT = Int32,
 } <: AbstractDendriteIF
     id::String = randstring(12)
     name::String = "Tripod"
     ## These are compulsory parameters
     N::IT = 100
-    param::DendNeuronParameter = TripodParameter
+    param::DendNeuronParameter = TripodParameter()
+    adex::SOMAT = AdExParameter()
+    soma_syn::SYNS = TripodSomaSynapse()
+    dend_syn::SYND = TripodDendSynapse()
+    spike::PST = PostSpike()
     d1::VDT = create_dendrite(N, param.ds[1])
     d2::VDT = create_dendrite(N, param.ds[2])
 
     # Membrane potential and adaptation
-    v_s::VFT = rand_value(N, param.adex.Vt, param.adex.Vr)
+    v_s::VFT = rand_value(N, adex.Vt, adex.Vr)
     w_s::VFT = zeros(N)
-    v_d1::VFT = rand_value(N, param.adex.Vt, param.adex.Vr)
-    v_d2::VFT = rand_value(N, param.adex.Vt, param.adex.Vr)
+    v_d1::VFT = rand_value(N, adex.Vt, adex.Vr)
+    v_d2::VFT = rand_value(N, adex.Vt, adex.Vr)
     I::VFT = zeros(N)
     I_d::VFT = zeros(N)
 
     # Synapses dendrites
-    synvars_s::SYNV = synaptic_variables(param.soma_syn, N)
-    synvars_d1::SYNV = synaptic_variables(param.dend_syn, N)
-    synvars_d2::SYNV = synaptic_variables(param.dend_syn, N)
+    synvars_s::SYNSV = synaptic_variables(soma_syn, N)
+    synvars_d1::SYNDV = synaptic_variables(dend_syn, N)
+    synvars_d2::SYNDV = synaptic_variables(dend_syn, N)
 
     glu_d1::VFT = zeros(N) #! target
     gaba_d1::VFT = zeros(N) #! target
@@ -79,7 +87,7 @@ Tripod
     # Spike model and threshold
     fire::VBT = zeros(Bool, N)
     tabs::VFT = zeros(Int, N)
-    θ::VFT = ones(N) * param.adex.Vt
+    θ::VFT = ones(N) * adex.Vt
     records::Dict = Dict()
 
     ## Temporary variables for integration
@@ -90,7 +98,7 @@ Tripod
 end
 
 function synaptic_target(targets::Dict, post::Tripod, sym::Symbol, target::Symbol)
-    syn = get_synapse_symbol(post.param.soma_syn, sym)
+    syn = get_synapse_symbol(post.soma_syn, sym)
     sym = Symbol("$(syn)_$target")
     v = Symbol("v_$target")
     g = getfield(post,sym )
@@ -102,6 +110,15 @@ function synaptic_target(targets::Dict, post::Tripod, sym::Symbol, target::Symbo
     return g, v_post
 end
 
+# function Population(param <:T; N::Int=100, name::String="TripodNeuron", kwargs...) where T<:TripodParameter
+#     return Tripod(;
+#         N = N,
+#         param = param,
+#         name = name,
+#         kwargs...,
+#     )
+
+# end
 
 function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     @unpack N, v_s, w_s, v_d1, v_d2 = p
@@ -111,7 +128,7 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     @unpack synvars_s, synvars_d1, synvars_d2, d1, d2, I_d = p
     @unpack glu_d1, glu_d2, glu_s, gaba_d1, gaba_d2, gaba_s = p
 
-    @unpack spike, adex,  soma_syn, dend_syn = param
+    @unpack spike, adex,  soma_syn, dend_syn = p
     @unpack AP_membrane, up, τabs, At, τA  = spike 
     @unpack El, Vr, Vt, τw, a, b = adex
 
@@ -166,7 +183,7 @@ end
     @unpack v_d1, v_d2, v_s, I_d, I, w_s, θ, tabs, fire = p
     @unpack d1, d2 = p
     @unpack is, ic = p
-    @unpack adex, spike, soma_syn, dend_syn = param
+    @unpack adex, spike, soma_syn, dend_syn = p
     @unpack AP_membrane, up, τabs, At, τA  = spike 
     @unpack C, gl, El, ΔT, Vt, Vr, a, b, τw = adex
     @unpack synvars_s, synvars_d1, synvars_d2 = p
@@ -175,7 +192,7 @@ end
     @views synaptic_current!(p, soma_syn,  synvars_s, v_s[:], is[:,1])
     @views synaptic_current!(p, dend_syn, synvars_d1, v_d1[:], is[:,2])
     @views synaptic_current!(p, dend_syn, synvars_d2, v_d2[:], is[:,3])
-    clamp!(is, -1000, 1000)
+    clamp!(is, -1500, 1500)
 
     @fastmath @inbounds for i ∈ 1:p.N
         ic[1] = -((v_d1[i] + Δv[i,2] * dt) - (v_s[i] + Δv[i,1] * dt)) * d1.gax[i]
@@ -187,10 +204,11 @@ end
                 + gl * (-(v_s[i] + Δv[i, 1] * dt) + El) 
                 + ΔT * exp256(1 / ΔT * (v_s[i] + Δv[i, 1] * dt - θ[i])) - w_s[i]  # adaptation
                 - is[i, 1]   # synapses
-                - sum(ic)*1 # axial currents
+                - sum(ic) # axial currents
                 + I[i]  # external current
             )
-        Δv[i, 4] = (a * (v_s[i]- El) - (w_s[i])) / τw
+        # Δv[i, 4] = (a * (v_s[i]- El) - (w_s[i])) / τw
+        Δv[i, 4] = (a * ((v_s[i] + Δv[i,1] )- El) - (w_s[i] + Δv[i,4])) / τw
     end
 end
 
