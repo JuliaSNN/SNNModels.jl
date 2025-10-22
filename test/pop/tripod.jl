@@ -51,7 +51,7 @@ E =let
             dend_syn = DendSynapse,
     )
 
-    E = SNNModels.Population(;N = 1, dend_neuron...)
+    E = SNNModels.Population(;N = 100, dend_neuron...)
 end
 
 poisson_exc = PoissonLayer(
@@ -69,6 +69,6 @@ stim_inh = Stimulus(poisson_inh, E, :gaba, :d1,  conn=(μ=0.1, ρ=1), name = "no
 
 model = compose(; E, stim_exc, stim_inh, silent=true)
 
-sim!(model, 1s)
+train!(model, 1s)
 
 true

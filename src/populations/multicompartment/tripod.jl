@@ -152,12 +152,12 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
         θ[i]    += dt * (Vt - θ[i]) / τA
         if tabs[i] > τabs / dt # backpropagation period
             v_s[i] = AP_membrane
-            v_d1 = ((-(v_d1[i] * dt) + El) * d1.gm[i] - is[2] + I_d[i]) / d1.C[i]
-            v_d2 = ((-(v_d2[i] * dt) + El) * d2.gm[i] - is[3] + I_d[i]) / d2.C[i]
+            v_d1[i] = ((-(v_d1[i] * dt) + El) * d1.gm[i] - is[2] + I_d[i]) / d1.C[i]
+            v_d2[i] = ((-(v_d2[i] * dt) + El) * d2.gm[i] - is[3] + I_d[i]) / d2.C[i]
         elseif tabs[i] > 0 # absolute refractory period
             v_s[i] = Vr
-            v_d1 = ((-(v_d1[i] * dt) + El) * d1.gm[i] - is[2] + I_d[i]) / d1.C[i]
-            v_d2 = ((-(v_d2[i] * dt) + El) * d2.gm[i] - is[3] + I_d[i]) / d2.C[i]
+            v_d1[i] = ((-(v_d1[i] * dt) + El) * d1.gm[i] - is[2] + I_d[i]) / d1.C[i]
+            v_d2[i] = ((-(v_d2[i] * dt) + El) * d2.gm[i] - is[3] + I_d[i]) / d2.C[i]
         elseif tabs[i] <= 0
             fire[i] = v_s[i] .+ Δv[i, 1] * dt >= -10mV
             Δv[i, 1]   = ifelse(fire[i], AP_membrane - v_s[i] , Δv[i,1]) 
