@@ -12,13 +12,11 @@ A synaptic parameter type that models receptor-based synaptic dynamics with NMDA
 - `syn::ST`: Array of receptor parameters (default: `SomaReceptors`)
 
 # Type Parameters
-- `FT`: Floating point type (default: `Float32`)
 - `VIT`: Vector of integers type (default: `Vector{Int}`)
 - `ST`: Receptor array type (default: `ReceptorArray`)
 - `NMDAT`: NMDA voltage dependency type (default: `NMDAVoltageDependency{Float32}`)
-- `VFT`: Vector of floating point type (default: `Vector{Float32}`)
 
-This type implements receptor-based synaptic dynamics with NMDA voltage dependence, where synaptic currents are calculated based on receptor activation and voltage-dependent NMDA modulation.
+This type implements conductance-based synaptic dynamics with AMPA, NMDA, GABAa, and GABAb receptors. Synaptic currents are calculated based on receptor activation and voltage-dependent NMDA modulation.
 """
 ReceptorSynapse
 
@@ -40,6 +38,15 @@ ReceptorSynapseType = ReceptorSynapse{
         NMDAVoltageDependency{Float32},
     }
 
+"""
+    ReceptorSynapseVars{MFT} <: AbstractSynapseVariable
+A synaptic variable type that stores the state variables for receptor-based synaptic dynamics.
+# Fields
+- `N::Int`: Number of synapses
+- `g::MFT`: Matrix of conductances for each receptor type
+- `h::MFT`: Matrix of auxiliary variables for each receptor type
+"""
+ReceptorSynapseVars
 @snn_kw struct ReceptorSynapseVars{MFT = Matrix{Float32}}  <: AbstractSynapseVariable
     N::Int = 100
     g::MFT = zeros(Float32, N, 4)

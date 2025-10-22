@@ -18,7 +18,7 @@ The parameter β controls the noise in the firing rate, with higher values leadi
 """
 BalancedParameter
 
-@snn_kw struct BalancedParameter{FT = Float32} <: AbstractParameter
+@snn_kw struct BalancedParameter{FT = Float32} <: AbstractStimulusParameter
     kIE::FT = 1.0
     β::FT = 0.0
     τ::FT = 50.0ms

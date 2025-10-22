@@ -30,6 +30,18 @@ SingleExpSynapse
     gsyn_i::FT = 1.0f0 #norm_synapse(τri, τdi) # Synaptic conductance for inhibitory synapses
 end
 
+"""
+    SingleExpSynapseVars{VFT} <: AbstractSynapseVariable
+
+A synaptic variable type that stores the state variables for single exponential synaptic dynamics.
+
+# Fields
+- `N::Int`: Number of synapses
+- `ge::VFT`: Vector of excitatory conductances
+- `gi::VFT`: Vector of inhibitory conductances
+"""
+SingleExpSynapseVars
+
 @snn_kw struct SingleExpSynapseVars{VFT = Vector{Float32}}  <: AbstractSynapseVariable
     N::Int = 100
     ge::VFT = zeros(Float32, N)
@@ -50,11 +62,12 @@ end
 function update_synapses!(
     p::P,
     synapse::T,
+    glu::Vector{Float32},
+    gaba::Vector{Float32},
     synvars::SingleExpSynapseVars,
     dt::Float32,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractSinExpParameter}
     @unpack N, ge, gi = synvars
-    @unpack glu, gaba = p
     @unpack τe, τi = synapse
     @fastmath @inbounds for i ∈ 1:N
         ge[i] += glu[i]
@@ -70,12 +83,14 @@ end
     p::P,
     synapse::T,
     synvars::SingleExpSynapseVars,
-) where {P<:AbstractGeneralizedIF,T<:AbstractSinExpParameter}
+    v::VT1, # membrane potential
+    syncurr::VT2, # synaptic current
+) where {P<:AbstractGeneralizedIF,T<:AbstractSinExpParameter, VT1 <:AbstractVector, VT2 <:AbstractVector}
     @unpack gsyn_e, gsyn_i, E_e, E_i = synapse
-    @unpack N, v, syn_curr = p
+    @unpack N, = p
     @unpack ge, gi = synvars
     @inbounds @simd for i ∈ 1:N
-        syn_curr[i] = ge[i] * (v[i] - E_e) * gsyn_e + gi[i] * (v[i] - E_i) * gsyn_i
+        syncurr[i] = ge[i] * (v[i] - E_e) * gsyn_e + gi[i] * (v[i] - E_i) * gsyn_i
     end
 end
 

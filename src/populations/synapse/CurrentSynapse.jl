@@ -25,6 +25,21 @@ CurrentSynapse
     E_e::FT = 0mV # Reversal potential for excitatory synapses
 end
 
+"""
+    CurrentSynapseVars{VFT} <: AbstractSynapseVariable
+A synaptic variable type that stores the state variables for current-based synaptic dynamics.
+# Fields
+- `N::Int`: Number of synapses
+- `ge::VFT`: Vector of excitatory conductances
+- `gi::VFT`: Vector of inhibitory conductances
+"""
+CurrentSynapseVars
+@snn_kw struct CurrentSynapseVars{VFT = Vector{Float32}} <: AbstractSynapseVariable
+    N::Int = 100
+    ge::VFT = zeros(Float32, N)
+    gi::VFT = zeros(Float32, N)
+end
+
 function synaptic_variables(
     synapse::CurrentSynapse,
     N::Int,
@@ -34,12 +49,6 @@ function synaptic_variables(
         ge = zeros(Float32, N),
         gi = zeros(Float32, N),
     )
-end
-
-@snn_kw struct CurrentSynapseVars{VFT = Vector{Float32}} <: AbstractSynapseVariable
-    N::Int = 100
-    ge::VFT = zeros(Float32, N)
-    gi::VFT = zeros(Float32, N)
 end
 
 @inline function update_synapses!(

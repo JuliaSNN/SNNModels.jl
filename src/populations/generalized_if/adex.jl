@@ -1,7 +1,8 @@
 """
     AdExParameter{FT} <: AbstractGeneralizedIFParameter
 
-A parameter struct for the Adaptive Exponential Integrate-and-Fire (AdEx) neuron model.
+The AdEx model extends the leaky integrate-and-fire model with exponential spiking dynamics and spike-triggered adaptation.
+This implementation follows the parameterization from Brette and Gerstner (2005).
 
 # Fields
 - `C::FT`: Membrane capacitance (default: 281 pF)
@@ -16,8 +17,6 @@ A parameter struct for the Adaptive Exponential Integrate-and-Fire (AdEx) neuron
 - `a::FT`: Subthreshold adaptation parameter (default: 4 nS)
 - `b::FT`: Spike-triggered adaptation parameter (default: 80.5 pA)
 
-The AdEx model extends the leaky integrate-and-fire model with exponential spiking dynamics and spike-triggered adaptation.
-This implementation follows the parameterization from Brette and Gerstner (2005).
 """
 AdExParameter
 @snn_kw mutable struct AdExParameter{FT = Float32} <: AbstractGeneralizedIFParameter
@@ -39,15 +38,21 @@ end
 """
     AdEx{VFT, MFT,  GIFT, SYNT} <: AbstractGeneralizedIF
 
-A struct representing an Adaptive Exponential Integrate-and-Fire (AdEx) neuron model.
+The AdEx model implements the adaptive exponential integrate-and-fire neuron model with support for any synaptic model.
 
 # Fields
+## Population Info
 - `name::String`: Name of the neuron model (default: "AdEx")
 - `id::String`: Unique identifier for the neuron population (default: random 12-character string)
+- `records::Dict`: Dictionary for storing simulation records (initialized empty)
+
+## Model Parameters
 - `param::GIFT`: Parameters for the AdEx model (default: `AdExParameter()`)
 - `synapse::SYNT`: Synaptic parameters (default: `DoubleExpSynapse()`)
-- `spike::PostSpike`: Post-spike parameters (default: `PostSpike()`)
+- `spike::PST`: Post-spike parameters (default: `PostSpike()`)
 - `N::Int32`: Number of neurons in the population (default: 100)
+
+## Model variable
 - `v::VFT`: Membrane potential (initialized randomly between `Vr` and `Vt`)
 - `w::VFT`: Adaptation current (initialized to zeros)
 - `fire::VBT`: Spike flags (initialized to false)
@@ -55,17 +60,12 @@ A struct representing an Adaptive Exponential Integrate-and-Fire (AdEx) neuron m
 - `tabs::VIT`: Absolute refractory period counters (initialized to ones)
 - `I::VFT`: External current (initialized to zeros)
 - `syn_curr::VFT`: Total synaptic current (initialized to zeros)
-- `ge::VFT`: Excitatory synaptic conductance (initialized to zeros if not using receptor model)
-- `gi::VFT`: Inhibitory synaptic conductance (initialized to zeros if not using receptor model)
-- `he::VFT`: Excitatory synaptic current (initialized to zeros)
-- `hi::VFT`: Inhibitory synaptic current (initialized to zeros)
-- `g::MFT`: Conductance matrix for receptor model (initialized to zeros if not using receptor model)
-- `h::MFT`: Synaptic current matrix for receptor model (initialized to zeros if not using receptor model)
-- `glu::VFT`: Glutamate receptor current (initialized to zeros if not using receptor model)
-- `gaba::VFT`: GABA receptor current (initialized to zeros if not using receptor model)
-- `records::Dict`: Dictionary for storing simulation records (initialized empty)
 
-The AdEx model implements the adaptive exponential integrate-and-fire neuron model with support for both simple synaptic models and receptor-based models.
+## Synapses
+- `synvars::SYNV`: Synaptic variables for the synapse model
+- `glu::VFT`: Glutamate receptor target
+- `gaba::VFT`: GABA receptor target
+
 """
 AdEx
 

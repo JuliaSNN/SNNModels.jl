@@ -1,5 +1,68 @@
 # BallAndStick
+"""
+    BallAndStick{
+    VFT = Vector{Float32},
+    MFT = Matrix{Float32},
+    VDT = Dendrite{Vector{Float32}},
+    SYND <: AbstractSynapseParameter,
+    SYNS <: AbstractSynapseParameter,
+    SYNDV <: AbstractSynapseVariable,
+    SYNSV <: AbstractSynapseVariable,
+    SOMAT <: AbstractGeneralizedIFParameter,
+    PST <: AbstractSpikeParameter,
+    IT = Int32,
+    } <: AbstractDendriteIF
 
+A ball-and-stick neuron model with dendritic and somatic compartments.
+The model incorporates adaptive exponential integrate-and-fire dynamics
+with synaptic inputs to both the soma and dendrites. The soma includes adaptation currents and dynamic thresholds for spike generation.
+The dendrite is modeled with separate passive compartments, and the soma integrates input currents from both dendrites. The current flows between the soma and the dendrite is governed by axial conductances, defined in the dendrite parameters. The dendrite parameters are computed based on passive membrane properties and geometrical properties, defined in the `DendNeuronParameter`.
+The model accepts any synaptic model for both soma and dendrites
+
+
+# Fields
+
+## Population Info
+- `name::String`: Name of the neuron model ("BallAndStick" by default)
+- `id::String`: Unique identifier for the neuron model
+- `N::IT`: Number of neurons in the population (default: 100)
+- `records::Dict`: Dictionary for storing simulation records
+
+## Model Parameters
+- `param::DendNeuronParameter`: Parameters specific to the dendrite-neuron model
+- `adex::SOMAT`: Adaptive Exponential Integrate-and-Fire (AdEx) parameters
+- `dend_syn::SYND`: Dendritic synapse parameters (default: TripodDendSynapse)
+- `soma_syn::SYNS`: Somatic synapse parameters (default: TripodSomaSynapse)
+- `spike::PST`: Post-spike parameters (default: PostSpike)
+- `d::VDT`: Dendrite properties
+
+## Model Variables
+- `v_s::VFT`: Somatic membrane potential
+- `w_s::VFT`: Somatic adaptation current
+- `v_d::VFT`: Dendritic membrane potential
+- `synvars_s::SYNSV`: Somatic synaptic variables
+- `synvars_d::SYNDV`: Dendritic synaptic variables
+- `Is::VFT`: Somatic external input current
+- `Id::VFT`: Dendritic external input current
+- `gaba_d::VFT`: GABA receptor conductance in dendrite
+- `glu_d::VFT`: Glutamate receptor conductance in dendrite
+- `gaba_s::VFT`: GABA receptor conductance in soma
+- `glu_s::VFT`: Glutamate receptor conductance in soma
+- `fire::VBT`: Boolean array indicating which neurons fired
+- `tabs::VFT`: Absolute refractory period counters
+- `θ::VFT`: Dynamic threshold for spike initiation
+
+## Temporary Variables for Integration
+- `Δv::MFT`: Temporary variable for voltage changes during integration
+- `Δv_temp::MFT`: Temporary variable for voltage changes during integration
+- `is::MFT`: Synaptic input currents
+- `ic::VFT`: Axial current between compartments
+
+This model implements a ball-and-stick neuron with separate somatic and dendritic compartments,
+using adaptive exponential integrate-and-fire dynamics with synaptic inputs to both compartments.
+The model supports Heun integration for numerical stability.
+"""
+BallAndStick
 @snn_kw struct BallAndStick{
     VFT = Vector{Float32},
     MFT = Matrix{Float32},

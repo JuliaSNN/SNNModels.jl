@@ -33,6 +33,17 @@ DoubleExpSynapse
     gsyn_i::FT = 1.0f0 #norm_synapse(τri, τdi) # Synaptic conductance for inhibitory synapses
 end
 
+"""
+    DoubleExpSynapseVars{VFT} <: AbstractSynapseVariable
+A synaptic variable type that stores the state variables for double exponential synaptic dynamics.
+# Fields
+- `N::Int`: Number of synapses
+- `ge::VFT`: Vector of excitatory conductances
+- `gi::VFT`: Vector of inhibitory conductances
+- `he::VFT`: Vector of auxiliary variables for excitatory synapses
+- `hi::VFT`: Vector of auxiliary variables for inhibitory synapses
+"""
+DoubleExpSynapseVars
 @snn_kw struct DoubleExpSynapseVars{VFT = Vector{Float32}}  <: AbstractSynapseVariable
     N::Int = 100
     ge::VFT = zeros(Float32, N)

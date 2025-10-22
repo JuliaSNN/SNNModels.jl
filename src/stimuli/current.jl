@@ -3,7 +3,7 @@
 
 Abstract type representing parameters for current stimuli.
 """
-abstract type CurrentParameter end
+abstract type CurrentParameter <: AbstractStimulusParameter end 
 
 
 """

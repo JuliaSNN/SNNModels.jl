@@ -1,43 +1,82 @@
-
 """
-    Tripod
+    Tripod{VFT = Vector{Float32},
+            MFT = Matrix{Float32},
+            VDT = Dendrite{Vector{Float32}},
+            SYNS <: AbstractSynapseParameter,
+            SYND <: AbstractSynapseParameter,
+            SYNSV <: AbstractSynapseVariable,
+            SYNDV <: AbstractSynapseVariable,
+            SOMAT <: AbstractGeneralizedIFParameter,
+            PST <: AbstractSpikeParameter,
+            IT = Int32,
+} <: AbstractDendriteIF
 
-A neuron model with a soma and two dendrites, implementing the Adaptive Exponential Integrate-and-Fire (AdEx) dynamics.
-The model includes synaptic conductances for both soma and dendrites, and supports NMDA voltage-dependent synapses.
+A struct representing a tripod neuron model with two dendrites and a soma.
+The model incorporates adaptive exponential integrate-and-fire dynamics
+with synaptic inputs to both the soma and dendrites. The soma includes adaptation currents and dynamic thresholds for spike generation.
+The dendrites are modeled with separate passive compartments, and the soma integrates input currents from both dendrites. The current flows between the soma and dendrites are governed by axial conductances, defined in the dendrite parameters. The dendrites are computed based on passive membrane properties and geometrical properties, defined in the `DendNeuronParameter`.
+The model accepts any synaptic model for both soma and dendrites
+
+The model leverages Heun integration for improved numerical stability.
+
 
 # Fields
-- `id::String`: Unique identifier for the neuron (default: random 12-character string)
-- `name::String`: Name of the neuron (default: "Tripod")
-- `N::IT`: Number of neurons in the population (default: 100)
-- `param::DendNeuronParameter`: Parameters for the neuron model (default: `TripodParameter`)
-- `d1::VDT`: First dendrite structure
-- `d2::VDT`: Second dendrite structure
-- `v_s::VFT`: Soma membrane potential (initialized randomly between Vt and Vr)
-- `w_s::VFT`: Adaptation current for soma (initialized to zeros)
-- `v_d1::VFT`: First dendrite membrane potential (initialized randomly between Vt and Vr)
-- `v_d2::VFT`: Second dendrite membrane potential (initialized randomly between Vt and Vr)
-- `I::VFT`: External current to soma (initialized to zeros)
-- `I_d::VFT`: External current to dendrites (initialized to zeros)
-- `g_d1::MFT`: Conductance for first dendrite synapses (initialized to zeros)
-- `g_d2::MFT`: Conductance for second dendrite synapses (initialized to zeros)
-- `h_d1::MFT`: Synaptic gating variable for first dendrite (initialized to zeros)
-- `h_d2::MFT`: Synaptic gating variable for second dendrite (initialized to zeros)
-- `g_s::MFT`: Conductance for soma synapses (initialized to zeros)
-- `h_s::MFT`: Synaptic gating variable for soma (initialized to zeros)
-- `glu_d1::VFT`: Glutamate synaptic input to first dendrite (initialized to zeros)
-- `gaba_d1::VFT`: GABA synaptic input to first dendrite (initialized to zeros)
-- `glu_d2::VFT`: Glutamate synaptic input to second dendrite (initialized to zeros)
-- `gaba_d2::VFT`: GABA synaptic input to second dendrite (initialized to zeros)
-- `glu_s::VFT`: Glutamate synaptic input to soma (initialized to zeros)
-- `gaba_s::VFT`: GABA synaptic input to soma (initialized to zeros)
-- `fire::VBT`: Boolean vector indicating which neurons fired (initialized to false)
-- `after_spike::VFT`: Counter for refractory period (initialized to zeros)
-- `θ::VFT`: Threshold potential (initialized to Vt)
-- `records::Dict`: Dictionary for storing simulation data (initialized empty)
-- `Δv::VFT`: Temporary voltage change vector (initialized to zeros)
-- `Δv_temp::VFT`: Temporary voltage change vector (initialized to zeros)
-- `cs::VFT`: Axial current vector (initialized to zeros)
-- `is::VFT`: Synaptic current vector (initialized to zeros)
+## Population Info
+- `id::String`: Unique identifier for the neuron (default: random 12-character string).
+- `name::String`: Name of the neuron (default: "Tripod").
+- `N::IT`: Number of neurons in the population (default: 100).
+- `records::Dict`: Dictionary for storing simulation records (initialized empty).
+
+## Model Parameters
+- `param::DendNeuronParameter`: Parameters for the dendrite neuron (default: `TripodParameter()`).
+- `adex::SOMAT`: Adaptive Exponential Integrate-and-Fire parameters (default: `AdExParameter()`).
+- `soma_syn::SYNS`: Synaptic parameters for the soma (default: `TripodSomaSynapse`).
+- `dend_syn::SYND`: Synaptic parameters for the dendrites (default: `TripodDendSynapse`).
+- `spike::PST`: Spike parameters (default: `PostSpike()`).
+- `d1::VDT`: First dendrite parameters (created using `create_dendrite`).
+- `d2::VDT`: Second dendrite parameters (created using `create_dendrite`).
+
+## Model Variables
+- `v_s::VFT`: Soma membrane potential (initialized randomly between `Vt` and `Vr`).
+- `w_s::VFT`: Adaptation current for the soma (initialized to zeros).
+- `v_d1::VFT`: First dendrite membrane potential (initialized randomly between `Vt` and `Vr`).
+- `v_d2::VFT`: Second dendrite membrane potential (initialized randomly between `Vt` and `Vr`).
+- `I::VFT`: External current input to the soma (initialized to zeros).
+- `I_d::VFT`: External current input to the dendrites (initialized to zeros).
+- `synvars_s::SYNSV`: Synaptic variables for the soma (initialized using `synaptic_variables`).
+- `synvars_d1::SYNDV`: Synaptic variables for the first dendrite (initialized using `synaptic_variables`).
+- `synvars_d2::SYNDV`: Synaptic variables for the second dendrite (initialized using `synaptic_variables`).
+- `glu_d1::VFT`: Glutamate synaptic input to the first dendrite (initialized to zeros).
+- `gaba_d1::VFT`: GABA synaptic input to the first dendrite (initialized to zeros).
+- `glu_d2::VFT`: Glutamate synaptic input to the second dendrite (initialized to zeros).
+- `gaba_d2::VFT`: GABA synaptic input to the second dendrite (initialized to zeros).
+- `glu_s::VFT`: Glutamate synaptic input to the soma (initialized to zeros).
+- `gaba_s::VFT`: GABA synaptic input to the soma (initialized to zeros).
+- `fire::VBT`: Boolean array indicating which neurons have spiked (initialized to false).
+- `tabs::VFT`: Absolute refractory period counters (initialized to zeros).
+- `θ::VFT`: Dynamic threshold for spike generation (initialized to `Vt`).
+- `records::Dict`: Dictionary for storing simulation records (initialized empty).
+
+## Temporary Variables for Integration
+- `Δv::MFT`: Temporary matrix for voltage changes during integration (initialized to zeros).
+- `Δv_temp::MFT`: Temporary matrix for voltage changes during integration (initialized to zeros).
+- `is::MFT`: Matrix for synaptic currents (initialized to zeros).
+- `ic::VFT`: Vector for axial currents between soma and dendrites (initialized to zeros).
+
+# Type Parameters
+- `VFT`: Type for vector fields (default: `Vector{Float32}`).
+- `MFT`: Type for matrix fields (default: `Matrix{Float32}`).
+- `VDT`: Type for dendrite parameters (default: `Dendrite{Vector{Float32}}`).
+- `SYNS`: Type for soma synaptic parameters (default: `AbstractSynapseParameter`).
+- `SYND`: Type for dendrite synaptic parameters (default: `AbstractSynapseParameter`).
+- `SYNSV`: Type for soma synaptic variables (default: `AbstractSynapseVariable`).
+- `SYNDV`: Type for dendrite synaptic variables (default: `AbstractSynapseVariable`).
+- `SOMAT`: Type for soma parameters (default: `AbstractGeneralizedIFParameter`).
+- `PST`: Type for spike parameters (default: `AbstractSpikeParameter`).
+- `IT`: Type for integer fields (default: `Int32`).
+
+# Functions
+- `synaptic_target`: Helper function to set synaptic targets for the neuron.
 """
 Tripod
 @snn_kw struct Tripod{

@@ -17,11 +17,22 @@ DeltaSynapse
 
 struct DeltaSynapse <: AbstractDeltaParameter end
 
+"""
+    DeltaSynapseVars{VFT} <: AbstractSynapseVariable
+
+    A synaptic variable type that stores the state variables for delta synaptic dynamics.
+    # Fields
+    - `N::Int`: Number of synapses
+    - `ge::VFT`: Vector of excitatory conductances
+    - `gi::VFT`: Vector of inhibitory conductances
+    """
+DeltaSynapseVars
 @snn_kw struct DeltaSynapseVars{VFT = Vector{Float32}}  <: AbstractSynapseVariable
     N::Int = 100
     ge::VFT = zeros(Float32, N)
     gi::VFT = zeros(Float32, N)
 end
+
 
 function synaptic_variables(
     synapse::DeltaSynapse,
