@@ -40,15 +40,8 @@ CurrentSynapseVars
     gi::VFT = zeros(Float32, N)
 end
 
-function synaptic_variables(
-    synapse::CurrentSynapse,
-    N::Int,
-) 
-    return CurrentSynapseVars(;
-        N = N,
-        ge = zeros(Float32, N),
-        gi = zeros(Float32, N),
-    )
+function synaptic_variables(synapse::CurrentSynapse, N::Int)
+    return CurrentSynapseVars(; N = N, ge = zeros(Float32, N), gi = zeros(Float32, N))
 end
 
 @inline function update_synapses!(

@@ -27,22 +27,15 @@ struct DeltaSynapse <: AbstractDeltaParameter end
     - `gi::VFT`: Vector of inhibitory conductances
     """
 DeltaSynapseVars
-@snn_kw struct DeltaSynapseVars{VFT = Vector{Float32}}  <: AbstractSynapseVariable
+@snn_kw struct DeltaSynapseVars{VFT = Vector{Float32}} <: AbstractSynapseVariable
     N::Int = 100
     ge::VFT = zeros(Float32, N)
     gi::VFT = zeros(Float32, N)
 end
 
 
-function synaptic_variables(
-    synapse::DeltaSynapse,
-    N::Int,
-) 
-    return DeltaSynapseVars(;
-        N = N,
-        ge = zeros(Float32, N),
-        gi = zeros(Float32, N),
-    )
+function synaptic_variables(synapse::DeltaSynapse, N::Int)
+    return DeltaSynapseVars(; N = N, ge = zeros(Float32, N), gi = zeros(Float32, N))
 end
 
 @inline function update_synapses!(

@@ -72,8 +72,8 @@ IF
     IT = Int32,
     VFT = Vector{Float32},
     PST = PostSpike{Float32},
-    SYNT <: AbstractSynapseParameter,
-    SYNV <: AbstractSynapseVariable,
+    SYNT<:AbstractSynapseParameter,
+    SYNV<:AbstractSynapseVariable,
 } <: AbstractGeneralizedIF
 
     param::IFParameter = IFParameter()
@@ -100,8 +100,14 @@ IF
     records::Dict = Dict()
 end
 
-function Population(param::IFParameter; synapse::AbstractSynapseParameter, spike::PostSpike, N, kwargs...)
-    return IF(;N, param, synapse, spike, SYNT =typeof(synapse), kwargs...)
+function Population(
+    param::IFParameter;
+    synapse::AbstractSynapseParameter,
+    spike::PostSpike,
+    N,
+    kwargs...,
+)
+    return IF(; N, param, synapse, spike, SYNT = typeof(synapse), kwargs...)
 end
 
 function synaptic_target(
@@ -125,7 +131,7 @@ function update_neuron!(
     dt::Float32,
 ) where {T<:AbstractGeneralizedIFParameter}
     @unpack N, v, w, I, tabs, fire, syn_curr = p
-    @unpack τm, El, R, Vt, Vr= param
+    @unpack τm, El, R, Vt, Vr = param
     @unpack τabs = p.spike
 
     # @inbounds 

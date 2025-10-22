@@ -69,13 +69,14 @@ The AdEx model implements the adaptive exponential integrate-and-fire neuron mod
 """
 AdEx
 
-@snn_kw struct AdEx{IT = Int32,
-                    VFT = Vector{Float32},
-                    PST <: PostSpike,
-                    SYNT <: AbstractSynapseParameter,
-                    SYNV <: AbstractSynapseVariable,
-                    AdExt <: AdExParameter,
-                    } <: AbstractGeneralizedIF
+@snn_kw struct AdEx{
+    IT = Int32,
+    VFT = Vector{Float32},
+    PST<:PostSpike,
+    SYNT<:AbstractSynapseParameter,
+    SYNV<:AbstractSynapseVariable,
+    AdExt<:AdExParameter,
+} <: AbstractGeneralizedIF
 
     name::String = "AdEx"
     id::String = randstring(12)
@@ -104,12 +105,7 @@ AdEx
 end
 
 
-function synaptic_target(
-    targets::Dict,
-    post::T,
-    sym::Symbol,
-    target,
-) where {T<:AdEx}
+function synaptic_target(targets::Dict, post::T, sym::Symbol, target) where {T<:AdEx}
     syn = get_synapse_symbol(post.synapse, sym)
     sym = Symbol(syn)
     g = getfield(post, sym)
@@ -119,8 +115,14 @@ function synaptic_target(
 end
 
 
-function Population(param::AdExParameter; synapse::AbstractSynapseParameter, N, spike=PostSpike(), kwargs...)
-    return AdEx(;N, param, synapse, spike, SYNT = typeof(synapse), kwargs...)
+function Population(
+    param::AdExParameter;
+    synapse::AbstractSynapseParameter,
+    N,
+    spike = PostSpike(),
+    kwargs...,
+)
+    return AdEx(; N, param, synapse, spike, SYNT = typeof(synapse), kwargs...)
 end
 
 
@@ -134,7 +136,7 @@ function update_neuron!(
     dt::Float32,
 ) where {P<:AdEx,T<:AdExParameter{Float32}}
     @unpack N, v, w, fire, θ, I, tabs, syn_curr = p
-    @unpack τm, Vt, Vr, El, R, ΔT, τw, a, b =param
+    @unpack τm, Vt, Vr, El, R, ΔT, τw, a, b = param
     @unpack At, τA, τabs = p.spike
 
     @inbounds for i ∈ 1:N
@@ -174,10 +176,10 @@ function update_neuron!(
     dt::Float32,
 ) where {P<:AdEx,T<:AdExParameter{Vector{Float32}}}
     @unpack N, v, w, fire, θ, I, tabs, syn_curr = p
-    @unpack τm, Vt, Vr, El, R, ΔT, τw, a, b =param
+    @unpack τm, Vt, Vr, El, R, ΔT, τw, a, b = param
     @unpack At, τA, τabs = p.spike
 
-    @inbounds for i ∈ 1:N 
+    @inbounds for i ∈ 1:N
         v[i] = ifelse(fire[i], Vr[i], v[i])
         # Absolute refractory period
         fire[i] = false
@@ -188,8 +190,10 @@ function update_neuron!(
         v[i] +=
             dt * (
                 -(v[i] - El[i])  # leakage
-                + (ΔT[i] < 0.0f0 ? 0.0f0 : ΔT[i] * exp((v[i] - θ[i]) / ΔT[i])) # exponential term
-                - R[i] * syn_curr[i] # excitatory synapses
+                +
+                (ΔT[i] < 0.0f0 ? 0.0f0 : ΔT[i] * exp((v[i] - θ[i]) / ΔT[i])) # exponential term
+                -
+                R[i] * syn_curr[i] # excitatory synapses
                 - R[i] * w[i] # adaptation
                 + R[i] * I[i] # external current
             ) / (τm[i])
@@ -201,7 +205,7 @@ function update_neuron!(
         θ[i] = ifelse(fire[i], θ[i] + At, θ[i])
         tabs[i] = ifelse(fire[i], round(Int, τabs / dt), tabs[i])
     end
-end 
+end
 
 
 export AdEx, AdExParameter

@@ -2,7 +2,7 @@
     rate::FT = 1Hz
 end
 
-@snn_kw mutable struct Poisson{VFT = Vector{Float32},IT = Int32} <:                       AbstractPopulation
+@snn_kw mutable struct Poisson{VFT = Vector{Float32},IT = Int32} <: AbstractPopulation
     id::String = randstring(12)
     name::String = "Poisson"
     param::PoissonParameter = PoissonParameter()
@@ -27,18 +27,15 @@ function integrate!(p::Poisson, param::PoissonParameter, dt::Float32)
     end
 end
 
-@snn_kw struct VariablePoissonParameter <:  AbstractStimulusParameter
+@snn_kw struct VariablePoissonParameter <: AbstractStimulusParameter
     β::Float32 = 0.0
     τ::Float32 = 50.0ms
     r0::Float32 = 1kHz
 end
 
 
-@snn_kw struct VariablePoisson{
-    VFT = Vector{Float32},
-    VBT = Vector{Bool},
-    IT = Int32,
-} <: AbstractPopulation
+@snn_kw struct VariablePoisson{VFT = Vector{Float32},VBT = Vector{Bool},IT = Int32} <:
+               AbstractPopulation
     id::String = randstring(12)
     param::VariablePoissonParameter
     name::String = "VariablePoisson"
@@ -84,4 +81,5 @@ function integrate!(p::VariablePoisson, param::VariablePoissonParameter, dt::Flo
 end
 
 
-export Poisson, PoissonParameter, integrate!, VariablePoisson, VariablePoissonParameter, stimulate!
+export Poisson,
+    PoissonParameter, integrate!, VariablePoisson, VariablePoissonParameter, stimulate!

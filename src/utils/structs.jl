@@ -37,7 +37,7 @@ An abstract type representing a connection. Any struct inheriting from this type
 - `forward!(c::Receptors, param::SynapseParameter)`: Propagates the signal through the synapse.
 - `plasticity!(c::Receptors, param::SynapseParameter, dt::Float32, T::Time)`: Updates the synapse parameters based on plasticity rules.
 """
-abstract type AbstractConnection <: AbstractComponent  end
+abstract type AbstractConnection <: AbstractComponent end
 
 """
     AbstractPopulation
@@ -47,7 +47,7 @@ An abstract type representing a population. Any struct inheriting from this type
 # Methods
 - `integrate!(p::NeuronModel, param::NeuronModelParam, dt::Float32)`: Integrates the neuron model over a time step `dt` using the given parameters.
 """
-abstract type AbstractPopulation  <: AbstractComponent end
+abstract type AbstractPopulation <: AbstractComponent end
 
 """
     AbstractStimulus
@@ -128,8 +128,11 @@ function Time(time::Number)
 end
 
 export Spiketimes, Time, NetworkModel
-export AbstractParameter, AbstractComponent,
-    AbstractConnectionParameter, AbstractPopulationParameter, AbstractStimulusParameter
+export AbstractParameter,
+    AbstractComponent,
+    AbstractConnectionParameter,
+    AbstractPopulationParameter,
+    AbstractStimulusParameter
 export AbstractConnection, AbstractPopulation, AbstractStimulus
 
 

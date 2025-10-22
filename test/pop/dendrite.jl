@@ -24,10 +24,10 @@ end
 # # Test the create_dendrite function
 @testset "create_dendrite function" begin
     @test begin
-        dd = create_dendrite(d = 4um, l = 100um, physiology = human_dend) 
-        isapprox(dd.gm , 0.32, atol=1e-2) &&
-        isapprox(dd.gax, 62.83, atol=1e-2) &&
-        isapprox(dd.C, 6.2831, atol=1e-2)
+        dd = create_dendrite(d = 4um, l = 100um, physiology = human_dend)
+        isapprox(dd.gm, 0.32, atol = 1e-2) &&
+            isapprox(dd.gax, 62.83, atol = 1e-2) &&
+            isapprox(dd.C, 6.2831, atol = 1e-2)
     end
 end
 

@@ -13,7 +13,7 @@
 """
 PoissonLayer
 
-@snn_kw struct PoissonLayer{FT = Float32, VFT = Vector{Float32}}  <: AbstractStimulusParameter
+@snn_kw struct PoissonLayer{FT = Float32,VFT = Vector{Float32}} <: AbstractStimulusParameter
     rate::FT = 1.0f0  # Default rate in Hz
     N::Int32 = 1
     rates::VFT = fill(Float32.(rate), N)
@@ -23,7 +23,7 @@ end
 function PoissonLayer(rate::R; kwargs...) where {R<:Real}
     N = kwargs[:N]
     rates = fill(Float32.(rate), N)
-    return PoissonLayer(; N=N, rate = rate, rates = rates)
+    return PoissonLayer(; N = N, rate = rate, rates = rates)
 end
 
 """
@@ -52,9 +52,7 @@ This layer implements a Poisson stimulus where each neuron fires independently w
 and the connectivity is defined by sparse matrix representations.
 """
 PoissonStimulusLayer
-@snn_kw struct PoissonStimulusLayer{
-    VFT = Vector{Float32},
-} <: AbstractStimulus
+@snn_kw struct PoissonStimulusLayer{VFT = Vector{Float32}} <: AbstractStimulus
     N::Int
     id::String = randstring(12)
     name::String = "Poisson"
@@ -104,7 +102,7 @@ end
 function Stimulus(
     param::PoissonLayer,
     post::T,
-    sym::Symbol, 
+    sym::Symbol,
     comp = nothing;
     conn::NamedTuple,
     name::String = "Poisson",
@@ -122,7 +120,7 @@ function Stimulus(
         targets = targets,
         g = g,
         @symdict(rowptr, colptr, I, J, index, W)...,
-        name = name
+        name = name,
     )
 end
 
@@ -139,12 +137,7 @@ Generate a Poisson stimulus for a postsynaptic population.
 - `dt`: Time step.
 """
 
-function stimulate!(
-    p::PoissonStimulusLayer,
-    param::PoissonLayer,
-    time::Time,
-    dt::Float32,
-)
+function stimulate!(p::PoissonStimulusLayer, param::PoissonLayer, time::Time, dt::Float32)
     @unpack N, randcache, fire, colptr, W, I, g = p
     @unpack rates = param
     rand!(randcache)

@@ -6,7 +6,7 @@
 
 # current_param = SNN.CurrentVariableParameter(variables, sinusoidal_current )
 struct VariableInputParameter{R<:Number} <: AbstractParameter
-    variables::Dict{Symbol, Any}
+    variables::Dict{Symbol,Any}
     target::Symbol
     func::Function
 end
@@ -85,4 +85,3 @@ function SinWaveNoise(x::Float32, param::PSParam)
     Y = sin(x * 2π * ν)
     return X * 0.1 + Y * μ
 end
-

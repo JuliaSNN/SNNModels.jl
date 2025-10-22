@@ -18,7 +18,14 @@ using Test
 
     # Test BalancedParameter constructor with custom parameters
     @testset "BalancedParameter with custom parameters" begin
-        param = BalancedParameter(; kIE = 2.0, β = 0.1, τ = 100.0ms, r0 = 2kHz, wIE = 2.0, same_input = true)
+        param = BalancedParameter(;
+            kIE = 2.0,
+            β = 0.1,
+            τ = 100.0ms,
+            r0 = 2kHz,
+            wIE = 2.0,
+            same_input = true,
+        )
         @test param.kIE ≈ 2.0
         @test param.β ≈ 0.1
         @test param.τ ≈ 100.0ms
@@ -43,7 +50,14 @@ using Test
 
     # Test BalancedStimulus constructor with custom parameters
     @testset "BalancedStimulus with custom parameters" begin
-        param = BalancedParameter(; kIE = 2.0, β = 0.1, τ = 100.0ms, r0 = 2kHz, wIE = 2.0, same_input = true)
+        param = BalancedParameter(;
+            kIE = 2.0,
+            β = 0.1,
+            τ = 100.0ms,
+            r0 = 2kHz,
+            wIE = 2.0,
+            same_input = true,
+        )
         stim = BalancedStimulus(E, :ge, :gi; param = param)
         @test stim.param == param
         @test stim.N == E.N
@@ -57,7 +71,14 @@ using Test
 
     # Test Stimulus constructor with BalancedParameter
     @testset "Stimulus with BalancedParameter" begin
-        param = BalancedParameter(; kIE = 2.0, β = 0.1, τ = 100.0ms, r0 = 2kHz, wIE = 2.0, same_input = true)
+        param = BalancedParameter(;
+            kIE = 2.0,
+            β = 0.1,
+            τ = 100.0ms,
+            r0 = 2kHz,
+            wIE = 2.0,
+            same_input = true,
+        )
         stim = Stimulus(param, E, :ge)
         @test stim.param == param
         @test stim.N == E.N
@@ -71,7 +92,14 @@ using Test
 
     # Test stimulate! method with BalancedStimulus
     @testset "stimulate! with BalancedStimulus" begin
-        param = BalancedParameter(; kIE = 2.0, β = 0.1, τ = 100.0ms, r0 = 2kHz, wIE = 2.0, same_input = true)
+        param = BalancedParameter(;
+            kIE = 2.0,
+            β = 0.1,
+            τ = 100.0ms,
+            r0 = 2kHz,
+            wIE = 2.0,
+            same_input = true,
+        )
         stim = BalancedStimulus(E, :ge, :gi; param = param)
         time = Time()
         dt = 0.001f0
@@ -81,9 +109,16 @@ using Test
         @test stim.gi isa Vector{Float32}
     end
 
-        # Test simulate with composed model
+    # Test simulate with composed model
     @testset "Simulate with composed model" begin
-        param = BalancedParameter(; kIE = 2.0, β = 0.1, τ = 100.0ms, r0 = 2kHz, wIE = 2.0, same_input = true)
+        param = BalancedParameter(;
+            kIE = 2.0,
+            β = 0.1,
+            τ = 100.0ms,
+            r0 = 2kHz,
+            wIE = 2.0,
+            same_input = true,
+        )
         stim = BalancedStimulus(E, :ge, :gi; param = param)
         model = compose(E = E, S = stim, silent = true)
         monitor!(E, [:fire, :ge, :gi])

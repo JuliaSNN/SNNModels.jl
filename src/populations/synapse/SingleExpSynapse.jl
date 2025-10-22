@@ -42,21 +42,14 @@ A synaptic variable type that stores the state variables for single exponential 
 """
 SingleExpSynapseVars
 
-@snn_kw struct SingleExpSynapseVars{VFT = Vector{Float32}}  <: AbstractSynapseVariable
+@snn_kw struct SingleExpSynapseVars{VFT = Vector{Float32}} <: AbstractSynapseVariable
     N::Int = 100
     ge::VFT = zeros(Float32, N)
     gi::VFT = zeros(Float32, N)
 end
 
-function synaptic_variables(
-    synapse::SingleExpSynapse,
-    N::Int,
-) 
-    return SingleExpSynapseVars(;
-        N = N,
-        ge = zeros(Float32, N),
-        gi = zeros(Float32, N),
-    )
+function synaptic_variables(synapse::SingleExpSynapse, N::Int)
+    return SingleExpSynapseVars(; N = N, ge = zeros(Float32, N), gi = zeros(Float32, N))
 end
 
 function update_synapses!(
@@ -75,8 +68,8 @@ function update_synapses!(
         ge[i] += dt * (-ge[i] / τe)
         gi[i] += dt * (-gi[i] / τi)
     end
-    fill!(glu, 0f0)
-    fill!(gaba, 0f0)
+    fill!(glu, 0.0f0)
+    fill!(gaba, 0.0f0)
 end
 
 @inline function synaptic_current!(
@@ -85,7 +78,12 @@ end
     synvars::SingleExpSynapseVars,
     v::VT1, # membrane potential
     syncurr::VT2, # synaptic current
-) where {P<:AbstractGeneralizedIF,T<:AbstractSinExpParameter, VT1 <:AbstractVector, VT2 <:AbstractVector}
+) where {
+    P<:AbstractGeneralizedIF,
+    T<:AbstractSinExpParameter,
+    VT1<:AbstractVector,
+    VT2<:AbstractVector,
+}
     @unpack gsyn_e, gsyn_i, E_e, E_i = synapse
     @unpack N, = p
     @unpack ge, gi = synvars

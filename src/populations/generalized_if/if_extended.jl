@@ -15,7 +15,7 @@ end
 @snn_kw mutable struct ExtendedIF{
     VFT = Vector{Float32},
     VBT = Vector{Bool},
-    IFT <: AbstractGeneralizedIFParameter,
+    IFT<:AbstractGeneralizedIFParameter,
 } <: AbstractGeneralizedIF
     id::String = randstring(12)
     name::String = "ExtendedIF"

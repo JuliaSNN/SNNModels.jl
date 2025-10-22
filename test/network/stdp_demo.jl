@@ -1,7 +1,7 @@
 N = 100
 E1 = IF(; N = N)
 E2 = IF(; N = N)
-EE = SpikingSynapse(E1, E2, :ge, LTPParam = vSTDPParameter(), conn=(μ = 0.5, p = 1.0))
+EE = SpikingSynapse(E1, E2, :ge, LTPParam = vSTDPParameter(), conn = (μ = 0.5, p = 1.0))
 for n = 1:E1.N
     connect!(EE, n, n)
 end

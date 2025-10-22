@@ -112,7 +112,12 @@ function Receptors(glu::Glutamatergic, gaba::GABAergic)
 end
 
 export Receptor,
-    Receptors, ReceptorVoltage, GABAergic, Glutamatergic, ReceptorArray, NMDAVoltageDependency
+    Receptors,
+    ReceptorVoltage,
+    GABAergic,
+    Glutamatergic,
+    ReceptorArray,
+    NMDAVoltageDependency
 
 """
 Calculate the normalization factor for a receptor.

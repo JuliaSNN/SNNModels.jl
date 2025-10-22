@@ -1,7 +1,5 @@
-@snn_kw mutable struct SpikingSynapse{
-    VIT = Vector{Int32},
-    VFT = Vector{Float32},
-} <: AbstractSpikingSynapse
+@snn_kw mutable struct SpikingSynapse{VIT = Vector{Int32},VFT = Vector{Float32}} <:
+                       AbstractSpikingSynapse
     id::String = randstring(12)
     name::String = "SpikingSynapse"
     param::SpikingSynapseParameter = SpikingSynapseParameter()
@@ -24,10 +22,8 @@
     records::Dict = Dict()
 end
 
-@snn_kw mutable struct SpikingSynapseDelay{
-    VIT = Vector{Int32},
-    VFT = Vector{Float32},
-} <: AbstractSpikingSynapse
+@snn_kw mutable struct SpikingSynapseDelay{VIT = Vector{Int32},VFT = Vector{Float32}} <:
+                       AbstractSpikingSynapse
     id::String = randstring(12)
     name::String = "SpikingSynapseDelay"
     param::SpikingSynapseParameter = SpikingSynapseParameter()
@@ -61,9 +57,9 @@ function SpikingSynapse(
     pre::AbstractPopulation,
     post::AbstractPopulation,
     sym::Symbol,
-    comp::Union{Symbol, Nothing} = nothing;
+    comp::Union{Symbol,Nothing} = nothing;
     conn::Connectivity,
-    delay_dist::Union{Distribution, Nothing} = nothing,
+    delay_dist::Union{Distribution,Nothing} = nothing,
     dt::Float32 = 0.125f0,
     LTPParam::LTPParameter = NoLTP(),
     STPParam::STPParameter = NoSTP(),
@@ -110,7 +106,7 @@ function SpikingSynapse(
             STPVars,
             LTPParam,
             STPParam,
-            name
+            name,
         )
 
     else
@@ -128,7 +124,7 @@ function SpikingSynapse(
             STPVars,
             LTPParam,
             STPParam,
-            name
+            name,
         )
     end
 end
@@ -181,4 +177,3 @@ function forward!(c::SpikingSynapseDelay, param::SpikingSynapseParameter)
 end
 
 export SpikingSynapse, SpikingSynapseDelay, update_plasticity!
-

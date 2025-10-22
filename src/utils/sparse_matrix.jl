@@ -1,6 +1,6 @@
 function connect!(c, j, i, μ = randn(Float32))
     W = matrix(c)
-    W[i, j] = μ 
+    W[i, j] = μ
     update_sparse_matrix!(c, W)
     return nothing
 end
@@ -15,15 +15,15 @@ function matrix(c::C, sym::Symbol) where {C<:AbstractConnection}
 end
 
 function matrix(c::C, sym::Symbol, time::Number) where {C<:AbstractConnection}
-    W, r = record(c, sym, range=true) 
+    W, r = record(c, sym, range = true)
     @assert time <= r[end] && time >= r[1] "Time $time not in recorded range $(r[1]):$(r[end])"
     return matrix(c, W, time)
 end
 
 function matrix(c::C, sym::Symbol, time::AbstractVector) where {C<:AbstractConnection}
-    W, r = record(c, sym, range=true) 
+    W, r = record(c, sym, range = true)
     @assert all(time .<= r[end] .&& time .>= r[1]) "Time $time not in recorded range $(r[1]):$(r[end])"
-    return [matrix(c, W, t) for t in time] |> x-> cat(x..., dims=3)
+    return [matrix(c, W, t) for t in time] |> x -> cat(x..., dims = 3)
 end
 
 
@@ -32,7 +32,9 @@ function matrix(c::C, W::AbstractArray, time::Number) where {C<:AbstractConnecti
 end
 
 function matrix(c::C, W::AbstractArray, time::AbstractVector) where {C<:AbstractConnection}
-    return [sparse(c.I, c.J, W[:, t], length(c.rowptr) - 1, length(c.colptr) - 1) for t in time] |> x-> cat(x..., dims=3)
+    return [
+        sparse(c.I, c.J, W[:, t], length(c.rowptr) - 1, length(c.colptr) - 1) for t in time
+    ] |> x -> cat(x..., dims = 3)
 end
 
 function update_weights!(c::C, j, i, w) where {C<:AbstractConnection}
@@ -64,14 +66,14 @@ end
 
 ##
 
-function presynaptic_idxs(c::C, i::Int)  where {C<:AbstractConnection}
+function presynaptic_idxs(c::C, i::Int) where {C<:AbstractConnection}
     @unpack rowptr, index, J, W = c
     rowptr[i]:(rowptr[i+1]-1)
 end
 
 function presynaptic(c::C) where {C<:AbstractConnection}
     @unpack rowptr, index, J, W = c
-    [J[index[rowptr[i]:(rowptr[i+1]-1)]] for i in 1:length(rowptr)-1]
+    [J[index[rowptr[i]:(rowptr[i+1]-1)]] for i = 1:(length(rowptr)-1)]
 end
 
 function presynaptic(c::C, i::Int) where {C<:AbstractConnection}
@@ -97,7 +99,7 @@ end
 
 function postsynaptic(c::C) where {C<:AbstractConnection}
     @unpack colptr, I, index = c
-    [I[colptr[j]:(colptr[j+1]-1)] for j in 1:length(colptr)-1]
+    [I[colptr[j]:(colptr[j+1]-1)] for j = 1:(length(colptr)-1)]
 end
 
 function postsynaptic(c::C, j::Int) where {C<:AbstractConnection}
@@ -151,12 +153,25 @@ using SpecialFunctions, Roots
 #     end
 # end
 
-function sparse_matrix(Npre, Npost; w=nothing, dist=:Normal, μ=1, σ=0, ρ=nothing, p=nothing, rule=:Fixed, γ=-1, kmin=-1, kwargs...)
+function sparse_matrix(
+    Npre,
+    Npost;
+    w = nothing,
+    dist = :Normal,
+    μ = 1,
+    σ = 0,
+    ρ = nothing,
+    p = nothing,
+    rule = :Fixed,
+    γ = -1,
+    kmin = -1,
+    kwargs...,
+)
     @assert (isnothing(p) || isnothing(ρ)) && !(isnothing(p) && isnothing(ρ)) "Specify either p or ρ"
     ρ = isnothing(ρ) ? p : ρ
     @assert ρ >= 0 && ρ <= 1 "ρ must be in [0, 1]"
     @debug "Constructing sparse matrix with $rule rule, $dist distribution, μ=$μ, σ=$σ, ρ=$ρ"
-    syn_sign = μ ≈ 0 ? 1 :  sign(μ)
+    syn_sign = μ ≈ 0 ? 1 : sign(μ)
     if syn_sign == -1
         @warn "You are using negative synaptic weights "
         μ = abs(μ)
@@ -166,25 +181,26 @@ function sparse_matrix(Npre, Npost; w=nothing, dist=:Normal, μ=1, σ=0, ρ=noth
     w = rand(my_dist(μ, σ), Npost, Npre) # Construct a random dense matrix with dimensions post.N x pre.N
     if rule == :FixedOut
         # Set to zero a fraction (1-ρ)*Npost of the weights in each column
-        for pre in 1:Npre
-            targets = ρ > 0 ?  sample(1:Npost, round(Int, (1-ρ)*Npost); replace=false) : 1:Npost
+        for pre = 1:Npre
+            targets =
+                ρ > 0 ? sample(1:Npost, round(Int, (1-ρ)*Npost); replace = false) : 1:Npost
             w[targets, pre] .= 0
         end
-    elseif rule == :FixedIn || rule ==:Fixed
-        for post in 1:Npost
-            pres = ρ > 0 ?  sample(1:Npre, round(Int, (1-ρ)*Npre); replace=false) : 1:Npre
+    elseif rule == :FixedIn || rule == :Fixed
+        for post = 1:Npost
+            pres = ρ > 0 ? sample(1:Npre, round(Int, (1-ρ)*Npre); replace = false) : 1:Npre
             w[post, pres] .= 0
         end
     elseif rule == :Bernoulli
         # Set to zero each weight with probability (1-ρ)
         w[[n for n in eachindex(w[:]) if rand() < 1-ρ]] .= 0
     elseif rule == :PowerLaw
-        for pre in 1:Npre
+        for pre = 1:Npre
             @assert γ > 0 "For PowerLaw connection rule, γ must be defined and positive"
             @assert kmin > 0 "For PowerLaw connection rule, kmin must be defined and positive"
             n = round(Int, rand(Distributions.Pareto(γ, kmin)))
             n = minimum((n, Npost-1))
-            targets = sample(1:Npost, Npost-n; replace=false)
+            targets = sample(1:Npost, Npost-n; replace = false)
             w[targets, pre] .= 0
         end
         # do nothing
@@ -200,7 +216,7 @@ end
 
 sparse_matrix(Npre, Npost, conn::NamedTuple) = sparse_matrix(Npre, Npost; conn...)
 
-function sparse_matrix(Npre, Npost, conn::AbstractMatrix) 
+function sparse_matrix(Npre, Npost, conn::AbstractMatrix)
     w = conn
     @assert size(w) == (Npost, Npre) "The size of the synaptic weight is not correct: $(size(w)) != ($Npost, $Npre)"
     return sparse(w)
@@ -251,7 +267,7 @@ function update_sparse_matrix!(c::S) where {S<:AbstractConnection}
     return nothing
 end
 
-                      
+
 
 """
     synaptic_turnover!(C::SpikingSynapse; p_rewire=0.05, p_pre = x->rand(), p_new = x->rand(), μ = 3.0)
@@ -275,16 +291,17 @@ This function implements synaptic turnover by:
 
 The function modifies the connection matrix in-place and updates its sparse matrix representation.
 """
-function synaptic_turnover!(C::S; 
-                p_rewire = x->rand() .< 0.05, 
-                p_new = x->rand(),
-                μ = 3.0
-                ) where {S <: AbstractConnection}
-    pre_tt = rand(Uniform(0,1), length(C.fireJ))
-    post_tt = rand(Uniform(0,1), length(C.fireI))
-    all_post= Set(1:length(C.fireI))
-    new_connections =  map(postsynaptic(C)) do pre
-        plausible = setdiff(all_post, pre) |> collect 
+function synaptic_turnover!(
+    C::S;
+    p_rewire = x->rand() .< 0.05,
+    p_new = x->rand(),
+    μ = 3.0,
+) where {S<:AbstractConnection}
+    pre_tt = rand(Uniform(0, 1), length(C.fireJ))
+    post_tt = rand(Uniform(0, 1), length(C.fireI))
+    all_post = Set(1:length(C.fireI))
+    new_connections = map(postsynaptic(C)) do pre
+        plausible = setdiff(all_post, pre) |> collect
         plausible[sortperm(p_new.(plausible))]
     end
 
@@ -351,4 +368,3 @@ export dsparse,
     presynaptic_idxs,
     postsynaptic_idxs,
     synaptic_turnover!
-

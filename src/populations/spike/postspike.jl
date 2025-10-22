@@ -20,4 +20,3 @@ PostSpike
 end
 
 export PostSpike
-

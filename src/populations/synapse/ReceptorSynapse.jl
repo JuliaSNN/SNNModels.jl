@@ -21,10 +21,10 @@ This type implements conductance-based synaptic dynamics with AMPA, NMDA, GABAa,
 ReceptorSynapse
 
 @snn_kw struct ReceptorSynapse{
-        VIT = Vector{Int},
-        ST = Vector{Receptor{Float32}},
-        NMDAT = NMDAVoltageDependency{Float32},
-    } <: AbstractReceptorParameter
+    VIT = Vector{Int},
+    ST = Vector{Receptor{Float32}},
+    NMDAT = NMDAVoltageDependency{Float32},
+} <: AbstractReceptorParameter
     ## Synapses
     NMDA::NMDAT = NMDAVoltageDependency()
     glu_receptors::VIT = [1, 2]
@@ -32,11 +32,8 @@ ReceptorSynapse
     syn::ST=SomaReceptors
 end
 
-ReceptorSynapseType = ReceptorSynapse{
-        Vector{Int},
-        Vector{Receptor{Float32}},
-        NMDAVoltageDependency{Float32},
-    }
+ReceptorSynapseType =
+    ReceptorSynapse{Vector{Int},Vector{Receptor{Float32}},NMDAVoltageDependency{Float32}}
 
 """
     ReceptorSynapseVars{MFT} <: AbstractSynapseVariable
@@ -47,18 +44,16 @@ A synaptic variable type that stores the state variables for receptor-based syna
 - `h::MFT`: Matrix of auxiliary variables for each receptor type
 """
 ReceptorSynapseVars
-@snn_kw struct ReceptorSynapseVars{MFT = Matrix{Float32}}  <: AbstractSynapseVariable
+@snn_kw struct ReceptorSynapseVars{MFT = Matrix{Float32}} <: AbstractSynapseVariable
     N::Int = 100
     g::MFT = zeros(Float32, N, 4)
     h::MFT = zeros(Float32, N, 4)
 end
 
-ReceptorSynapse(syn::ReceptorArray, NMDA::NMDAVoltageDependency{Float32}; kwargs...) = ReceptorSynapse(; kwargs..., syn=syn, NMDA=NMDA)
+ReceptorSynapse(syn::ReceptorArray, NMDA::NMDAVoltageDependency{Float32}; kwargs...) =
+    ReceptorSynapse(; kwargs..., syn = syn, NMDA = NMDA)
 
-function synaptic_variables(
-    synapse::ReceptorSynapse,
-    N::Int,
-) 
+function synaptic_variables(synapse::ReceptorSynapse, N::Int)
     num_receptors = length(synapse.syn)
     return ReceptorSynapseVars(;
         N = N,
@@ -105,7 +100,12 @@ end
     synvars::ReceptorSynapseVars,
     v::VT1, # membrane potential
     syncurr::VT2, # synaptic current
-) where {T<:AbstractGeneralizedIF,P<:AbstractReceptorParameter, VT1 <:AbstractVector, VT2 <:AbstractVector}
+) where {
+    T<:AbstractGeneralizedIF,
+    P<:AbstractReceptorParameter,
+    VT1<:AbstractVector,
+    VT2<:AbstractVector,
+}
     @unpack N = p
     @unpack g, h = synvars
     @unpack syn, NMDA = synapse

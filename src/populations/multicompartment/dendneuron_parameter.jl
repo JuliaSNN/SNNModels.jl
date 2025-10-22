@@ -26,53 +26,47 @@ DendNeuronParameter
     DT=Vector{DendLength},
     GT=Vector{Pair{Symbol,Symbol}},
     PT = Physiology{Float32},
-    NT <: AbstractDendriticTree
+    NT<:AbstractDendriticTree,
 } <: AbstractGeneralizedIFParameter
 
     ## Dend parameters
-    ds::DT = [(200um, 400um) , (200um, 400um)] ## Dendritic segment lengths
+    ds::DT = [(200um, 400um), (200um, 400um)] ## Dendritic segment lengths
     physiology::PT = human_dend
     geometry::GT = [(:s=>:d1), (:s=>:d2)]  ## Geometry between soma and dendrites
-    type::NT = begin 
-            if length(ds) == 1
-                BallAndStickNeuron()
-            elseif length(ds) == 2
-                TripodNeuron()
-            else
-                error("MulticompartmentNeuron not implemented yet. Dendritic segments must be either 1 (BallAndStick) or 2 (Tripod).")
-            end
+    type::NT = begin
+        if length(ds) == 1
+            BallAndStickNeuron()
+        elseif length(ds) == 2
+            TripodNeuron()
+        else
+            error(
+                "MulticompartmentNeuron not implemented yet. Dendritic segments must be either 1 (BallAndStick) or 2 (Tripod).",
+            )
         end
+    end
 end
 
 function TripodParameter(;
-        ds = [(200um, 400um), (200um, 400um)],
-        physiology = human_dend,
-        geometry = [(:s=>:d1), (:s=>:d2)],
-        )
-    return DendNeuronParameter(
-        ds = ds,
-        physiology = physiology,
-        geometry = geometry,
-    )
+    ds = [(200um, 400um), (200um, 400um)],
+    physiology = human_dend,
+    geometry = [(:s=>:d1), (:s=>:d2)],
+)
+    return DendNeuronParameter(ds = ds, physiology = physiology, geometry = geometry)
 end
 
 function BallAndStickParameter(;
-        ds = [(150um, 400um)],
-        physiology = human_dend,
-        geometry = [(:s=>:d)],
-        )
-    return DendNeuronParameter(
-        ds = ds,
-        physiology = physiology,
-        geometry = geometry,
-    )
+    ds = [(150um, 400um)],
+    physiology = human_dend,
+    geometry = [(:s=>:d)],
+)
+    return DendNeuronParameter(ds = ds, physiology = physiology, geometry = geometry)
 end
 
 function Population(param::T; kwargs...) where {T<:DendNeuronParameter}
     if param.type isa TripodNeuron
-        return Tripod(;param, kwargs...)
+        return Tripod(; param, kwargs...)
     elseif param.type isa BallAndStickNeuron
-        return BallAndStick(;param, kwargs...)
+        return BallAndStick(; param, kwargs...)
     else
         error("Dendritic segments must be either 1 (BallAndStick) or 2 (Tripod).")
     end

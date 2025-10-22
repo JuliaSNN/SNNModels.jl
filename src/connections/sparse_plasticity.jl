@@ -75,15 +75,15 @@ function change_plasticity!(syn; LTP = nothing, STP = nothing)
     end
 end
 
-export SpikingSynapse, PlasticityParameter,
+export SpikingSynapse,
+    PlasticityParameter,
     SpikingSynapseParameter,
     no_STDPParameter,
     NoSTDP,
     no_PlasticityVariables,
     plasticityvariables,
     plasticity!
-    change_plasticity!,
-    set_plasticity!
-    
+change_plasticity!, set_plasticity!
+
 
 export LTP, STP, NoLTP, NoSTP

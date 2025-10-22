@@ -12,8 +12,7 @@ A simple population type that acts as an identity function, passing input direct
 This population type is useful for testing and as a building block in more complex networks.
 """
 Identity
-@snn_kw mutable struct Identity{VFT = Vector{Float32}, IT = Int32} <:
-                       AbstractPopulation
+@snn_kw mutable struct Identity{VFT = Vector{Float32},IT = Int32} <: AbstractPopulation
     name::String = "identity"
     id::String = randstring(12)
     param::IdentityParam = IdentityParam()

@@ -1,5 +1,10 @@
 integrate!(p::AbstractPopulation, param::AbstractPopulationParameter, dt::Float32) = nothing
-plasticity!(p::AbstractPopulation, param::AbstractPopulationParameter, dt::Float32, T::Time) = nothing
+plasticity!(
+    p::AbstractPopulation,
+    param::AbstractPopulationParameter,
+    dt::Float32,
+    T::Time,
+) = nothing
 
 ## Spikes
 abstract type AbstractSpikeParameter end
@@ -42,10 +47,14 @@ include("multicompartment/ballandstick.jl")
 Population(; param, kwargs...) = Population(param; kwargs...)
 
 ## Heterogeneous populations
-function heterogeneous(param::T, N::Int; kwargs...) where {T<:AbstractGeneralizedIFParameter}
+function heterogeneous(
+    param::T,
+    N::Int;
+    kwargs...,
+) where {T<:AbstractGeneralizedIFParameter}
     # ξ_het = ones(Float32, N)
     _type = typeof(param)
-    het_dict = Dict{Symbol, Vector{Float32}}()
+    het_dict = Dict{Symbol,Vector{Float32}}()
     for fields in fieldnames(_type)
         if haskey(kwargs, fields)
             het_dict[fields] = rand(kwargs[fields], N)
@@ -58,4 +67,10 @@ function heterogeneous(param::T, N::Int; kwargs...) where {T<:AbstractGeneralize
 end
 
 
-export AbstractDendriteIF, AbstractGeneralizedIF, AbstractGeneralizedIFParameter, Population, integrate!, plasticity!, heterogeneous
+export AbstractDendriteIF,
+    AbstractGeneralizedIF,
+    AbstractGeneralizedIFParameter,
+    Population,
+    integrate!,
+    plasticity!,
+    heterogeneous

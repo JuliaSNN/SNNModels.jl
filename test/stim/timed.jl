@@ -41,7 +41,7 @@ using Test
     # Test SpikeTimeStimulus constructor with default parameters
     @testset "SpikeTimeStimulus with default parameters" begin
         param = SpikeTimeParameter()
-        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed,)
+        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed)
         stim = SpikeTimeStimulus(E, :ge; param = param, conn = conn)
         @test stim.N == 0
         @test stim.name == "SpikeTime"
@@ -58,7 +58,7 @@ using Test
         spiketimes = [0.1, 0.2, 0.3]
         neurons = [1, 2, 3]
         param = SpikeTimeParameter(spiketimes, neurons)
-        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed,)
+        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed)
         stim = SpikeTimeStimulus(E, :ge; param = param, conn = conn)
         @test stim.N == 3
         @test stim.name == "SpikeTime"
@@ -75,7 +75,7 @@ using Test
         spiketimes = [0.1, 0.2, 0.3]
         neurons = [1, 2, 3]
         param = SpikeTimeParameter(spiketimes, neurons)
-        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed,)
+        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed)
         stim = SpikeTimeStimulusIdentity(E, :ge; param = param, conn = conn)
         @test stim.N == E.N
         @test stim.name == "SpikeTime"
@@ -92,7 +92,7 @@ using Test
         spiketimes = [0.1, 0.2, 0.3]
         neurons = [1, 2, 3]
         param = SpikeTimeParameter(spiketimes, neurons)
-        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed,)
+        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed)
         stim = SpikeTimeStimulus(E, :ge; param = param, conn = conn)
         time = Time()
         dt = 0.001f0
@@ -105,7 +105,7 @@ using Test
     @testset "next_neuron with SpikeTimeStimulus" begin
         spiketimes = [0.1, 0.2, 0.3]
         neurons = [1, 2, 3]
-        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed,)
+        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed)
         param = SpikeTimeParameter(spiketimes, neurons)
         stim = SpikeTimeStimulus(E, :ge; param = param, conn = conn)
         @test next_neuron(stim) == 1
@@ -113,7 +113,7 @@ using Test
 
     # Test shift_spikes! method with SpikeTimeParameter
     @testset "shift_spikes! with SpikeTimeParameter" begin
-        spiketimes = Vector{Float32}([0.1, 0.2, 0.3] )
+        spiketimes = Vector{Float32}([0.1, 0.2, 0.3])
         neurons = [1, 2, 3]
         param = SpikeTimeParameter(spiketimes, neurons)
         shift_spikes!(param, 0.1f0)
@@ -125,7 +125,7 @@ using Test
         spiketimes = [0.1, 0.2, 0.3]
         neurons = [1, 2, 3]
         param = SpikeTimeParameter(spiketimes, neurons)
-        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed,)
+        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed)
         stim = SpikeTimeStimulus(E, :ge; param = param, conn = conn)
         shift_spikes!(stim, 0.1)
         @test stim.param.spiketimes ≈ [0.2, 0.3, 0.4]
@@ -138,7 +138,7 @@ using Test
         spiketimes = [0.1, 0.2, 0.3]
         neurons = [1, 2, 3]
         param = SpikeTimeParameter(spiketimes, neurons)
-        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed,)
+        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed)
         stim = SpikeTimeStimulus(E, :ge; param = param, conn = conn)
         new_spiketimes = [0.4, 0.5, 0.6]
         new_neurons = [4, 5, 6]
@@ -163,7 +163,7 @@ using Test
         spiketimes = [0.1, 0.2, 0.3]
         neurons = [1, 2, 3]
         param = SpikeTimeParameter(spiketimes, neurons)
-        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed,)
+        conn = (; p = 1.0f0, μ = 1.0f0, σ = 0.0f0, dist = :Normal, rule = :Fixed)
         stim = SpikeTimeStimulus(E, :ge; param = param, conn = conn)
         model = compose(E = E, S = stim, silent = true)
         monitor!(E, [:fire, :ge])

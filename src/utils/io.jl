@@ -170,12 +170,7 @@ function model_path_name(; path, name = randstring(10), info = nothing, kwargs..
     return SNNpath(path, name, info, :model, 0)
 end
 
-function save_config(;
-    path,
-    name = randstring(10),
-    config,
-    info = nothing,
-)
+function save_config(; path, name = randstring(10), config, info = nothing)
     @info "Parameters: `$(savename(name, info, connector="-"))` \nsaved at $(path)"
 
     isdir(path) || mkpath(path)

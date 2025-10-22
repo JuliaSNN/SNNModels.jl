@@ -24,14 +24,7 @@ end
     p::P,
     synapse::T,
     synvars::SYN,
-) where {P<:AbstractGeneralizedIF,T<:AbstractSynapseParameter, SYN<:AbstractSynapseVariable}
+) where {P<:AbstractGeneralizedIF,T<:AbstractSynapseParameter,SYN<:AbstractSynapseVariable}
     @unpack N, v, syn_curr = p
-    synaptic_current!(
-        p,
-        synapse,
-        synvars,
-        v,
-        syn_curr
-    )
+    synaptic_current!(p, synapse, synvars, v, syn_curr)
 end
-

@@ -44,7 +44,7 @@ A synaptic variable type that stores the state variables for double exponential 
 - `hi::VFT`: Vector of auxiliary variables for inhibitory synapses
 """
 DoubleExpSynapseVars
-@snn_kw struct DoubleExpSynapseVars{VFT = Vector{Float32}}  <: AbstractSynapseVariable
+@snn_kw struct DoubleExpSynapseVars{VFT = Vector{Float32}} <: AbstractSynapseVariable
     N::Int = 100
     ge::VFT = zeros(Float32, N)
     gi::VFT = zeros(Float32, N)
@@ -52,10 +52,7 @@ DoubleExpSynapseVars
     hi::VFT = zeros(Float32, N)
 end
 
-function synaptic_variables(
-    synapse::DoubleExpSynapse,
-    N::Int,
-) 
+function synaptic_variables(synapse::DoubleExpSynapse, N::Int)
     return DoubleExpSynapseVars(;
         N = N,
         ge = zeros(Float32, N),
@@ -83,8 +80,8 @@ function update_synapses!(
         gi[i] += dt * (-gi[i] / τdi + hi[i])
         hi[i] += dt * (-hi[i] / τri)
     end
-    fill!(glu, 0f0)
-    fill!(gaba, 0f0)
+    fill!(glu, 0.0f0)
+    fill!(gaba, 0.0f0)
 end
 
 
@@ -94,7 +91,7 @@ end
     synvars::DoubleExpSynapseVars,
     v::VT1, # membrane potential
     syncurr::VT2, # synaptic current
-) where {T<:AbstractPopulation, VT1 <:AbstractVector, VT2 <:AbstractVector}
+) where {T<:AbstractPopulation,VT1<:AbstractVector,VT2<:AbstractVector}
     @unpack gsyn_e, gsyn_i, E_e, E_i = synapse
     @unpack N = p
     @unpack ge, gi = synvars

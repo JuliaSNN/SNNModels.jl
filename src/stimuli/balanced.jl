@@ -56,10 +56,7 @@ A stimulus that generates balanced excitatory and inhibitory inputs to a postsyn
 """
 BalancedStimulus
 
-@snn_kw struct BalancedStimulus{
-    VFT = Vector{Float32},
-    IT = Int32,
-} <: AbstractStimulus
+@snn_kw struct BalancedStimulus{VFT = Vector{Float32},IT = Int32} <: AbstractStimulus
     id::String = randstring(12)
     param::BalancedParameter
     name::String = "Balanced"
@@ -126,7 +123,13 @@ function BalancedStimulus(
 end
 
 
-function Stimulus(param::BalancedParameter, post::T, sym::Symbol, target = nothing; kwargs...) where {T<:AbstractPopulation}
+function Stimulus(
+    param::BalancedParameter,
+    post::T,
+    sym::Symbol,
+    target = nothing;
+    kwargs...,
+) where {T<:AbstractPopulation}
     return BalancedStimulus(post, sym, sym, target; param, kwargs...)
 end
 
@@ -136,12 +139,7 @@ end
 
 Generate a Balanced stimulus for a postsynaptic population.
 """
-function stimulate!(
-    p::BalancedStimulus,
-    param::BalancedParameter,
-    time::Time,
-    dt::Float32,
-)
+function stimulate!(p::BalancedStimulus, param::BalancedParameter, time::Time, dt::Float32)
     @unpack N, randcache_β, ge, gi = p
 
     ## Inhomogeneous Poisson process
@@ -151,7 +149,7 @@ function stimulate!(
 
     # Inhibitory spike
     my_rate = Distributions.Poisson{Float32}(r0 * kIE * dt)
-    @fastmath @simd for n in 1:N
+    @fastmath @simd for n = 1:N
         gi[n] += w * rand(my_rate) * wIE
     end
 
@@ -170,7 +168,7 @@ function stimulate!(
         @assert Erate >= 0
 
         my_rate = Distributions.Poisson{Float32}(Erate * dt)
-        @fastmath @simd for n in 1:N
+        @fastmath @simd for n = 1:N
             ge[i] += w * rand(my_rate)
         end
     else
@@ -183,7 +181,7 @@ function stimulate!(
             @assert Erate >= 0
             rand!(randcache)
             my_rate = Distributions.Poisson{Float32}(Erate * dt)
-            @fastmath @simd for n in 1:N
+            @fastmath @simd for n = 1:N
                 ge[i] += w * rand(my_rate)
             end
         end
@@ -192,4 +190,3 @@ function stimulate!(
 end
 
 export BalancedStimulus, stimulate!, BSParam, BalancedParameter
-

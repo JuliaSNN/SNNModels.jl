@@ -47,10 +47,7 @@ function get_synapse_symbol(synapse::T, sym::Symbol) where {T<:AbstractSynapsePa
     error("Synapse symbol $sym not found in DoubleExpSynapse")
 end
 
-function synaptic_variables(
-    synapse::AbstractSynapseParameter,
-    N::Int,
-) 
+function synaptic_variables(synapse::AbstractSynapseParameter, N::Int)
     error("synaptic_variables not implemented for synapse type $(typeof(synapse))")
 end
 
@@ -71,8 +68,24 @@ end
     synvars::AbstractSynapseVariable,
     v::VT1, # membrane potential
     syncurr::VT2, # synaptic current
-) where {P<:AbstractGeneralizedIF,T<:AbstractSinExpParameter, VT1 <:AbstractVector, VT2 <:AbstractVector}
+) where {
+    P<:AbstractGeneralizedIF,
+    T<:AbstractSinExpParameter,
+    VT1<:AbstractVector,
+    VT2<:AbstractVector,
+}
     error("synaptic_current! not implemented for synapse type $(typeof(synapse))")
 end
 
-export synaptic_current!, update_synapses!, synaptic_variables, synaptic_target, get_synapse_symbols, CurrentSynapse, DeltaSynapse, DoubleExpSynapse, SingleExpSynapse, ReceptorSynapse, AbstractSynapseParameter, AbstractSynapseVariable
+export synaptic_current!,
+    update_synapses!,
+    synaptic_variables,
+    synaptic_target,
+    get_synapse_symbols,
+    CurrentSynapse,
+    DeltaSynapse,
+    DoubleExpSynapse,
+    SingleExpSynapse,
+    ReceptorSynapse,
+    AbstractSynapseParameter,
+    AbstractSynapseVariable

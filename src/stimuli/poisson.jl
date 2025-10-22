@@ -12,7 +12,8 @@ abstract type PoissonStimulusParameter <: AbstractStimulusParameter end
 """
 PoissonVariable
 
-@snn_kw struct PoissonVariable{FT = Float32, VDT = Dict{Symbol,Any}} <: PoissonStimulusParameter
+@snn_kw struct PoissonVariable{FT = Float32,VDT = Dict{Symbol,Any}} <:
+               PoissonStimulusParameter
     variables::VDT
     rate::Function
     μ::FT = 1.0f0
@@ -50,7 +51,8 @@ end
 """
 PoissonInterval
 
-@snn_kw struct PoissonInterval{R = Float32, VVFT = Vector{Vector{Float32}}} <: PoissonStimulusParameter
+@snn_kw struct PoissonInterval{R = Float32,VVFT = Vector{Vector{Float32}}} <:
+               PoissonStimulusParameter
     rate::R
     intervals::VVFT
     μ::R = 1.0f0
@@ -58,9 +60,7 @@ PoissonInterval
 end
 
 
-@snn_kw struct PoissonStimulus{
-    VFT = Vector{Float32},
-} <: AbstractStimulus
+@snn_kw struct PoissonStimulus{VFT = Vector{Float32}} <: AbstractStimulus
     id::String = randstring(12)
     name::String = "Poisson"
     param::PoissonStimulusParameter
@@ -68,7 +68,7 @@ end
     neurons::VIT
     g::VFT # target conductance for soma
     targets::Dict = Dict()
-    records ::Dict = Dict()
+    records::Dict = Dict()
 end
 
 

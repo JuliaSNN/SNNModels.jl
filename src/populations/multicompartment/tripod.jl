@@ -83,12 +83,12 @@ Tripod
     VFT = Vector{Float32},
     MFT = Matrix{Float32},
     VDT = Dendrite{Vector{Float32}},
-    SYNS <: AbstractSynapseParameter,
-    SYND <: AbstractSynapseParameter,
-    SYNSV <: AbstractSynapseVariable,
-    SYNDV <: AbstractSynapseVariable,
-    SOMAT <: AbstractGeneralizedIFParameter,
-    PST <: AbstractSpikeParameter,
+    SYNS<:AbstractSynapseParameter,
+    SYND<:AbstractSynapseParameter,
+    SYNSV<:AbstractSynapseVariable,
+    SYNDV<:AbstractSynapseVariable,
+    SOMAT<:AbstractGeneralizedIFParameter,
+    PST<:AbstractSpikeParameter,
     IT = Int32,
 } <: AbstractDendriteIF
     id::String = randstring(12)
@@ -140,7 +140,7 @@ function synaptic_target(targets::Dict, post::Tripod, sym::Symbol, target::Symbo
     syn = get_synapse_symbol(post.soma_syn, sym)
     sym = Symbol("$(syn)_$target")
     v = Symbol("v_$target")
-    g = getfield(post,sym )
+    g = getfield(post, sym)
     hasfield(typeof(post), v) && (v_post = getfield(post, v))
 
     push!(targets, :sym => sym)
@@ -167,8 +167,8 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     @unpack synvars_s, synvars_d1, synvars_d2, d1, d2, I_d = p
     @unpack glu_d1, glu_d2, glu_s, gaba_d1, gaba_d2, gaba_s = p
 
-    @unpack spike, adex,  soma_syn, dend_syn = p
-    @unpack AP_membrane, up, τabs, At, τA  = spike 
+    @unpack spike, adex, soma_syn, dend_syn = p
+    @unpack AP_membrane, up, τabs, At, τA = spike
     @unpack El, Vr, Vt, τw, a, b = adex
 
     # Update all synaptic conductance
@@ -188,7 +188,7 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
 
     @inbounds for i ∈ 1:N
         tabs[i] -= 1
-        θ[i]    += dt * (Vt - θ[i]) / τA
+        θ[i] += dt * (Vt - θ[i]) / τA
         if tabs[i] > τabs / dt # backpropagation period
             v_s[i] = AP_membrane
             v_d1[i] += dt * (v_s[i] - v_d1[i]) * d1.gax[i] / d1.C[i]
@@ -199,16 +199,16 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
             v_d2[i] += dt * (v_s[i] - v_d2[i]) * d2.gax[i] / d2.C[i]
         elseif tabs[i] <= 0
             fire[i] = v_s[i] .+ Δv[i, 1] * dt >= -10mV
-            Δv[i, 1]   = ifelse(fire[i], AP_membrane - v_s[i] , Δv[i,1]) 
-            v_s[i]  = ifelse(fire[i], AP_membrane, v_s[i]) 
-            w_s[i]  = ifelse(fire[i], w_s[i] + b, w_s[i])
-            θ[i]    = ifelse(fire[i], θ[i] + At, θ[i])
+            Δv[i, 1] = ifelse(fire[i], AP_membrane - v_s[i], Δv[i, 1])
+            v_s[i] = ifelse(fire[i], AP_membrane, v_s[i])
+            w_s[i] = ifelse(fire[i], w_s[i] + b, w_s[i])
+            θ[i] = ifelse(fire[i], θ[i] + At, θ[i])
             tabs[i] = ifelse(fire[i], round(Int, (up + τabs) / dt), tabs[i])
             fire[i] && continue
-            v_s[i]  += 0.5 * dt * (Δv_temp[i, 1] + Δv[i, 1])
+            v_s[i] += 0.5 * dt * (Δv_temp[i, 1] + Δv[i, 1])
             v_d1[i] += 0.5 * dt * (Δv_temp[i, 2] + Δv[i, 2])
             v_d2[i] += 0.5 * dt * (Δv_temp[i, 3] + Δv[i, 3])
-            w_s[i]  += 0.5 * dt * (Δv_temp[i, 4] + Δv[i, 4])
+            w_s[i] += 0.5 * dt * (Δv_temp[i, 4] + Δv[i, 4])
         end
     end
 end
@@ -223,31 +223,35 @@ end
     @unpack d1, d2 = p
     @unpack is, ic = p
     @unpack adex, spike, soma_syn, dend_syn = p
-    @unpack AP_membrane, up, τabs, At, τA  = spike 
+    @unpack AP_membrane, up, τabs, At, τA = spike
     @unpack C, gl, El, ΔT, Vt, Vr, a, b, τw = adex
     @unpack synvars_s, synvars_d1, synvars_d2 = p
 
 
-    @views synaptic_current!(p, soma_syn,  synvars_s, v_s[:], is[:,1])
-    @views synaptic_current!(p, dend_syn, synvars_d1, v_d1[:], is[:,2])
-    @views synaptic_current!(p, dend_syn, synvars_d2, v_d2[:], is[:,3])
+    @views synaptic_current!(p, soma_syn, synvars_s, v_s[:], is[:, 1])
+    @views synaptic_current!(p, dend_syn, synvars_d1, v_d1[:], is[:, 2])
+    @views synaptic_current!(p, dend_syn, synvars_d2, v_d2[:], is[:, 3])
     clamp!(is, -1500, 1500)
 
     @fastmath @inbounds for i ∈ 1:p.N
-        ic[1] = -((v_d1[i] + Δv[i,2] * dt) - (v_s[i] + Δv[i,1] * dt)) * d1.gax[i]
-        ic[2] = -((v_d2[i] + Δv[i,3] * dt) - (v_s[i] + Δv[i,1] * dt)) * d2.gax[i]
-        Δv[i, 2] = ((-(v_d1[i] + Δv[i,2] * dt) + El) * d1.gm[i] - is[2] + ic[1] + I_d[i]) / d1.C[i]
-        Δv[i, 3] = ((-(v_d2[i] + Δv[i,3] * dt) + El) * d2.gm[i] - is[3] + ic[2] + I_d[i]) / d2.C[i]
-        Δv[i,1] =
+        ic[1] = -((v_d1[i] + Δv[i, 2] * dt) - (v_s[i] + Δv[i, 1] * dt)) * d1.gax[i]
+        ic[2] = -((v_d2[i] + Δv[i, 3] * dt) - (v_s[i] + Δv[i, 1] * dt)) * d2.gax[i]
+        Δv[i, 2] =
+            ((-(v_d1[i] + Δv[i, 2] * dt) + El) * d1.gm[i] - is[2] + ic[1] + I_d[i]) /
+            d1.C[i]
+        Δv[i, 3] =
+            ((-(v_d2[i] + Δv[i, 3] * dt) + El) * d2.gm[i] - is[3] + ic[2] + I_d[i]) /
+            d2.C[i]
+        Δv[i, 1] =
             1/C * (
-                + gl * (-(v_s[i] + Δv[i, 1] * dt) + El) 
-                + ΔT * exp256(1 / ΔT * (v_s[i] + Δv[i, 1] * dt - θ[i])) - w_s[i]  # adaptation
+                + gl * (-(v_s[i] + Δv[i, 1] * dt) + El) +
+                ΔT * exp256(1 / ΔT * (v_s[i] + Δv[i, 1] * dt - θ[i])) - w_s[i]  # adaptation
                 - is[i, 1]   # synapses
                 - sum(ic) # axial currents
                 + I[i]  # external current
             )
         # Δv[i, 4] = (a * (v_s[i]- El) - (w_s[i])) / τw
-        Δv[i, 4] = (a * ((v_s[i] + Δv[i,1] )- El) - (w_s[i] + Δv[i,4])) / τw
+        Δv[i, 4] = (a * ((v_s[i] + Δv[i, 1]) - El) - (w_s[i] + Δv[i, 4])) / τw
     end
 end
 

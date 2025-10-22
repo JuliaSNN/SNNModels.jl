@@ -1,4 +1,4 @@
-@snn_kw struct AggregateScalingParameter{FT = Float32, VFT = Vector{Float32}} <: NormParam
+@snn_kw struct AggregateScalingParameter{FT = Float32,VFT = Vector{Float32}} <: NormParam
     τ::FT = 10ms
     τa::FT
     τe::FT

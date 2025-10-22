@@ -231,7 +231,8 @@ function firing_rate(
 )
     # Check if the interval is empty and create an interval
     interval = _retrieve_interval(interval; kwargs...)
-    neurons = neurons == :ALL ? eachindex(spiketimes) : (isa(neurons, Int) ? [neurons] : neurons)
+    neurons =
+        neurons == :ALL ? eachindex(spiketimes) : (isa(neurons, Int) ? [neurons] : neurons)
     rates = nothing
     if time_average
         return time_average_fr(spiketimes, interval, pop_average), interval

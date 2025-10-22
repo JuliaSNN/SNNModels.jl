@@ -16,7 +16,7 @@ using Test
 
     # Test PoissonLayer constructor with custom parameters
     @testset "PoissonLayer with custom parameters" begin
-        param = PoissonLayer(; rate = 2.0f0, N = 10,active = [false])
+        param = PoissonLayer(; rate = 2.0f0, N = 10, active = [false])
         @test param.rate ≈ 2.0f0
         @test param.N == 10
         @test param.rates ≈ fill(2.0f0, 10)
@@ -34,8 +34,8 @@ using Test
     # Test Stimulus constructor with PoissonLayer
     @testset "Stimulus with PoissonLayer" begin
         param = PoissonLayer(; rate = 2.0f0, N = 10, active = [false])
-        conn = (;  p = 0.2f0, μ = 2.0f0, σ = 1.0f0, dist = :Normal, rule = :Fixed, )
-        stim = Stimulus(param, E, :ge, conn=conn)
+        conn = (; p = 0.2f0, μ = 2.0f0, σ = 1.0f0, dist = :Normal, rule = :Fixed)
+        stim = Stimulus(param, E, :ge, conn = conn)
         @test stim.param == param
         @test stim.N == param.N
         @test stim.targets[:pre] == :PoissonStim
@@ -46,8 +46,8 @@ using Test
     # Test stimulate! method with PoissonLayer
     @testset "stimulate! with PoissonLayer" begin
         param = PoissonLayer(; rate = 2.0f0, N = 10, active = [false])
-        conn = (;  p = 0.2f0, μ = 2.0f0, σ = 1.0f0, dist = :Normal, rule = :Fixed, )
-        stim = Stimulus(param, E, :ge, conn=conn)
+        conn = (; p = 0.2f0, μ = 2.0f0, σ = 1.0f0, dist = :Normal, rule = :Fixed)
+        stim = Stimulus(param, E, :ge, conn = conn)
         time = Time()
         dt = 0.001f0
         stimulate!(stim, param, time, dt)
@@ -58,8 +58,8 @@ using Test
     # Test simulate with composed model
     @testset "Simulate with composed model" begin
         param = PoissonLayer(; rate = 2.0f0, N = 10, active = [false])
-        conn = (;  p = 0.2f0, μ = 2.0f0, σ = 1.0f0, dist = :Normal, rule = :Fixed, )
-        stim = Stimulus(param, E, :ge, conn=conn)
+        conn = (; p = 0.2f0, μ = 2.0f0, σ = 1.0f0, dist = :Normal, rule = :Fixed)
+        stim = Stimulus(param, E, :ge, conn = conn)
         model = compose(E = E, S = stim, silent = true)
         monitor!(E, [:fire, :ge])
         sim!(model; duration = 1s)
