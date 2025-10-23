@@ -4,6 +4,7 @@ function synaptic_target(
     sym::Symbol,
     target,
 ) where {T<:AbstractPopulation}
+    @warn "Synaptic target not defined for this type. Please implement a method for $(T)"
     g = zeros(Float32, post.N)
     v_post = zeros(Float32, post.N)
     if isnothing(target)
@@ -31,6 +32,7 @@ function synaptic_target(
         end
     end
     return g, v_post
+    # return zeros(Float32, post.N), zeros(Float32, post.N)
 end
 
 function synaptic_target(

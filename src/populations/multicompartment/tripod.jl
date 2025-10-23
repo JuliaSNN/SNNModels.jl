@@ -89,6 +89,7 @@ Tripod
     SYNDV<:AbstractSynapseVariable,
     SOMAT<:AbstractGeneralizedIFParameter,
     PST<:AbstractSpikeParameter,
+    RECT<:NamedTuple,
     IT = Int32,
 } <: AbstractDendriteIF
     id::String = randstring(12)
@@ -116,12 +117,9 @@ Tripod
     synvars_d1::SYNDV = synaptic_variables(dend_syn, N)
     synvars_d2::SYNDV = synaptic_variables(dend_syn, N)
 
-    glu_d1::VFT = zeros(N) #! target
-    gaba_d1::VFT = zeros(N) #! target
-    glu_d2::VFT = zeros(N) #! target
-    gaba_d2::VFT = zeros(N) #! target
-    glu_s::VFT = zeros(N) #! target
-    gaba_s::VFT = zeros(N) #! target
+    receptors_s::RECT = (glu = zeros(Float32, N), gaba = zeros(Float32, N)) #! target
+    receptors_d1::RECT = (glu = zeros(Float32, N), gaba = zeros(Float32, N)) #! target
+    receptors_d2::RECT = (glu = zeros(Float32, N), gaba = zeros(Float32, N)) #! target
 
     # Spike model and threshold
     fire::VBT = zeros(Bool, N)
@@ -136,18 +134,7 @@ Tripod
     ic::VFT = zeros(2)
 end
 
-function synaptic_target(targets::Dict, post::Tripod, sym::Symbol, target::Symbol)
-    syn = get_synapse_symbol(post.soma_syn, sym)
-    sym = Symbol("$(syn)_$target")
-    v = Symbol("v_$target")
-    g = getfield(post, sym)
-    hasfield(typeof(post), v) && (v_post = getfield(post, v))
 
-    push!(targets, :sym => sym)
-    push!(targets, :g => post.id)
-
-    return g, v_post
-end
 
 # function Population(param <:T; N::Int=100, name::String="TripodNeuron", kwargs...) where T<:TripodParameter
 #     return Tripod(;
@@ -165,16 +152,16 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     @unpack Δv, Δv_temp, is = p
 
     @unpack synvars_s, synvars_d1, synvars_d2, d1, d2, I_d = p
-    @unpack glu_d1, glu_d2, glu_s, gaba_d1, gaba_d2, gaba_s = p
+    @unpack receptors_d1, receptors_d2, receptors_s = p
 
     @unpack spike, adex, soma_syn, dend_syn = p
     @unpack AP_membrane, up, τabs, At, τA = spike
     @unpack El, Vr, Vt, τw, a, b = adex
 
     # Update all synaptic conductance
-    update_synapses!(p, soma_syn, glu_s, gaba_s, synvars_s, dt)
-    update_synapses!(p, dend_syn, glu_d1, gaba_d1, synvars_d1, dt)
-    update_synapses!(p, dend_syn, glu_d2, gaba_d2, synvars_d2, dt)
+    update_synapses!(p, soma_syn, receptors_s, synvars_s, dt)
+    update_synapses!(p, dend_syn, receptors_d1, synvars_d1, dt)
+    update_synapses!(p, dend_syn, receptors_d2, synvars_d2, dt)
 
     ## Heun integration
     fill!(Δv, 0.0f0)

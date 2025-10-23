@@ -72,4 +72,16 @@ function Population(param::T; kwargs...) where {T<:DendNeuronParameter}
     end
 end
 
+function synaptic_target(targets::Dict, post::T, sym::Symbol, target::Symbol) where {T<:AbstractDendriteIF}
+    receps = Symbol("receptors_$target")
+    v = Symbol("v_$target")
+    sym =  get_synapse_symbol(post.soma_syn, sym)
+    g = getfield(getfield(post, receps), sym)
+    hasfield(typeof(post), v) && (v_post = getfield(post, v))
+    push!(targets, :sym => "$(sym)_$target")
+    push!(targets, :g => post.id)
+    return g, v_post
+end
+
+
 export BallAndStickParameter, TripodParameter, DendNeuronParameter

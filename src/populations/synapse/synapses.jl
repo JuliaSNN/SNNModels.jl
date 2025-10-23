@@ -51,6 +51,11 @@ function synaptic_variables(synapse::AbstractSynapseParameter, N::Int)
     error("synaptic_variables not implemented for synapse type $(typeof(synapse))")
 end
 
+function synaptic_receptors(synapse::AbstractSynapseParameter, N::Int)
+    return (glu = zeros(Float32, N), gaba = zeros(Float32, N))
+    # error("synaptic_receptors not implemented for synapse type $(typeof(synapse))")
+end
+
 function update_synapses!(
     p::P,
     synapse::T,
@@ -86,6 +91,7 @@ export synaptic_current!,
     DeltaSynapse,
     DoubleExpSynapse,
     SingleExpSynapse,
+    MultiRecetorSynapse,
     ReceptorSynapse,
     AbstractSynapseParameter,
     AbstractSynapseVariable

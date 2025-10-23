@@ -73,6 +73,7 @@ BallAndStick
     SYNSV<:AbstractSynapseVariable,
     SOMAT<:AbstractGeneralizedIFParameter,
     PST<:AbstractSpikeParameter,
+    RECT<:NamedTuple,
     IT = Int32,
 } <: AbstractDendriteIF     ## These are compulsory parameters
 
@@ -100,10 +101,8 @@ BallAndStick
     Id::VFT = zeros(N)
 
     # Receptors properties
-    gaba_d::VFT = zeros(N) #! target
-    glu_d::VFT = zeros(N) #! target
-    gaba_s::VFT = zeros(N) #! target
-    glu_s::VFT = zeros(N) #! target
+    receptors_d::RECT = synaptic_receptors(dend_syn, N) #! target
+    receptors_s::RECT = synaptic_receptors(soma_syn, N) #! target
 
     # Spike model and threshold
     fire::VBT = zeros(Bool, N)
@@ -118,30 +117,20 @@ BallAndStick
     ic::VFT = zeros(1)
 end
 
-function synaptic_target(targets::Dict, post::BallAndStick, sym::Symbol, target)
-    _sym = Symbol("$(sym)_$target")
-    _v = Symbol("v_$target")
-    g = getfield(post, _sym)
-    v_post = getfield(post, _v)
-    push!(targets, :sym => _sym)
-    return g, v_post
-end
-
-
 function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
     @unpack N, v_s, w_s, v_d = p
     @unpack fire, θ, tabs = p
     @unpack Δv, Δv_temp, is = p
 
     @unpack synvars_s, synvars_d, d = p
-    @unpack glu_d, glu_s, gaba_d, gaba_s = p
+    @unpack receptors_d, receptors_s = p
 
     @unpack spike, adex, soma_syn, dend_syn = p
     @unpack AP_membrane, up, τabs, At, τA = spike
     @unpack El, Vr, Vt, τw, a, b = adex
 
-    update_synapses!(p, soma_syn, glu_s, gaba_s, synvars_s, dt)
-    update_synapses!(p, dend_syn, glu_d, gaba_d, synvars_d, dt)
+    update_synapses!(p, soma_syn, receptors_s, synvars_s, dt)
+    update_synapses!(p, dend_syn, receptors_d, synvars_d, dt)
 
     ## Heun integration
     fill!(Δv, 0.0f0)

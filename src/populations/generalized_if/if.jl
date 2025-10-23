@@ -74,6 +74,7 @@ IF
     PST = PostSpike{Float32},
     SYNT<:AbstractSynapseParameter,
     SYNV<:AbstractSynapseVariable,
+    RECT<:NamedTuple
 } <: AbstractGeneralizedIF
 
     param::IFParameter = IFParameter()
@@ -93,9 +94,9 @@ IF
     # Two receptors synaptic conductance
     syn_curr::VFT = zeros(Float32, N)
     synvars::SYNV = synaptic_variables(synapse, N) # Synaptic variables for receptor model
+    receptors::RECT = synaptic_receptors(synapse, N)
     # Synaptic targets
-    glu::VFT = zeros(Float32, N)
-    gaba::VFT = zeros(Float32, N)
+
 
     records::Dict = Dict()
 end
@@ -118,7 +119,7 @@ function synaptic_target(
 ) where {T<:IF}
     syn = get_synapse_symbol(post.synapse, sym)
     sym = Symbol(syn)
-    g = getfield(post, sym)
+    g = getfield(post.receptors, sym)
     v_post = getfield(post, :v)
     push!(targets, :sym => sym)
     return g, v_post
