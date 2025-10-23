@@ -27,10 +27,10 @@ ReceptorSynapse
     NMDAT = NMDAVoltageDependency{Float32},
 } <: AbstractReceptorParameter
     ## Synapses
+    syn::ST=SomaReceptors
     NMDA::NMDAT = NMDAVoltageDependency()
     glu_receptors::VIT = [1, 2]
     gaba_receptors::VIT = [3, 4]
-    syn::ST=SomaReceptors
 end
 
 ReceptorSynapse(syn::ReceptorArray, NMDA::NMDAVoltageDependency{Float32}; kwargs...) = ReceptorSynapse(; kwargs..., syn = syn, NMDA = NMDA)
@@ -65,13 +65,12 @@ MultiReceptorSynapse
     NMDAT = NMDAVoltageDependency{Float32},
     REC <: NamedTuple
 } <: AbstractReceptorParameter
-    ## Synapses
-    NMDA::NMDAT = NMDAVoltageDependency()
     syn::ST=SomaReceptors
+    NMDA::NMDAT = NMDAVoltageDependency()
     receptors::REC = infer_receptors(syn)
 end
 
-MultiReceptorSynapse(syn::ReceptorArray, NMDA::NMDAVoltageDependency{Float32}, receptors::NamedTuple) = ReceptorSynapse(; syn = syn, NMDA = NMDA, receptors = receptors)
+MultiReceptorSynapse(syn::ReceptorArray) = ReceptorSynapse(; syn = syn, NMDA = NMDA, receptors = receptors)
 
 function synaptic_receptors(synapse::MultiReceptorSynapse, N::Int)
 
@@ -208,7 +207,6 @@ end
                 (nmda==0.0f0 ? 1.0f0 : 1/(1.0f0 + (mg / b) * exp256(k * v[neuron])))
         end
     end
-    # @show syncurr
 end
 
 export ReceptorSynapse, MultiReceptorSynapse
