@@ -12,6 +12,14 @@ struct RateParameter <: AbstractPopulationParameter end
     records::Dict = Dict()
 end
 
+function synaptic_target(targets::Dict, post::T, sym::Symbol, target) where {T<:Rate}
+    sym = :g
+    g = getfield(post, :g)
+    v_post = getfield(post, :r)
+    push!(targets, :sym => sym)
+    return g, v_post
+end
+
 """
 [Rate Neuron](https://neuronaldynamics.epfl.ch/online/Ch15.S3.html)
 """
