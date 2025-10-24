@@ -12,9 +12,9 @@ struct RateParameter <: AbstractPopulationParameter end
     records::Dict = Dict()
 end
 
-function synaptic_target(targets::Dict, post::T, sym::Symbol, target) where {T<:Rate}
+function synaptic_target(targets::Dict, post::T, sym=nothing, target=nothing) where {T<:Rate}
     sym = :g
-    g = getfield(post, :g)
+    g = getfield(post, sym)
     v_post = getfield(post, :r)
     push!(targets, :sym => sym)
     return g, v_post

@@ -32,7 +32,7 @@ function RateSynapse(pre, post; μ = 0.0, p = 0.0, kwargs...)
         :pre => pre.id,
         :type=>:RateSynapse,
     )
-    @views g, v_post = synaptic_target(targets, post, :g, nothing)
+    @views g, v_post = synaptic_target(targets, post, nothing, nothing)
 
     RateSynapse(; @symdict(colptr, I, W, rI, rJ, g)..., kwargs..., targets = targets)
 end
