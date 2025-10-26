@@ -80,14 +80,18 @@ end
 
 
     config1 = (a = 1, b = (c = 2, d = 3))
-    updated1 = @update config1 a = 4
+    updated1 = @update! config1 begin
+        a = 4
+    end
     @test updated1.a == 4
     @test updated1.b.c == 2
     @test updated1.b.d == 3
 
     # Test case 2: Nested update
     config2 = (a = 1, b = (c = 2, d = 3))
-    updated2 = @update config2 b.c = 5
+    updated2 = @update config2 begin
+        b.c = 5
+    end
     @test updated2.a == 1
     @test updated2.b.c == 5
     @test updated2.b.d == 3
@@ -104,24 +108,32 @@ end
 
     # Test case 4: Create new nested structure
     config4 = (a = 1,)
-    updated4 = @update config4 b.c = 2
+    updated4 = @update config4 begin
+        b.c = 2
+    end
     @test updated4.a == 1
     @test updated4.b.c == 2
 
     # Test case 5: Overwrite non-NamedTuple field
     config5 = (a = 1, b = 2)
-    @test_throws TypeError     updated5 = @update config5 b.c = 3
+    @test_throws TypeError updated5 = @update config5 begin
+        b.c = 3
+    end
 
     # Test case 6: Simple update with !
     config6 = (a = 1, b = (c = 2, d = 3))
-    @update! config6 a = 4
+    @update! config6 begin
+        a = 4
+    end
     @test config6.a == 4
     @test config6.b.c == 2
     @test config6.b.d == 3
 
     # Test case 7: Nested update with !
     config7 = (a = 1, b = (c = 2, d = 3))
-    @update! config7 b.c = 5
+    @update! config7 begin
+        b.c = 5
+    end
     @test config7.a == 1
     @test config7.b.c == 5
     @test config7.b.d == 3
@@ -138,13 +150,19 @@ end
 
     # Test case 9: Create new nested structure with !
     config9 = (a = 1,)
-    @update! config9 b.c = 2
+    @update! config9 begin
+        b.c = 2
+    end
     @test config9.a == 1
     @test config9.b.c == 2
 
     # Test case 10: Overwrite non-NamedTuple field with !
     config10 = (a = 1, b = 2)
-    @test_throws TypeError @update! config10 b.c = 3
+    @test_throws TypeError @update! config10 begin
+        b.c = 3
+    end
     @test config10.a == 1
+    @test config10.b == 2
+    # @test config10.b.c == 3
 
 end

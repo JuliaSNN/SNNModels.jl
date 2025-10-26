@@ -233,9 +233,16 @@ macro update(base, update_expr)
         end
         return current_config
     else
-        lhs, rhs = update_expr.args  # Extract the left-hand side and right-hand side
+        # Extract the left-hand side and right-hand side, the left-hand side is the field to update, the right hand side is the new value
+        lhs, rhs = update_expr.args
 
+        # Escape the value to ensure it's evaluated in the correct context
+        value = :($(esc(rhs)))
 
+        # Assert the left-hand side has the correct structure
+        # if isa(lhs, Symbol)
+        #     pushfirst!(fields, lhs)  # Add the first part
+        # else
         # @assert lhs.head == Symbol(".")
         fields = []
         while !isa(lhs, Symbol)
@@ -247,8 +254,8 @@ macro update(base, update_expr)
         # Convert the field names into symbols
         field_syms = [Symbol(f) for f in fields]
 
-        # Return the updated expression with deep merge
-        return :(update_with_merge($base, $field_syms, $rhs))
+        # Apply the update to the current config using the helper function
+        current_config = :(update_with_merge($current_config, $field_syms, $value))
     end
     # end
 end

@@ -11,8 +11,8 @@ if VERSION > v"1.1"
 end
 
 errorlogger = ConsoleLogger(stderr, Logging.Error)
-# with_logger(errorlogger) do
-    # @testset "Neurons and stimuli" begin
+with_logger(errorlogger) do
+    @testset "Neurons and stimuli" begin
         include("pop/hh_neuron.jl")
         include("pop/if_neuron.jl")
         include("pop/adex_neuron.jl")
