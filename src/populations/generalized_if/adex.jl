@@ -76,6 +76,7 @@ AdEx
     SYNT<:AbstractSynapseParameter,
     SYNV<:AbstractSynapseVariable,
     AdExt<:AdExParameter,
+    RECT<:NamedTuple
 } <: AbstractGeneralizedIF
 
     name::String = "AdEx"
@@ -97,9 +98,7 @@ AdEx
     # Two receptors synaptic conductance
     syn_curr::VFT = zeros(Float32, N)
     synvars::SYNV = synaptic_variables(synapse, N) # Synaptic variables for receptor model
-    # Synaptic targets
-    glu::VFT = zeros(Float32, N)
-    gaba::VFT = zeros(Float32, N)
+    receptors::RECT = synaptic_receptors(synapse, N)
 
     records::Dict = Dict()
 end
@@ -108,7 +107,7 @@ end
 function synaptic_target(targets::Dict, post::T, sym::Symbol, target) where {T<:AdEx}
     syn = get_synapse_symbol(post.synapse, sym)
     sym = Symbol(syn)
-    g = getfield(post, sym)
+    g = getfield(post.receptors, sym)
     v_post = getfield(post, :v)
     push!(targets, :sym => sym)
     return g, v_post

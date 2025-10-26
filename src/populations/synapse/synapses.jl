@@ -31,11 +31,11 @@ This type serves as a base for various synaptic variable implementations corresp
 """
 abstract type AbstractSynapseVariable <: AbstractComponent end
 
-include("CurrentSynapse.jl")
-include("DeltaSynapse.jl")
-include("DoubleExpSynapse.jl")
-include("SingleExpSynapse.jl")
-include("ReceptorSynapse.jl")
+include("synapses/CurrentSynapse.jl")
+include("synapses/DeltaSynapse.jl")
+include("synapses/DoubleExpSynapse.jl")
+include("synapses/SingleExpSynapse.jl")
+include("synapses/ReceptorSynapse.jl")
 
 function get_synapse_symbol(synapse::T, sym::Symbol) where {T<:AbstractSynapseParameter}
     sym == :glu && return :glu
@@ -44,11 +44,17 @@ function get_synapse_symbol(synapse::T, sym::Symbol) where {T<:AbstractSynapsePa
     sym == :hi && return :gaba
     sym == :ge && return :glu
     sym == :gi && return :gaba
-    error("Synapse symbol $sym not found in DoubleExpSynapse")
+    return sym
+    # error("Synapse symbol $sym not found in DoubleExpSynapse")
 end
 
 function synaptic_variables(synapse::AbstractSynapseParameter, N::Int)
     error("synaptic_variables not implemented for synapse type $(typeof(synapse))")
+end
+
+function synaptic_receptors(synapse::AbstractSynapseParameter, N::Int)
+    return (glu = zeros(Float32, N), gaba = zeros(Float32, N))
+    # error("synaptic_receptors not implemented for synapse type $(typeof(synapse))")
 end
 
 function update_synapses!(
@@ -86,6 +92,7 @@ export synaptic_current!,
     DeltaSynapse,
     DoubleExpSynapse,
     SingleExpSynapse,
+    MultiRecetorSynapse,
     ReceptorSynapse,
     AbstractSynapseParameter,
     AbstractSynapseVariable

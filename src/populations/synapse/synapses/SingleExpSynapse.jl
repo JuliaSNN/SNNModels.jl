@@ -55,13 +55,13 @@ end
 function update_synapses!(
     p::P,
     synapse::T,
-    glu::Vector{Float32},
-    gaba::Vector{Float32},
+    receptors::RECT,
     synvars::SingleExpSynapseVars,
     dt::Float32,
-) where {P<:AbstractGeneralizedIF,T<:AbstractSinExpParameter}
+) where {P<:AbstractGeneralizedIF,T<:AbstractSinExpParameter, RECT<:NamedTuple}
     @unpack N, ge, gi = synvars
     @unpack τe, τi = synapse
+    @unpack glu, gaba = receptors
     @fastmath @inbounds for i ∈ 1:N
         ge[i] += glu[i]
         gi[i] += gaba[i]

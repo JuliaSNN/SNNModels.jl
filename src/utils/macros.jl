@@ -183,7 +183,7 @@ end
 
 export @symdict, @snn_kw
 
-""" Macro to update fields in a named tuple configuration.
+"""" Macro to update fields in a named tuple configuration.
     Usage:
         @update base_config field1.field2 = value
         @update base_config begin
@@ -233,9 +233,16 @@ macro update(base, update_expr)
         end
         return current_config
     else
-        lhs, rhs = update_expr.args  # Extract the left-hand side and right-hand side
+        # Extract the left-hand side and right-hand side, the left-hand side is the field to update, the right hand side is the new value
+        lhs, rhs = update_expr.args
 
+        # Escape the value to ensure it's evaluated in the correct context
+        value = :($(esc(rhs)))
 
+        # Assert the left-hand side has the correct structure
+        # if isa(lhs, Symbol)
+        #     pushfirst!(fields, lhs)  # Add the first part
+        # else
         # @assert lhs.head == Symbol(".")
         fields = []
         while !isa(lhs, Symbol)
@@ -247,8 +254,8 @@ macro update(base, update_expr)
         # Convert the field names into symbols
         field_syms = [Symbol(f) for f in fields]
 
-        # Return the updated expression with deep merge
-        return :(update_with_merge($base, $field_syms, $rhs))
+        # Apply the update to the current config using the helper function
+        current_config = :(update_with_merge($current_config, $field_syms, $value))
     end
     # end
 end
@@ -273,6 +280,7 @@ function update_with_merge(
                 "Field $key in $(join(full_path,".")) does not exist, assign it to an empty NamedTuple"
             )
             base_config = merge(base_config, (key => NamedTuple(),))
+            updated_sub = update_with_merge(NamedTuple(), path[2:end], value, full_path)
             # updated_sub = update_with_merge(base_config, path, value)
             # sub = (;tmp=nothing)
         end
@@ -280,17 +288,40 @@ function update_with_merge(
         if isa(sub, NamedTuple)
             # Recursively update the nested subfield
             updated_sub = update_with_merge(sub, path[2:end], value, full_path)
-        else
-            @warn(
-                "Field $key in $(join(full_path,".")) is not a NamedTuple. Overwriting $key with a new NamedTuple."
-            )
-            updated_sub = update_with_merge(NamedTuple(), path[2:end], value, full_path)
+        else # assume it is a struct. It will return an error if not.
+            # @warn(
+            #     "Field $key in $(join(full_path,".")) is not a NamedTuple. Overwriting $key with a new NamedTuple."
+            # )
+            updated_sub = update_with_merge(sub, path[2:end], value, full_path)
         end
 
         # Merge the updated subfield back into the base
         return merge(base_config, (key => updated_sub,))
     end
 end
+
+function isstructwithfields(x)
+    return isstructtype(typeof(x)) && !isempty(fieldnames(typeof(x)))
+end
+
+function update_with_merge(
+    base_config::Any,
+    path::Vector{Symbol},
+    value,
+    full_path = nothing,
+)
+    if isstructwithfields(base_config)
+        # Convert struct to NamedTuple
+        nt = (; [(f => getfield(base_config, f)) for f in fieldnames(typeof(base_config))]...)
+        updated_nt = update_with_merge(nt, path, value, full_path)
+        # Convert back to struct
+        return typeof(base_config)(; updated_nt...)
+    else
+        # error("Cannot update field in type $(typeof(base_config)) at path $(join(full_path,"."))")
+        throw(TypeError(path[1], "path $(join(full_path,"."))", NamedTuple, typeof(value)))
+    end
+end
+
 
 macro update!(base, update_expr)
     if update_expr.head == :block
@@ -354,7 +385,9 @@ end
 function normalize(v)
     return v / sum(abs, v)
 end
+
 export @update, @update!, update_with_merge, pretty_nt_print
+
 
 
 # macro compose(args...)

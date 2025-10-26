@@ -41,11 +41,12 @@ end
 @inline function update_synapses!(
     p::P,
     synapse::T,
+    receptors::RECT,
     synvars::DeltaSynapseVars,
     dt::Float32,
-) where {P<:AbstractGeneralizedIF,T<:AbstractDeltaParameter}
+) where {P<:AbstractGeneralizedIF,T<:AbstractDeltaParameter, RECT<:NamedTuple }
     @unpack N, ge, gi = synvars
-    @unpack glu, gaba = p
+    @unpack glu, gaba = receptors
     @fastmath @inbounds for i ∈ 1:N
         ge[i] += glu[i]
         gi[i] += gaba[i]

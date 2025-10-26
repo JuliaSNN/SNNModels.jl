@@ -5,19 +5,9 @@ function integrate!(
     param::T,
     dt::Float32,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractGeneralizedIFParameter}
-    update_synapses!(p, p.synapse, p.synvars, dt)
+    update_synapses!(p, p.synapse, p.receptors, p.synvars, dt)
     synaptic_current!(p, p.synapse, p.synvars)
     update_neuron!(p, param, dt)
-end
-
-function update_synapses!(
-    p::P,
-    synapse::T,
-    synvars::SYN,
-    dt::Float32,
-) where {P<:AbstractGeneralizedIF,T<:AbstractSynapseParameter,SYN<:AbstractSynapseVariable}
-    @unpack N, glu, gaba = p
-    update_synapses!(p, synapse, glu, gaba, synvars, dt)
 end
 
 @inline function synaptic_current!(

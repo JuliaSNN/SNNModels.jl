@@ -47,10 +47,11 @@ end
 @inline function update_synapses!(
     p::P,
     param::T,
+    receptors::RECT,
     synvars::CurrentSynapseVars,
     dt::Float32,
-) where {P<:AbstractGeneralizedIF,T<:AbstractCurrentParameter}
-    @unpack glu, gaba = p
+) where {P<:AbstractGeneralizedIF,T<:AbstractCurrentParameter, RECT<:NamedTuple}
+    @unpack glu, gaba = receptors
     @unpack N, ge, gi = synvars
     @unpack τe, τi = param
     @fastmath @inbounds @simd for i ∈ 1:N

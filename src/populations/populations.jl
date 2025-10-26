@@ -23,9 +23,9 @@ abstract type AbstractGeneralizedIFParameter <: AbstractPopulationParameter end
 abstract type AbstractGeneralizedIF <: AbstractPopulation end
 
 ## Synapses
-include("synapse/synapse.jl")
+include("synapse/receptors.jl")
 include("synapse/synapses.jl")
-include("synapse/synapse_parameters.jl")
+include("synapse/receptor_types.jl")
 include("synapse/synaptic_targets.jl")
 
 include("generalized_if/gif.jl")

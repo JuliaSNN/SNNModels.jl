@@ -7,31 +7,31 @@ using Random
 if VERSION > v"1.1"
     include("ctors.jl")
     include("records.jl")
-end
-#
-
-@testset "Neurons and stimuli" begin
-    include("pop/hh_neuron.jl")
-    include("pop/if_neuron.jl")
-    include("pop/adex_neuron.jl")
-    include("pop/iz_neuron.jl")
-    include("pop/spiketime.jl")
-    include("pop/ballandstick.jl")
-    include("pop/tripod.jl")
-    include("pop/dendrite.jl")
+    include("macros.jl")
 end
 
-@testset "Stimuli" begin
-    include("stim/poisson.jl")
-    include("stim/poisson_layer.jl")
-    include("stim/current.jl")
-    include("stim/timed.jl")
-    include("stim/balanced.jl")
-end
-
-# Set the default logger to output only errors:
 errorlogger = ConsoleLogger(stderr, Logging.Error)
 with_logger(errorlogger) do
+    @testset "Neurons and stimuli" begin
+        include("pop/hh_neuron.jl")
+        include("pop/if_neuron.jl")
+        include("pop/adex_neuron.jl")
+        include("pop/iz_neuron.jl")
+        include("pop/spiketime.jl")
+        include("pop/ballandstick.jl")
+        include("pop/tripod.jl")
+        include("pop/dendrite.jl")
+    end
+
+    @testset "Stimuli" begin
+        include("stim/poisson.jl")
+        include("stim/poisson_layer.jl")
+        include("stim/current.jl")
+        include("stim/timed.jl")
+        include("stim/balanced.jl")
+    end
+
+# Set the default logger to output only errors:
     @testset "Networks and synapses" begin
         @test include("network/if_net.jl")
         @test include("network/chain.jl")
