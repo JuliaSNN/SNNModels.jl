@@ -11,9 +11,8 @@
             IT = Int32,
 } <: AbstractDendriteIF
 
-A struct representing a tripod neuron model with two dendrites and a soma.
-The model incorporates adaptive exponential integrate-and-fire dynamics
-with synaptic inputs to both the soma and dendrites. The soma includes adaptation currents and dynamic thresholds for spike generation.
+A struct representing a tripod neuron model with two dendrites and a soma. The model incorporates adaptive exponential integrate-and-fire dynamics with synaptic inputs to both the soma and dendrites. The soma includes adaptation currents and dynamic thresholds for spike generation.
+
 The dendrites are modeled with separate passive compartments, and the soma integrates input currents from both dendrites. The current flows between the soma and dendrites are governed by axial conductances, defined in the dendrite parameters. The dendrites are computed based on passive membrane properties and geometrical properties, defined in the `DendNeuronParameter`.
 The model accepts any synaptic model for both soma and dendrites
 
