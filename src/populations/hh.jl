@@ -29,6 +29,13 @@ end
     records::Dict = Dict()
 end
 
+function synaptic_target(targets::Dict, post::T, sym=nothing, target=nothing) where {T<:HH}
+    g = getfield(post, sym)
+    v_post = getfield(post, :v)
+    push!(targets, :sym => sym)
+    return g, v_post
+end
+
 """
 [Hodgkin–Huxley Neuron](https://en.wikipedia.org/wiki/Hodgkin%E2%80%93Huxley_model)
 """
@@ -38,6 +45,7 @@ function integrate!(p::HH, param::HHParameter, dt::Float32)
     @unpack N, v, m, n, h, ge, gi, fire, I = p
     @unpack Cm, gl, El, Ek, En, gn, gk, Vt, τe, τi, Ee, Ei = param
     @inbounds for i = 1:N
+        fire[i] = false
         m[i] +=
             dt * (
                 0.32f0 * (13.0f0 - v[i] + Vt) /
