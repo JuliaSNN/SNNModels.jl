@@ -43,19 +43,18 @@ The model leverages Heun integration for improved numerical stability.
 - `v_d2::VFT`: Second dendrite membrane potential (initialized randomly between `Vt` and `Vr`).
 - `I::VFT`: External current input to the soma (initialized to zeros).
 - `I_d::VFT`: External current input to the dendrites (initialized to zeros).
-- `synvars_s::SYNSV`: Synaptic variables for the soma (initialized using `synaptic_variables`).
-- `synvars_d1::SYNDV`: Synaptic variables for the first dendrite (initialized using `synaptic_variables`).
-- `synvars_d2::SYNDV`: Synaptic variables for the second dendrite (initialized using `synaptic_variables`).
-- `glu_d1::VFT`: Glutamate synaptic input to the first dendrite (initialized to zeros).
-- `gaba_d1::VFT`: GABA synaptic input to the first dendrite (initialized to zeros).
-- `glu_d2::VFT`: Glutamate synaptic input to the second dendrite (initialized to zeros).
-- `gaba_d2::VFT`: GABA synaptic input to the second dendrite (initialized to zeros).
-- `glu_s::VFT`: Glutamate synaptic input to the soma (initialized to zeros).
-- `gaba_s::VFT`: GABA synaptic input to the soma (initialized to zeros).
 - `fire::VBT`: Boolean array indicating which neurons have spiked (initialized to false).
 - `tabs::VFT`: Absolute refractory period counters (initialized to zeros).
 - `θ::VFT`: Dynamic threshold for spike generation (initialized to `Vt`).
 - `records::Dict`: Dictionary for storing simulation records (initialized empty).
+
+## Synapses
+- `synvars_s::SYNSV`: Synaptic variables for the soma (initialized using `synaptic_variables`).
+- `synvars_d1::SYNDV`: Synaptic variables for the first dendrite (initialized using `synaptic_variables`).
+- `synvars_d2::SYNDV`: Synaptic variables for the second dendrite (initialized using `synaptic_variables`).
+- `receptors_s::NamedTuple`: Synaptic receptors triggered by soma-targeting spike events (initialized using `synaptic_receptors`).
+- `receptors_d1::NamedTuple`: Synaptic receptors triggered by d1-targeting spike events (initialized using `synaptic_receptors`).
+- `receptors_d2::NamedTuple`: Synaptic receptors triggered by d2-targeting spike events (initialized using `synaptic_receptors`).
 
 ## Temporary Variables for Integration
 - `Δv::MFT`: Temporary matrix for voltage changes during integration (initialized to zeros).
@@ -117,9 +116,9 @@ Tripod
     synvars_d1::SYNDV = synaptic_variables(dend_syn, N)
     synvars_d2::SYNDV = synaptic_variables(dend_syn, N)
 
-    receptors_s::RECT = (glu = zeros(Float32, N), gaba = zeros(Float32, N)) #! target
-    receptors_d1::RECT = (glu = zeros(Float32, N), gaba = zeros(Float32, N)) #! target
-    receptors_d2::RECT = (glu = zeros(Float32, N), gaba = zeros(Float32, N)) #! target
+    receptors_s::RECT = synaptic_receptors(soma_syn, N)
+    receptors_d1::RECT = synaptic_receptors(dend_syn, N)
+    receptors_d2::RECT = synaptic_receptors(dend_syn, N)
 
     # Spike model and threshold
     fire::VBT = zeros(Bool, N)
