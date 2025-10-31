@@ -1,5 +1,3 @@
-abstract type PlasticityParameter end
-
 abstract type LTPVariables <: PlasticityVariables end
 abstract type LTPParameter <: PlasticityParameter end
 abstract type STPVariables <: PlasticityVariables end
@@ -17,7 +15,6 @@ end
 
 struct LTP <: LTPParameter end
 struct STP <: STPParameter end
-
 
 plasticityvariables(param::NoLTP, Npre, Npost) = NoVariables()
 plasticityvariables(param::NoSTP, Npre, Npost) = NoVariables()
@@ -39,7 +36,6 @@ end
 function set_plasticity!(c::AbstractSparseSynapse, param::STPParameter, state::Bool)
     c.STPVars.active .= state
 end
-
 
 function plasticity!(
     c::AbstractSparseSynapse,
