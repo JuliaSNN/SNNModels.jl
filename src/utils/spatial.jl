@@ -9,7 +9,8 @@ using SpecialFunctions
 Create a 2D spatial structure and dispose N points for each population.
 
 # Arguments
-- `config::NamedTuple`: A NamedTuple containing configuration parameters, including `projections` and `Npop`.
+- `Npop::NamedTuple`: A named tuple containing the number of neurons for each population.
+- `grid_size::Vector{Float64}`: A vector specifying the size of the grid in each dimension.
 
 # Returns
 - `Pops::NamedTuple`: A named tuple containing the spatial points for each population.
@@ -18,7 +19,7 @@ function place_populations(Npop, grid_size)
     Pops = Dict{Symbol,Vector}()
     for k in keys(Npop)
         !(typeof(Npop[k]) == Int64) && continue
-        points = [rand(length(grid_size)) .* grid_size for _ = 1:Npop[k]]
+        points = [rand(Float32, length(grid_size)) .* grid_size for _ = 1:Npop[k]]
         Pops[k] = points
     end
     return Pops |> dict2ntuple
@@ -37,18 +38,18 @@ Calculate the periodic distance between two points in a 2D grid.
 # Returns
 - `distance::Float64`: The periodic distance between the two points.
 """
-function periodic_distance(point1, point2, grid_size)
-    isa(grid_size, Vector) &&
-        @assert length(grid_size) == length(point1) "grid_size must match the dimension of points: $(point1), $(length(grid_size))"
-    typeof(grid_size) <: Real && (grid_size = repeat([grid_size], length(point1)))
-    @assert length(point1) == length(point2) "point1 and point2 must have the same dimension"
-    return sqrt(
-        sum(
+function periodic_distance(point1::Float32, point2::Float32, grid_size::Float32)
+        abs(min(abs(point1 - point2), grid_size - abs(point1 - point2)))
+end
+function periodic_distance(point1::Vector{Float32}, point2::Vector{Float32}, grid_size::Vector{T}) where T<:Real
+    return sqrt( sum(
             map(eachindex(point1)) do n
                 min(abs(point1[n] - point2[n]), grid_size[n] - abs(point1[n] - point2[n]))
-            end,
-        ) .^ 2,
-    )
+                end,
+            ) .^ 2,)
+end
+function periodic_distance(point1::Vector{Float32}, point2::Vector{Float32}, grid_size::T) where T<:Real
+    return sqrt( sum([periodic_distance(point1[n], point2[n], grid_size)^2 for n in eachindex(point1)]) )
 end
 
 """
@@ -92,6 +93,35 @@ function neurons_outside_area(points, center, distance, grid_size)
     ]
 end
 
+
+"""
+    gaussian_weight(pre, post; σx, σy, grid_size)
+Compute the Gaussian weight between pre- and post-synaptic neurons based on their spatial coordinates.
+# Arguments
+- `pre::Vector{Float32}`: The coordinates of the pre-synaptic neuron.
+- `post::Vector{Float32}`: The coordinates of the post-synaptic neuron.
+- `σx::Float32`: The standard deviation of the Gaussian in the x-direction.
+- `σy::Float32`: The standard deviation of the Gaussian in the y-direction.
+- `grid_size::Vector{Float32}`: The size of the grid.
+
+# Returns
+- `weight::Float32`: The Gaussian weight between the pre- and post-synaptic neurons.
+""" 
+function gaussian_weight(
+    pre::Vector{Float32},
+    post::Vector{Float32} = [0.0f0, 0.0f0];
+    σx::Float32,
+    σy::Float32,
+    grid_size::Vector{Float32},
+)
+    begin
+        x = periodic_distance(post[1], pre[1], grid_size[1])
+        y = periodic_distance(post[2], pre[2], grid_size[2])
+        return exp64(-(x/σx)^2 - (y/σy)^2)
+    end
+end
+
+
 """
     compute_long_short_connections(pre::Symbol, post::Symbol, points; dc, pl, ϵ, grid_size, conn)
 
@@ -120,8 +150,9 @@ function compute_connections(pre::Symbol, post::Symbol, points; conn, spatial)
     post_points = getfield(points, post)
     N_pre = length(getfield(points, pre))
     N_post = length(getfield(points, post))
-    P = falses(N_post, N_pre)
+    L = falses(N_post, N_pre)
     W = zeros(Float32, N_post, N_pre)
+    P = zeros(Float32, N_post, N_pre)
 
     if spatial.type == :critical_distance
         @unpack dc, ϵ, grid_size, p_long = spatial
@@ -137,65 +168,59 @@ function compute_connections(pre::Symbol, post::Symbol, points; conn, spatial)
                 distance = periodic_distance(post_points[i], pre_points[j], grid_size)
                 if distance < dc
                     if rand() <= p_short
-                        P[i, j] = true
+                        L[i, j] = true
                         W[i, j] = conn.μ
                     end
                 else
                     if rand() <= p_long
-                        P[i, j] = true
+                        L[i, j] = true
                         W[i, j] = conn.μ
                     end
                 end
             end
         end
-        return P, W
+        return L, W, P
     end
     if spatial.type == :gaussian
-        function gaussian_weight(
-            pre,
-            post = [0.0f0, 0.0f0];
-            σx::Float32,
-            σy::Float32,
-            grid_size::Vector{Float32},
-        )
-            # @fastmath @inbounds 
-            begin
-                x = periodic_distance(post[1], pre[1], grid_size[1])
-                y = periodic_distance(post[2], pre[2], grid_size[2])
-                return exp64(-(x/σx)^2 - (y/σy)^2)
-            end
-        end
+
         @unpack σs, grid_size, ϵ = spatial
         X, Y = grid_size
-        x = range(-X/2, stop = X/2, length = 200) |> collect
-        y = range(-Y/2, stop = Y/2, length = 200) |> collect
+        xs = range(-X/2, stop = X/2, length = 200) |> collect |> z->Float32.(z)
+        ys = range(-Y/2, stop = Y/2, length = 200) |> collect |> z->Float32.(z)
         σx, σy = Float32.(getfield(σs, pre))
-        γ = 1/mean(map(Iterators.product(x, y)) do point
-            gaussian_weight(point; σx, σy, grid_size)
-        end)
+        γ = 1/mean(
+            [gaussian_weight([_x, _y]; σx, σy, grid_size) for _x in xs for _y in ys]
+        )
         p = Float32(conn.p * ϵ * γ)
         randcache = rand(N_post, N_pre)
         for j = 1:N_pre
             for i = 1:N_post
-                pre == post && i == j && continue
-                p == 0 && continue
-                randcache[i, j] > p && continue
-                if randcache[i, j] <=
-                   p * gaussian_weight(
+                if i == j
+                    P[i, j] = 0.0f0
+                    L[i, j] = false
+                    W[i, j] = 0.0f0
+                    continue
+                end
+                p0 = gaussian_weight(
                     pre_points[j],
                     post_points[i];
                     σx = σx,
                     σy = σy,
                     grid_size,
                 )
-                    P[i, j] = true
+                P[i, j] = p0 * p
+                pre == post && i == j && continue
+                p == 0 && continue
+                randcache[i, j] > p && continue
+                if randcache[i, j] <= p *  p0
+                    L[i, j] = true
                     W[i, j] = conn.μ
                 end
             end
         end
         # @info "$pre => $post average conn weight: $(mean(W))"
         # @info "$pre => $post average conn probability: $(mean(P))"
-        return P, W
+        return L, W, P
     end
 end
 
@@ -274,7 +299,7 @@ spatial_avg, x_range, y_range = spatial_activity(points, activity; N, L, grid_si
 function spatial_activity(points, activity; N, L, grid_size = (x = [0, 0.1], y = [0, 0.1]))
     xs, ys = points
     _, num_values = size(activity)
-
+    
     time_indices = Vector{}()
     if isa(N, Number)
         for t = 1:(num_values÷N)
@@ -294,10 +319,10 @@ function spatial_activity(points, activity; N, L, grid_size = (x = [0, 0.1], y =
     y_range = ceil(Int, diff(collect(y))[1] / L)
 
     spatial_avg = Array{Any,3}(undef, x_range, y_range, length(time_indices))
+    @show size(spatial_avg)
     spatial_avg[:].=0
     for t in eachindex(time_indices)
         interval = time_indices[t]
-
         for j = 1:x_range
             for k = 1:y_range
                 # Find points within the current grid cell
