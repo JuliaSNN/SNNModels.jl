@@ -28,12 +28,12 @@ end
 
 
 function matrix(c::C, W::AbstractArray, time::Number) where {C<:AbstractConnection}
-    return sparse(c.I, c.J, W[:, time], length(c.rowptr) - 1, length(c.colptr) - 1)
+    return sparse(c.I, c.J, W(axes(W,1), time), length(c.rowptr) - 1, length(c.colptr) - 1)
 end
 
 function matrix(c::C, W::AbstractArray, time::AbstractVector) where {C<:AbstractConnection}
     return [
-        sparse(c.I, c.J, W[:, t], length(c.rowptr) - 1, length(c.colptr) - 1) for t in time
+        sparse(c.I, c.J, W(axes(W,1), t), length(c.rowptr) - 1, length(c.colptr) - 1) for t in time
     ] |> x -> cat(x..., dims = 3)
 end
 
@@ -266,64 +266,6 @@ function update_sparse_matrix!(c::S) where {S<:AbstractConnection}
     c.rowptr = rowptr
     return nothing
 end
-
-
-
-"""
-    synaptic_turnover!(C::SpikingSynapse; p_rewire=0.05, p_pre = x->rand(), p_new = x->rand(), μ = 3.0)
-
-Perform synaptic turnover on a spiking synapse connection matrix.
-
-# Arguments
-- `C::SpikingSynapse`: The spiking synapse connection to modify
-- `p_rewire::Float64=0.05`: Probability threshold for rewiring existing connections
-- `p_pre::Function=x->rand()`: Function that returns probability for each presynaptic connection `s` to be rewired 
-- `p_new::Function=x->rand()`: Function that returns probability for selecting new postsynaptic neurons
-- `μ::Float64=3.0`: Weight value for new connections
-
-# Description
-This function implements synaptic turnover by:
-1. Generating thresholds for selecting connections to rewire. 
-2. Identifying plausible new connections for each presynaptic neuron
-3. Selecting connections to rewire based on the probability thresholds
-4. Replacing the selected connections with new ones
-5. Updating the sparse matrix structure
-
-The function modifies the connection matrix in-place and updates its sparse matrix representation.
-"""
-function synaptic_turnover!(
-    C::S;
-    p_rewire = x->rand() .< 0.05,
-    p_new = x->rand(),
-    μ = 3.0,
-) where {S<:AbstractConnection}
-    pre_tt = rand(Uniform(0, 1), length(C.fireJ))
-    post_tt = rand(Uniform(0, 1), length(C.fireI))
-    all_post = Set(1:length(C.fireI))
-    new_connections = map(postsynaptic(C)) do pre
-        plausible = setdiff(all_post, pre) |> collect
-        plausible[sortperm(p_new.(plausible))]
-    end
-
-    rep_connections = Int[]
-    rep_neurons = Int[]
-    pre_tt .* post_tt
-    @unpack rowptr, colptr, I, J, index, W, fireJ = C
-    for j in eachindex(fireJ)
-        for s in postsynaptic_idxs(C, j)
-            !p_rewire(s) && continue
-            push!(rep_connections, s)
-            push!(rep_neurons, pop!(new_connections[j]))
-        end
-    end
-    for (s, new_post) in zip(rep_connections, rep_neurons)
-        C.I[s] = new_post
-        C.W[s] = μ
-    end
-    update_sparse_matrix!(C)
-end
-
-
 
 
 function dsparse(A)
