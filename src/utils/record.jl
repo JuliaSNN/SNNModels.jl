@@ -319,6 +319,7 @@ function monitor!(
                 end
             else
                 @warn "Field $variables not found in $(nameof(typeof(obj)))"
+                continue
             end
         end
         @debug "Monitoring :$(key) in $(obj.name)"

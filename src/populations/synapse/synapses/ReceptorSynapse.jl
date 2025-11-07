@@ -116,9 +116,6 @@ end
     @unpack glu_receptors, gaba_receptors = synapse
     @unpack N, g, h = synvars
     @unpack glu, gaba = receptors
-    for name in keys(receptors)
-        fill!(getfield(receptors, name), 0.0f0)
-    end
     @inbounds for n in glu_receptors
         @unpack τr⁻, τd⁻, α = synapse.syn[n]
         @turbo for i ∈ 1:N
@@ -147,10 +144,8 @@ end
     dt::Float32,
 ) where {P<:AbstractPopulation, RECT<:NamedTuple}
     for name in keys(synapse.receptors)
-        ids = synapse.receptors[name]
-        target::Vector{Float32} = getfield(receptors, name)
-        @inbounds for n in ids
-            update_receptor!(synvars, synapse.syn[n], target, n,  dt)
+        @inbounds for n in synapse.receptors[name]
+            update_receptor!(synvars, synapse.syn[n], getfield(receptors, name), n,  dt)
         end
     end
     for name in keys(receptors)
