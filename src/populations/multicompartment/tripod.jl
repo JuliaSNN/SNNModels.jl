@@ -87,7 +87,8 @@ Tripod
     SYNDV<:AbstractSynapseVariable,
     SOMAT<:AbstractGeneralizedIFParameter,
     PST<:AbstractSpikeParameter,
-    RECT<:NamedTuple,
+    RECTS<:NamedTuple,
+    RECTD<:NamedTuple,
     IT = Int32,
 } <: AbstractDendriteIF
     id::String = randstring(12)
@@ -115,9 +116,9 @@ Tripod
     synvars_d1::SYNDV = synaptic_variables(dend_syn, N)
     synvars_d2::SYNDV = synaptic_variables(dend_syn, N)
 
-    receptors_s::RECT = synaptic_receptors(soma_syn, N)
-    receptors_d1::RECT = synaptic_receptors(dend_syn, N)
-    receptors_d2::RECT = synaptic_receptors(dend_syn, N)
+    receptors_s::RECTS = synaptic_receptors(soma_syn, N)
+    receptors_d1::RECTD = synaptic_receptors(dend_syn, N)
+    receptors_d2::RECTD = synaptic_receptors(dend_syn, N)
 
     # Spike model and threshold
     fire::VBT = zeros(Bool, N)
@@ -131,18 +132,6 @@ Tripod
     is::MFT = zeros(N, 3)
     ic::VFT = zeros(2)
 end
-
-
-
-# function Population(param <:T; N::Int=100, name::String="TripodNeuron", kwargs...) where T<:TripodParameter
-#     return Tripod(;
-#         N = N,
-#         param = param,
-#         name = name,
-#         kwargs...,
-#     )
-
-# end
 
 function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     @unpack N, v_s, w_s, v_d1, v_d2 = p
