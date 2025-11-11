@@ -118,6 +118,90 @@ function is_unimodal(kernel, ratio)
     end
 end
 
+function tile_interval(spiketrainA, Δt, interval)
+    width = 0
+    for n in eachindex(spiketrainA)
+        n == 1 && continue
+        if spiketrainA[n] - spiketrainA[n-1] < 2Δt
+            width += spiketrainA[n] - spiketrainA[n-1]
+        else
+            width += 2Δt
+        end
+
+    end
+    width = width + 2Δt
+    width / (interval[end] - interval[1] +2Δt)
+end
+"""
+    STTC(spiketrain1::Vector{Float32}, spiketrain2::Vector{Float32}, Δt::Float32)
+Calculate the Spike Time Tiling Coefficient (STTC) between two spike trains.
+# Arguments
+- `spiketrain1`: A vector of spike times for the first neuron.
+- `spiketrain2`: A vector of spike times for the second neuron.
+- `Δt`: The time window for considering spikes as coincident.
+# Returns
+- `sttc_value`: The calculated STTC value.
+"""
+##
+function STTC(spiketrainA, spiketrainB, Δt, interval, dt=0.125  )
+    # Implementation of the Spike Time Tiling Coefficient (STTC)
+    # Placeholder for actual implementation
+    # A_intervals = [(t - Δt : dt: t + Δt) for t in spiketrainA] |> x -> vcat(x...) |> Set
+    # B_intervals = [(t - Δt : dt: t + Δt) for t in spiketrainB] |> x -> vcat(x...) |> Set
+    # full_int = Set(interval[1]: dt:interval[end])
+    # TA = 1- length(setdiff(A_intervals, full_int))/length(full_int)
+    # TB = 1- length(setdiff(B_intervals, full_int))/length(full_int)
+    TA = tile_interval(spiketrainA, Δt, interval)
+    TB = tile_interval(spiketrainB, Δt, interval)
+    # PA = length(spiketrainA ∩ B_intervals) / length(spiketrainA)
+    # PB = length(spiketrainB ∩ A_intervals) / length(spiketrainB)
+    # return B_intervals, spiketrainA
+    # PA = length(findall(x -> x in B_intervals, spiketrainA)) / length(spiketrainA)
+    # PB = length(findall(x -> x in A_intervals, spiketrainB)) / length(spiketrainB)
+    # PB = sum([any(abs.(spiketrainA .- t) .<= Δt) for t in spiketrainB]) / length(spiketrainB)
+    # TA = length(spiketrainA)*2Δt / (interval[end] - interval[1])
+    # TB = length(spiketrainB)*2Δt / (interval[end] - interval[1])
+    PA = sum([any(abs.(spiketrainB .- t) .<= Δt) for t in spiketrainA]) / length(spiketrainA)
+    PB = sum([any(abs.(spiketrainA .- t) .<= Δt) for t in spiketrainB]) / length(spiketrainB)
+    sttc_value = 0.5 * ( (PA - TB) / (1 - PA*TB) + (PB - TA) / (1 - PB*TA) )
+    # @show TA, TB, PA, PB, sttc_value
+    return sttc_value
+end
+
+"""
+    STTC(spiketrains::Vector{Vector{Float32}}, Δt::Float32, interval::AbstractVector=nothing)
+Calculate the Spike Time Tiling Coefficient (STTC) matrix for a set of spike trains.
+# Arguments
+- `spiketrains`: A vector of vectors containing the spike times of each neuron.
+- `Δt`: The time window for considering spikes as coincident.
+- `interval`: The time interval over which to compute the STTC. If not provided, it will be inferred from the first and last events in the spike trains.
+# Returns
+- `sttc_matrix`: A matrix containing the STTC values between all pairs of spike trains.
+"""
+function STTC(spiketrains::Vector{Vector{Float32}}, Δt, interval=nothing)
+    n = length(spiketrains)
+    sttc_matrix = zeros(Float32, n, n)
+    if isnothing(interval) 
+        ss = vcat(spiketrains...)
+        interval = (-Δt + minimum(ss):maximum(ss)+Δt)
+    end 
+    @inbounds @simd for i in 1:n
+        @fastmath for j in i+1:n
+            if i==j
+                sttc_value = 1
+            elseif length(spiketrains[i]) == 0 || length(spiketrains[j]) == 0
+                sttc_value = 0
+            else
+                sttc_value = STTC(spiketrains[i], spiketrains[j], Δt, interval)
+            end
+            sttc_matrix[i, j] = sttc_value
+            sttc_matrix[j, i] = sttc_value
+        end
+    end
+    return sttc_matrix
+end
+
+
 
 export is_unimodal,
     get_maxima, gaussian_kernel_estimate, gaussian_kernel, asynchronous_state
@@ -221,7 +305,7 @@ end
 
 
 
-export gaussian_kernel_estimate, gaussian_kernel, asynchronous_state, is_attractor_state
+export gaussian_kernel_estimate, gaussian_kernel, asynchronous_state, is_attractor_state, STTC
 
 
 
