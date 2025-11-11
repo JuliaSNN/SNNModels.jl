@@ -118,20 +118,7 @@ function is_unimodal(kernel, ratio)
     end
 end
 
-function tile_interval(spiketrainA, Δt, interval)
-    width = 0
-    for n in eachindex(spiketrainA)
-        n == 1 && continue
-        if spiketrainA[n] - spiketrainA[n-1] < 2Δt
-            width += spiketrainA[n] - spiketrainA[n-1]
-        else
-            width += 2Δt
-        end
 
-    end
-    width = width + 2Δt
-    width / (interval[end] - interval[1] +2Δt)
-end
 """
     STTC(spiketrain1::Vector{Float32}, spiketrain2::Vector{Float32}, Δt::Float32)
 Calculate the Spike Time Tiling Coefficient (STTC) between two spike trains.
@@ -143,29 +130,32 @@ Calculate the Spike Time Tiling Coefficient (STTC) between two spike trains.
 - `sttc_value`: The calculated STTC value.
 """
 ##
-function STTC(spiketrainA, spiketrainB, Δt, interval, dt=0.125  )
+function STTC(spiketrainA, spiketrainB, Δt, interval)
     # Implementation of the Spike Time Tiling Coefficient (STTC)
-    # Placeholder for actual implementation
-    # A_intervals = [(t - Δt : dt: t + Δt) for t in spiketrainA] |> x -> vcat(x...) |> Set
-    # B_intervals = [(t - Δt : dt: t + Δt) for t in spiketrainB] |> x -> vcat(x...) |> Set
-    # full_int = Set(interval[1]: dt:interval[end])
-    # TA = 1- length(setdiff(A_intervals, full_int))/length(full_int)
-    # TB = 1- length(setdiff(B_intervals, full_int))/length(full_int)
     TA = tile_interval(spiketrainA, Δt, interval)
     TB = tile_interval(spiketrainB, Δt, interval)
-    # PA = length(spiketrainA ∩ B_intervals) / length(spiketrainA)
-    # PB = length(spiketrainB ∩ A_intervals) / length(spiketrainB)
-    # return B_intervals, spiketrainA
-    # PA = length(findall(x -> x in B_intervals, spiketrainA)) / length(spiketrainA)
-    # PB = length(findall(x -> x in A_intervals, spiketrainB)) / length(spiketrainB)
-    # PB = sum([any(abs.(spiketrainA .- t) .<= Δt) for t in spiketrainB]) / length(spiketrainB)
-    # TA = length(spiketrainA)*2Δt / (interval[end] - interval[1])
-    # TB = length(spiketrainB)*2Δt / (interval[end] - interval[1])
     PA = sum([any(abs.(spiketrainB .- t) .<= Δt) for t in spiketrainA]) / length(spiketrainA)
     PB = sum([any(abs.(spiketrainA .- t) .<= Δt) for t in spiketrainB]) / length(spiketrainB)
     sttc_value = 0.5 * ( (PA - TB) / (1 - PA*TB) + (PB - TA) / (1 - PB*TA) )
-    # @show TA, TB, PA, PB, sttc_value
     return sttc_value
+end
+
+function tile_interval(spiketrainA, Δt, interval)
+    width = Δt
+    sort!(spiketrainA)
+    for n in eachindex(spiketrainA)
+        n == 1 && continue
+        spiketrainA[n] < interval[1] && continue
+        spiketrainA[n] > interval[end] && continue
+
+        if spiketrainA[n] - spiketrainA[n-1] < 2Δt
+            width += spiketrainA[n] - spiketrainA[n-1]
+        else
+            width += 2Δt
+        end
+    end
+    width = width + Δt
+    width / (interval[end] - interval[1] +2Δt)
 end
 
 """
@@ -185,8 +175,8 @@ function STTC(spiketrains::Vector{Vector{Float32}}, Δt, interval=nothing)
         ss = vcat(spiketrains...)
         interval = (-Δt + minimum(ss):maximum(ss)+Δt)
     end 
-    @inbounds @simd for i in 1:n
-        @fastmath for j in i+1:n
+    for i in ProgressBar(1:n)
+    @inbounds @fastmath @simd for j in i+1:n
             if i==j
                 sttc_value = 1
             elseif length(spiketrains[i]) == 0 || length(spiketrains[j]) == 0
@@ -200,6 +190,13 @@ function STTC(spiketrains::Vector{Vector{Float32}}, Δt, interval=nothing)
     end
     return sttc_matrix
 end
+
+function STTC(pop::T; ΔT, interval) where T <: AbstractPopulation
+    STTC(spiketimes(pop), ΔT, interval)
+end
+
+STTC(pop::T, ΔT::R, interval::V) where {T<:AbstractPopulation, R<: Real, V<:AbstractVector } = STTC(pop; ΔT, interval)
+
 
 
 
@@ -305,7 +302,7 @@ end
 
 
 
-export gaussian_kernel_estimate, gaussian_kernel, asynchronous_state, is_attractor_state, STTC
+export gaussian_kernel_estimate, gaussian_kernel, asynchronous_state, is_attractor_state, STTC, tile_interval
 
 
 
