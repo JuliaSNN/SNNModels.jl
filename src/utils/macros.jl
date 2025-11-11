@@ -315,7 +315,7 @@ function update_with_merge(
         nt = (; [(f => getfield(base_config, f)) for f in fieldnames(typeof(base_config))]...)
         updated_nt = update_with_merge(nt, path, value, full_path)
         # Convert back to struct
-        return typeof(base_config)(; updated_nt...)
+        return typeof(base_config).name.wrapper(; updated_nt...)
     else
         # error("Cannot update field in type $(typeof(base_config)) at path $(join(full_path,"."))")
         throw(TypeError(path[1], "path $(join(full_path,"."))", NamedTuple, typeof(value)))
