@@ -39,17 +39,15 @@ end
     @test config2.c.s == 30
 
     # Test case 3: Deep nested struct update
-    struct_config3 = TestStruct(10, AnotherStruct(5, 6))
+    struct_config3 = TestStruct(10, AdExParameter())
     config3 = (a = 10, b = 2, c = struct_config3)
     @update! config3 begin
-        c.s.x = 100
-        c.s.y = 200
+        c.s.Vr = 200
     end
     @test config3.a == 10
     @test config3.b == 2
     @test config3.c.z == 10
-    @test config3.c.s.x == 100
-    @test config3.c.s.y == 200
+    @test config3.c.s.Vr == 200
 
     # Test case 4: Mixed named tuple and struct update
     struct_config4 = TestStruct(10, AnotherStruct(5, 6))
