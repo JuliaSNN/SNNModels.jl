@@ -26,8 +26,8 @@ TripodSomaReceptors = Receptors(DuarteGluSoma, MilesGabaSoma)
 TripodDendReceptors = Receptors(EyalGluDend, MilesGabaDend)
 
 TripodSomaSynapse = ReceptorSynapse(
-    glu_receptors = [1, 2],
-    gaba_receptors = [3, 4],
+    glu_receptors = [1],
+    gaba_receptors = [2],
     syn = TripodSomaReceptors,
     NMDA = EyalNMDA,
 )

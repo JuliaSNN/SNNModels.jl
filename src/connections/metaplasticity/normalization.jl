@@ -1,7 +1,7 @@
 """
     Abstract type for normalization parameters.
 """
-abstract type NormParam end
+abstract type NormParam <: MetaPlasticityParameter end
 
 """
     MultiplicativeNorm{FT = Int32} <: NormParam

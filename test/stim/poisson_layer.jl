@@ -7,10 +7,9 @@ using Test
 
     # Test PoissonLayer constructor with default parameters
     @testset "PoissonLayer with default parameters" begin
-        param = PoissonLayer()
-        @test param.rate ≈ 1.0f0
+        param = PoissonLayer(rate=10Hz)
+        @test param.rate ≈ 10Hz
         @test param.N == 1
-        @test param.rates ≈ [1.0f0]
         @test param.active == [true]
     end
 
@@ -19,7 +18,6 @@ using Test
         param = PoissonLayer(; rate = 2.0f0, N = 10, active = [false])
         @test param.rate ≈ 2.0f0
         @test param.N == 10
-        @test param.rates ≈ fill(2.0f0, 10)
         @test param.active == [false]
     end
 
@@ -28,7 +26,6 @@ using Test
         param = PoissonLayer(2.0f0; N = 10)
         @test param.rate ≈ 2.0f0
         @test param.N == 10
-        @test param.rates ≈ fill(2.0f0, 10)
     end
 
     # Test Stimulus constructor with PoissonLayer

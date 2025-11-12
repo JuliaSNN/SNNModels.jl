@@ -1,3 +1,19 @@
+"""
+    AbstractPopulationParameter <: AbstractParameter
+"""
+abstract type AbstractPopulationParameter <: AbstractParameter end
+
+"""
+    AbstractPopulation
+
+An abstract type representing a population. Any struct inheriting from this type must implement:
+
+# Methods
+- `integrate!(p::NeuronModel, param::NeuronModelParam, dt::Float32)`: Integrates the neuron model over a time step `dt` using the given parameters.
+- `plasticity!(p::NeuronModel, param::NeuronModelParam, dt::Float32, T::Time)`: Updates the neuron model parameters based on plasticity rules.
+"""
+abstract type AbstractPopulation <: AbstractComponent end
+
 integrate!(p::AbstractPopulation, param::AbstractPopulationParameter, dt::Float32) = nothing
 plasticity!(
     p::AbstractPopulation,

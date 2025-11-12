@@ -63,8 +63,7 @@ The AdEx model implements the adaptive exponential integrate-and-fire neuron mod
 
 ## Synapses
 - `synvars::SYNV`: Synaptic variables for the synapse model
-- `glu::VFT`: Glutamate receptor target
-- `gaba::VFT`: GABA receptor target
+- `receptors<:NamedTuple`: Synaptic receptors triggered by spike events
 
 """
 AdEx

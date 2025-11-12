@@ -1,3 +1,4 @@
+abstract type PoissonLayerParameter <: AbstractStimulusParameter end
 
 """
     PoissonLayer
@@ -13,17 +14,26 @@
 """
 PoissonLayer
 
-@snn_kw struct PoissonLayer{FT = Float32,VFT = Vector{Float32}} <: AbstractStimulusParameter
-    rate::FT = 1.0f0  # Default rate in Hz
+@snn_kw struct PoissonLayer{FT = Float32} <: PoissonLayerParameter
+    rate::FT  # Default rate in Hz
     N::Int32 = 1
-    rates::VFT = fill(Float32.(rate), N)
+    active::VBT = [true]
+end
+
+@snn_kw struct PoissonLayerHet{VFT = Vector{Float32}} <: PoissonLayerParameter
+    N::Int32 = 1
+    rates::VFT 
     active::VBT = [true]
 end
 
 function PoissonLayer(rate::R; kwargs...) where {R<:Real}
     N = kwargs[:N]
-    rates = fill(Float32.(rate), N)
-    return PoissonLayer(; N = N, rate = rate, rates = rates)
+    return PoissonLayer(; N = N, rate = rate)
+end
+
+function PoissonLayerHet(rate::R; kwargs...) where {R<:Real}
+    N = kwargs[:N]
+    return PoissonLayerHet(; N = N, rates = fill(rate, N))
 end
 
 """
@@ -52,11 +62,11 @@ This layer implements a Poisson stimulus where each neuron fires independently w
 and the connectivity is defined by sparse matrix representations.
 """
 PoissonStimulusLayer
-@snn_kw struct PoissonStimulusLayer{VFT = Vector{Float32}} <: AbstractStimulus
+@snn_kw struct PoissonStimulusLayer{VFT = Vector{Float32}, PT <: PoissonLayerParameter} <: AbstractStimulus
     N::Int
     id::String = randstring(12)
     name::String = "Poisson"
-    param::PoissonLayer
+    param::PT = PoissonLayer(-1)
     ##
     g::VFT # target conductance for soma
     colptr::VIT
@@ -78,7 +88,7 @@ function PoissonStimulusLayer(
     sym::Symbol,
     comp = nothing;
     conn::Connectivity,
-    param::PoissonLayer,
+    param :: PoissonLayerParameter,
     name::String = "Poisson",
 ) where {T<:AbstractPopulation}
     # @warn "PoissonStimulusLayer is deprecated. Please use Stimulus(param, post, sym, comp; conn) instead."
@@ -100,7 +110,7 @@ function PoissonStimulusLayer(
 end
 
 function Stimulus(
-    param::PoissonLayer,
+    param :: PoissonLayerParameter,
     post::T,
     sym::Symbol,
     comp = nothing;
@@ -138,6 +148,22 @@ Generate a Poisson stimulus for a postsynaptic population.
 """
 
 function stimulate!(p::PoissonStimulusLayer, param::PoissonLayer, time::Time, dt::Float32)
+    @unpack N, randcache, fire, colptr, W, I, g = p
+    @unpack rate = param
+    rand!(randcache)
+    @inbounds @simd for j = 1:N
+        if randcache[j] < rate * dt
+            fire[j] = true
+            @fastmath @simd for s ∈ colptr[j]:(colptr[j+1]-1)
+                g[I[s]] += W[s]
+            end
+        else
+            fire[j] = false
+        end
+    end
+end
+
+function stimulate!(p::PoissonStimulusLayer, param::PoissonLayerHet, time::Time, dt::Float32)
     @unpack N, randcache, fire, colptr, W, I, g = p
     @unpack rates = param
     rand!(randcache)

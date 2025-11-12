@@ -319,6 +319,7 @@ function monitor!(
                 end
             else
                 @warn "Field $variables not found in $(nameof(typeof(obj)))"
+                continue
             end
         end
         @debug "Monitoring :$(key) in $(obj.name)"
@@ -373,7 +374,6 @@ function interpolated_record(p, sym)
     _start = p.records[:start_time][sym]
     _end = p.records[:end_time][sym]
     # ! this is the recorded time (in ms), it assumes all recordings are contained in v_dt
-    r_v = _start:(1/sr):(_end)
 
     # Set NoInterp in the singleton dimensions:
     interp = get_interpolator(v_dt)
@@ -382,8 +382,17 @@ function interpolated_record(p, sym)
     ax = map(1:(length(size(v_dt))-1)) do i
         axes(v_dt, i)
     end
+    
+    r_v = range(_start,_end, size(v_dt, ndims(v_dt)))
     y = scale(v, ax..., r_v)
     return y, r_v
+    # try
+    #     r_v = (_start):(1/sr):(_end)
+    # catch e
+    #     r_v = (_start):(1/sr):(_end+1/sr)
+    #     y = scale(v, ax..., r_v)
+    #     return y, r_v
+    # end
 end
 
 function add_endtime!(model::NamedTuple)
@@ -476,6 +485,7 @@ v, r = record(p, :fire; range = true, interval = (0.0, 1.0))
 
 # Record spike times for a population p
 spikes = record(p, :spiketimes)
+```
 """
 function record(
     p,

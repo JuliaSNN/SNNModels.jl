@@ -27,7 +27,7 @@ function integrate!(p::Poisson, param::PoissonParameter, dt::Float32)
     end
 end
 
-@snn_kw struct VariablePoissonParameter <: AbstractStimulusParameter
+@snn_kw struct VariablePoissonParameter <: AbstractPopulationParameter
     β::Float32 = 0.0
     τ::Float32 = 50.0ms
     r0::Float32 = 1kHz

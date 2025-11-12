@@ -12,15 +12,15 @@ Generate a graph representation of the model.
 A `MetaGraphs.MetaDiGraph` object representing the graph.
 
 ## Details
-- Each vertex represents either a population ('pop'), a normalization synapse ('norm'), or a stimulus pre-target ('pre'). 
+- Each vertex represents either a population ('pop'), a normalization synapse ('meta'), or a stimulus pre-target ('pre'). 
   Its metadata includes:
-    - `name`: Actual name of the population, 'norm' for a SynapseNormalization, or the pre-target's name for a stimulus.
+    - `name`: Actual name of the population, 'meta' for a SynapseNormalization, or the pre-target's name for a stimulus.
     - `id`: Identifier of the population, SynapseNormalization, or stimulus.
     - `key`: Key from the original 'pop', 'syn', or 'stim' dictionary in the model.
 
 - Each edge represents a synaptic connection or a stimulus. 
   Its metadata includes:
-    - `type`: Type of the edge, ':fire_to_g' for SpikingSynapse, ':norm' for SynapseNormalization, or ':stim' for a stimulus.
+    - `type`: Type of the edge, ':fire_to_g' for SpikingSynapse, ':meta' for SynapseNormalization, or ':stim' for a stimulus.
     - `name`: Name of the edge, formatted as "from_vertex_name to to_vertex_name".
     - `key`: Key from the original 'syn' or 'stim' dictionary in the model.
     - `id`: Identifier of the synapse or stimulus.    
@@ -44,16 +44,18 @@ Throws ArgumentError when the synapse type is neither SpikingSynapse nor Synapse
 function graph(model)
     graph = MetaGraphs.MetaDiGraph()
     @unpack pop, syn, stim = model
-    norms = Dict()
+    meta_plast = Dict()
     for (k, pop) in pairs(pop)
         name = pop.name
         id = pop.id
         add_vertex!(graph, Dict(:name => name, :id => id, :key => k))
     end
     for (k, syn) in pairs(syn)
-        if typeof(syn) <: AbstractNormalization
-            push!(norms, k => syn)
+        if typeof(syn) <: AbstractMetaPlasticity
+            @show "meta" * syn.name
+            push!(meta_plast, k => syn)
         elseif haskey(syn.targets, :type)
+            @show "syn" * syn.name
             pre_id = syn.targets[:fire]
             post_id = syn.targets[:post]
             type = syn.targets[:type]
@@ -70,11 +72,12 @@ function graph(model)
         type = :fire_to_g
         add_connection!(graph, pre_id, post_id, k, stim, type)
     end
-    for (k, v) in norms
-        for id in v.targets[:synapses]
+    for (k, v) in meta_plast
+        ids = v.targets[:synapses] isa Vector ? v.targets[:synapses] : [v.targets[:synapses]]
+        for id in ids
             _edges, _ids = filter_edge_props(graph, :id, id)
             for (e, i) in zip(_edges, _ids)
-                props(graph, e.src, e.dst)[:norm][i] = k
+                props(graph, e.src, e.dst)[:meta][i] = k
             end
         end
     end
@@ -101,7 +104,7 @@ function add_connection!(graph, pre_id, post_id, k, syn, type)
                 :pop => [syn_pop],
                 :key => [k],
                 :id => [id],
-                :norm => [:none],
+                :meta => [:none],
                 :target => [sym],
                 :count => [1],
                 :multi => 1,
@@ -116,7 +119,7 @@ function add_connection!(graph, pre_id, post_id, k, syn, type)
         push!(multi_dict[:type], type)
         push!(multi_dict[:key], k)
         push!(multi_dict[:id], id)
-        push!(multi_dict[:norm], :none)
+        push!(multi_dict[:meta], :none)
         push!(multi_dict[:target], sym)
         push!(multi_dict[:count], _multi)
         set_props!(graph, pre_node, post_node, multi_dict)

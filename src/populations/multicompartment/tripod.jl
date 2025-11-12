@@ -11,9 +11,8 @@
             IT = Int32,
 } <: AbstractDendriteIF
 
-A struct representing a tripod neuron model with two dendrites and a soma.
-The model incorporates adaptive exponential integrate-and-fire dynamics
-with synaptic inputs to both the soma and dendrites. The soma includes adaptation currents and dynamic thresholds for spike generation.
+A struct representing a tripod neuron model with two dendrites and a soma. The model incorporates adaptive exponential integrate-and-fire dynamics with synaptic inputs to both the soma and dendrites. The soma includes adaptation currents and dynamic thresholds for spike generation.
+
 The dendrites are modeled with separate passive compartments, and the soma integrates input currents from both dendrites. The current flows between the soma and dendrites are governed by axial conductances, defined in the dendrite parameters. The dendrites are computed based on passive membrane properties and geometrical properties, defined in the `DendNeuronParameter`.
 The model accepts any synaptic model for both soma and dendrites
 
@@ -43,19 +42,18 @@ The model leverages Heun integration for improved numerical stability.
 - `v_d2::VFT`: Second dendrite membrane potential (initialized randomly between `Vt` and `Vr`).
 - `I::VFT`: External current input to the soma (initialized to zeros).
 - `I_d::VFT`: External current input to the dendrites (initialized to zeros).
-- `synvars_s::SYNSV`: Synaptic variables for the soma (initialized using `synaptic_variables`).
-- `synvars_d1::SYNDV`: Synaptic variables for the first dendrite (initialized using `synaptic_variables`).
-- `synvars_d2::SYNDV`: Synaptic variables for the second dendrite (initialized using `synaptic_variables`).
-- `glu_d1::VFT`: Glutamate synaptic input to the first dendrite (initialized to zeros).
-- `gaba_d1::VFT`: GABA synaptic input to the first dendrite (initialized to zeros).
-- `glu_d2::VFT`: Glutamate synaptic input to the second dendrite (initialized to zeros).
-- `gaba_d2::VFT`: GABA synaptic input to the second dendrite (initialized to zeros).
-- `glu_s::VFT`: Glutamate synaptic input to the soma (initialized to zeros).
-- `gaba_s::VFT`: GABA synaptic input to the soma (initialized to zeros).
 - `fire::VBT`: Boolean array indicating which neurons have spiked (initialized to false).
 - `tabs::VFT`: Absolute refractory period counters (initialized to zeros).
 - `θ::VFT`: Dynamic threshold for spike generation (initialized to `Vt`).
 - `records::Dict`: Dictionary for storing simulation records (initialized empty).
+
+## Synapses
+- `synvars_s::SYNSV`: Synaptic variables for the soma (initialized using `synaptic_variables`).
+- `synvars_d1::SYNDV`: Synaptic variables for the first dendrite (initialized using `synaptic_variables`).
+- `synvars_d2::SYNDV`: Synaptic variables for the second dendrite (initialized using `synaptic_variables`).
+- `receptors_s::NamedTuple`: Synaptic receptors triggered by soma-targeting spike events (initialized using `synaptic_receptors`).
+- `receptors_d1::NamedTuple`: Synaptic receptors triggered by d1-targeting spike events (initialized using `synaptic_receptors`).
+- `receptors_d2::NamedTuple`: Synaptic receptors triggered by d2-targeting spike events (initialized using `synaptic_receptors`).
 
 ## Temporary Variables for Integration
 - `Δv::MFT`: Temporary matrix for voltage changes during integration (initialized to zeros).
@@ -89,7 +87,8 @@ Tripod
     SYNDV<:AbstractSynapseVariable,
     SOMAT<:AbstractGeneralizedIFParameter,
     PST<:AbstractSpikeParameter,
-    RECT<:NamedTuple,
+    RECTS<:NamedTuple,
+    RECTD<:NamedTuple,
     IT = Int32,
 } <: AbstractDendriteIF
     id::String = randstring(12)
@@ -117,9 +116,9 @@ Tripod
     synvars_d1::SYNDV = synaptic_variables(dend_syn, N)
     synvars_d2::SYNDV = synaptic_variables(dend_syn, N)
 
-    receptors_s::RECT = (glu = zeros(Float32, N), gaba = zeros(Float32, N)) #! target
-    receptors_d1::RECT = (glu = zeros(Float32, N), gaba = zeros(Float32, N)) #! target
-    receptors_d2::RECT = (glu = zeros(Float32, N), gaba = zeros(Float32, N)) #! target
+    receptors_s::RECTS = synaptic_receptors(soma_syn, N)
+    receptors_d1::RECTD = synaptic_receptors(dend_syn, N)
+    receptors_d2::RECTD = synaptic_receptors(dend_syn, N)
 
     # Spike model and threshold
     fire::VBT = zeros(Bool, N)
@@ -133,18 +132,6 @@ Tripod
     is::MFT = zeros(N, 3)
     ic::VFT = zeros(2)
 end
-
-
-
-# function Population(param <:T; N::Int=100, name::String="TripodNeuron", kwargs...) where T<:TripodParameter
-#     return Tripod(;
-#         N = N,
-#         param = param,
-#         name = name,
-#         kwargs...,
-#     )
-
-# end
 
 function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     @unpack N, v_s, w_s, v_d1, v_d2 = p

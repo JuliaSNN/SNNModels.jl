@@ -456,8 +456,6 @@ function bin_spiketimes(
     interval::AbstractRange,
     do_sparse = true,
 )
-    # interval =
-    #     isempty(interval) ? (0.0:bin_width:(maximum(spike_times)+max_lag)) : interval
     bin_width = step(interval)
     spike_train = zeros(length(interval))
     st = sort(spike_times) .- first(interval)

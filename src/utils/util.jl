@@ -143,16 +143,16 @@ function print_model(model, get_keys = false)
     end
     synapses = Vector{String}()
     for k in keys(syn)
-        typeof(syn[k]) <: AbstractNormalization && continue
+        typeof(syn[k]) <: AbstractMetaPlasticity && continue
         _edges, _ids = filter_edge_props(model_graph, :key, k)
         for (e, i) in zip(_edges, _ids)
             name = props(model_graph, e)[:name][i]
             syn_pop = props(model_graph, e)[:pop][i]
             _k = get_keys ? "($k)" : ""
-            norm =
-                props(model_graph, e)[:norm][i] !== :none ?
-                "($(props(model_graph, e)[:norm][i]))" : ""
-            # @info "$name $(_k) $norm: \n $(nameof(typeof(getfield(syn,k)))): $(nameof(typeof(getfield(syn,k).param)))"
+            meta =
+                props(model_graph, e)[:meta][i] !== :none ?
+                "($(props(model_graph, e)[:meta][i]))" : ""
+            # @info "$name $(_k) $meta: \n $(nameof(typeof(getfield(syn,k)))): $(nameof(typeof(getfield(syn,k).param)))"
             @assert typeof(getfield(syn, k)) <: AbstractConnection "Expected synapse, got $(typeof(getfield(network.syn,k)))"
             if hasfield(typeof(getfield(syn, k)), :LTPParam)
                 ltp_name = nameof(typeof(getfield(syn, k).LTPParam))
@@ -163,7 +163,7 @@ function print_model(model, get_keys = false)
             end
             push!(
                 synapses,
-                "$(f2l(name, 18)) : $(f2l(syn_pop, 30)):$(f2l(norm)) : $(f2l(ltp_name)) : $(f2l(stp_name))",
+                "$(f2l(name, 18)) : $(f2l(syn_pop, 30)):$(f2l(meta)) : $(f2l(ltp_name)) : $(f2l(stp_name))",
             )
         end
     end
