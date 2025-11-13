@@ -44,7 +44,7 @@ end
     receptors::RECT,
     synvars::DeltaSynapseVars,
     dt::Float32,
-) where {P<:AbstractGeneralizedIF,T<:AbstractDeltaParameter, RECT<:NamedTuple }
+) where {P<:AbstractGeneralizedIF,T<:AbstractDeltaParameter,RECT<:NamedTuple}
     @unpack N, ge, gi = synvars
     @unpack glu, gaba = receptors
     @fastmath @inbounds for i ∈ 1:N

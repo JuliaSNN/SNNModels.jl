@@ -50,7 +50,7 @@ end
     receptors::RECT,
     synvars::CurrentSynapseVars,
     dt::Float32,
-) where {P<:AbstractGeneralizedIF,T<:AbstractCurrentParameter, RECT<:NamedTuple}
+) where {P<:AbstractGeneralizedIF,T<:AbstractCurrentParameter,RECT<:NamedTuple}
     @unpack glu, gaba = receptors
     @unpack N, ge, gi = synvars
     @unpack τe, τi = param

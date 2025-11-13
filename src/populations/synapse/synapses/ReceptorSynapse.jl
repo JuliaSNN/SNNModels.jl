@@ -33,10 +33,11 @@ ReceptorSynapse
     gaba_receptors::VIT = [3, 4]
 end
 
-ReceptorSynapse(syn::ReceptorArray, NMDA::NMDAVoltageDependency{Float32}; kwargs...) = ReceptorSynapse(; kwargs..., syn = syn, NMDA = NMDA)
+ReceptorSynapse(syn::ReceptorArray, NMDA::NMDAVoltageDependency{Float32}; kwargs...) =
+    ReceptorSynapse(; kwargs..., syn = syn, NMDA = NMDA)
 
-function synaptic_receptors(synapse:: ReceptorSynapse, N::Int) 
-    return (glu=zeros(Float32, N), gaba=zeros(Float32, N))
+function synaptic_receptors(synapse::ReceptorSynapse, N::Int)
+    return (glu = zeros(Float32, N), gaba = zeros(Float32, N))
 end
 
 
@@ -63,22 +64,23 @@ MultiReceptorSynapse
 @snn_kw struct MultiReceptorSynapse{
     ST = Vector{Receptor{Float32}},
     NMDAT = NMDAVoltageDependency{Float32},
-    REC <: NamedTuple
+    REC<:NamedTuple,
 } <: AbstractReceptorParameter
     syn::ST=SomaReceptors
     NMDA::NMDAT = NMDAVoltageDependency()
     receptors::REC = infer_receptors(syn)
 end
 
-MultiReceptorSynapse(syn::ReceptorArray) = ReceptorSynapse(; syn = syn, NMDA = NMDA, receptors = receptors)
+MultiReceptorSynapse(syn::ReceptorArray) =
+    ReceptorSynapse(; syn = syn, NMDA = NMDA, receptors = receptors)
 
 function synaptic_receptors(synapse::MultiReceptorSynapse, N::Int)
 
-    receptors = Dict{Symbol, Vector{Float32}}()
+    receptors = Dict{Symbol,Vector{Float32}}()
     for rec in keys(synapse.receptors)
         receptors[rec] = zeros(Float32, N)
     end
-    return (; receptors...) 
+    return (; receptors...)
 end
 
 """
@@ -112,7 +114,7 @@ end
     receptors::RECT,
     synvars::ReceptorSynapseVars,
     dt::Float32,
-) where {P<:AbstractPopulation, RECT<:NamedTuple}
+) where {P<:AbstractPopulation,RECT<:NamedTuple}
     @unpack glu_receptors, gaba_receptors = synapse
     @unpack N, g, h = synvars
     @unpack glu, gaba = receptors
@@ -142,10 +144,10 @@ end
     receptors::RECT,
     synvars::ReceptorSynapseVars,
     dt::Float32,
-) where {P<:AbstractPopulation, RECT<:NamedTuple}
+) where {P<:AbstractPopulation,RECT<:NamedTuple}
     for name in keys(synapse.receptors)
         @inbounds for n in synapse.receptors[name]
-            update_receptor!(synvars, synapse.syn[n], getfield(receptors, name), n,  dt)
+            update_receptor!(synvars, synapse.syn[n], getfield(receptors, name), n, dt)
         end
     end
     for name in keys(receptors)
@@ -157,8 +159,8 @@ end
     synvars::T,
     receptor::Receptor{Float32},
     target::Vector{Float32},
-    n ::Int,
-    dt::Float32,     
+    n::Int,
+    dt::Float32,
 ) where {T<:AbstractReceptorVariable}
     @unpack N, g, h = synvars
     @unpack τr⁻, τd⁻, α = receptor
