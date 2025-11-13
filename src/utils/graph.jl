@@ -73,7 +73,8 @@ function graph(model)
         add_connection!(graph, pre_id, post_id, k, stim, type)
     end
     for (k, v) in meta_plast
-        ids = v.targets[:synapses] isa Vector ? v.targets[:synapses] : [v.targets[:synapses]]
+        ids =
+            v.targets[:synapses] isa Vector ? v.targets[:synapses] : [v.targets[:synapses]]
         for id in ids
             _edges, _ids = filter_edge_props(graph, :id, id)
             for (e, i) in zip(_edges, _ids)
