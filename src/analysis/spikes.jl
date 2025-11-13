@@ -486,9 +486,9 @@ bin_spiketimes(P::AbstractStimulus; kwargs...) = bin_spiketimes(spiketimes(P); k
 bin_spiketimes(P, interval::T; kwargs...) where {T<:AbstractRange} =
     bin_spiketimes(P; interval, kwargs...)
 
-function bin_spiketimes(populations; interval, kwargs...)
+function bin_spiketimes(populations::NamedTuple; interval, do_sparse = true)
     st_pops, names_pop = spiketimes_split(populations)
-    ss = map(st->bin_spiketimes(st; interval, kwargs...)[1], eachindex(st_pops))
+    ss = map(st->bin_spiketimes(st; interval, do_sparse)[1], st_pops)
     return ss, interval, names_pop
 end
 
