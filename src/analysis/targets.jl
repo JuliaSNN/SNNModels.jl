@@ -129,14 +129,15 @@ Calculate the Spike Time Tiling Coefficient (STTC) between two spike trains.
 # Returns
 - `sttc_value`: The calculated STTC value.
 """
-##
 function STTC(spiketrainA, spiketrainB, Δt, interval)
     # Implementation of the Spike Time Tiling Coefficient (STTC)
     TA = tile_interval(spiketrainA, Δt, interval)
     TB = tile_interval(spiketrainB, Δt, interval)
-    PA = sum([any(abs.(spiketrainB .- t) .<= Δt) for t in spiketrainA]) / length(spiketrainA)
-    PB = sum([any(abs.(spiketrainA .- t) .<= Δt) for t in spiketrainB]) / length(spiketrainB)
-    sttc_value = 0.5 * ( (PA - TB) / (1 - PA*TB) + (PB - TA) / (1 - PB*TA) )
+    PA =
+        sum([any(abs.(spiketrainB .- t) .<= Δt) for t in spiketrainA]) / length(spiketrainA)
+    PB =
+        sum([any(abs.(spiketrainA .- t) .<= Δt) for t in spiketrainB]) / length(spiketrainB)
+    sttc_value = 0.5 * ((PA - TB) / (1 - PA*TB) + (PB - TA) / (1 - PB*TA))
     return sttc_value
 end
 
@@ -155,7 +156,7 @@ function tile_interval(spiketrainA, Δt, interval)
         end
     end
     width = width + Δt
-    width / (interval[end] - interval[1] +2Δt)
+    width / (interval[end] - interval[1] + 2Δt)
 end
 
 """
@@ -168,15 +169,15 @@ Calculate the Spike Time Tiling Coefficient (STTC) matrix for a set of spike tra
 # Returns
 - `sttc_matrix`: A matrix containing the STTC values between all pairs of spike trains.
 """
-function STTC(spiketrains::Vector{Vector{Float32}}, Δt, interval=nothing)
+function STTC(spiketrains::Vector{Vector{Float32}}, Δt, interval = nothing)
     n = length(spiketrains)
     sttc_matrix = zeros(Float32, n, n)
-    if isnothing(interval) 
+    if isnothing(interval)
         ss = vcat(spiketrains...)
-        interval = (-Δt + minimum(ss):maximum(ss)+Δt)
-    end 
+        interval = ((-Δt+minimum(ss)):(maximum(ss)+Δt))
+    end
     for i in ProgressBar(1:n)
-    @inbounds @fastmath @simd for j in i+1:n
+        @inbounds @fastmath @simd for j = (i+1):n
             if i==j
                 sttc_value = 1
             elseif length(spiketrains[i]) == 0 || length(spiketrains[j]) == 0
@@ -191,11 +192,12 @@ function STTC(spiketrains::Vector{Vector{Float32}}, Δt, interval=nothing)
     return sttc_matrix
 end
 
-function STTC(pop::T; ΔT, interval) where T <: AbstractPopulation
+function STTC(pop::T; ΔT, interval) where {T<:AbstractPopulation}
     STTC(spiketimes(pop), ΔT, interval)
 end
 
-STTC(pop::T, ΔT::R, interval::V) where {T<:AbstractPopulation, R<: Real, V<:AbstractVector } = STTC(pop; ΔT, interval)
+STTC(pop::T, ΔT::R, interval::V) where {T<:AbstractPopulation,R<:Real,V<:AbstractVector} =
+    STTC(pop; ΔT, interval)
 
 
 
@@ -302,7 +304,8 @@ end
 
 
 
-export gaussian_kernel_estimate, gaussian_kernel, asynchronous_state, is_attractor_state, STTC, tile_interval
+export gaussian_kernel_estimate,
+    gaussian_kernel, asynchronous_state, is_attractor_state, STTC, tile_interval
 
 
 
