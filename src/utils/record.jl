@@ -204,7 +204,16 @@ This function records the state of the object by iterating through all keys in t
 """
 function record!(obj, T::Time)
     @unpack records = obj
+    time = get_time(T)
     for key::Symbol in keys(records)
+        (key == :indices) && (continue)
+        (key == :sr) && (continue)
+        (key == :timestamp) && (continue)
+        (key == :plasticity) && (continue)
+        (key == :start_time) && (continue)
+        (key == :end_time) && (continue)
+        haskey(records[:start_time], key) || (records[:start_time][key] = time)
+        records[:end_time][key] = time
         ## If the key is :indices, :sr, :timestamp, skip
         if key == :fire
             record_fire!(obj.fire, obj.records[:fire], T, records[:indices])
@@ -232,8 +241,6 @@ function record!(obj, T::Time)
             records[:indices],
             records[:sr][key],
         )
-        haskey(records[:start_time], key) || (records[:start_time][key] = get_time(T))
-        records[:end_time][key] = get_time(T)
     end
 end
 
@@ -363,37 +370,48 @@ monitor!(objs, keys, variables::Symbol; kwargs...) =
     ----
     The element can be accessed at whichever time point by using the index of the array. The time point must be within the range of the recorded time points, in r_v.
 """
-function interpolated_record(p, sym)
+function interpolated_record(p, sym, τ = 20ms)
     if sym == :fire
         return firing_rate(p, τ = 20ms)
     end
-    sr = p.records[:sr][sym]
     v_dt = getvariable(p, sym)
-
-    # ! adjust the end time to account for the added first element 
-    _start = p.records[:start_time][sym]
-    _end = p.records[:end_time][sym]
-    # ! this is the recorded time (in ms), it assumes all recordings are contained in v_dt
 
     # Set NoInterp in the singleton dimensions:
     interp = get_interpolator(v_dt)
     v = interpolate(v_dt, interp)
-
+    # Last dimension is time
     ax = map(1:(length(size(v_dt))-1)) do i
         axes(v_dt, i)
     end
-    
-    r_v = range(_start,_end, size(v_dt, ndims(v_dt)))
+
+    r_v = get_measure_interval(p, sym, size(v_dt, ndims(v_dt)))
     y = scale(v, ax..., r_v)
     return y, r_v
-    # try
-    #     r_v = (_start):(1/sr):(_end)
-    # catch e
-    #     r_v = (_start):(1/sr):(_end+1/sr)
-    #     y = scale(v, ax..., r_v)
-    #     return y, r_v
-    # end
 end
+
+function get_measure_interval(p::AbstractComponent, sym::Symbol)
+    _start = p.records[:start_time][sym]
+    _end = p.records[:end_time][sym]
+    return _start:_end
+end
+
+function get_measure_interval(p::AbstractComponent, sym::Symbol, steps::Int)
+    _start = p.records[:start_time][sym]
+    _end = p.records[:end_time][sym]
+    return range(_start, _end, steps)
+end
+
+function get_measure_interval(
+    p::AbstractComponent,
+    sym::Symbol,
+    step::R,
+) where {R<:Union{Float32,Float64}}
+    _start = p.records[:start_time][sym]
+    _end = p.records[:end_time][sym]
+    return range(_start, _end, step = step)
+end
+
+
 
 function add_endtime!(model::NamedTuple)
     @assert isa_model(model) "Model is not a valid NetworkModel"
@@ -511,7 +529,7 @@ function record(
             if !isnothing(interval)
                 @assert interval[1] .>= r[1] "Interval start $(interval[1]) is out of bounds $(r_v[1])"
                 @assert interval[end] .<= r[end] "Interval end $(interval[end]) is out of bounds $(r_v[end])"
-                v_dt = v(:, interval)
+                v_dt = v(axes(v, 1), interval)
                 r = interval
                 ax = map(i -> axes(v_dt, i), 1:(length(size(v))-1))
                 v = scale(
@@ -604,14 +622,14 @@ Clears all the records of a given object.
 """
 function clear_records!(obj)
     if obj isa AbstractPopulation || obj isa AbstractStimulus || obj isa AbstractConnection
-        _clean(obj.records)
+        _clear(obj.records)
     else
         for v in obj
             if v isa AbstractPopulation ||
                v isa AbstractStimulus ||
                v isa AbstractConnection
                 @debug "Removing records from $(v.name)"
-                _clean(v.records)
+                _clear(v.records)
             elseif v isa String
                 continue
             elseif v isa Time
@@ -624,7 +642,7 @@ function clear_records!(obj)
 
 end
 
-function _clean(z)
+function _clear(z)
     for (key, val) in z
         (key == :indices) && (continue)
         (key == :sr) && (continue)
@@ -633,7 +651,7 @@ function _clean(z)
         (key == :start_time) && (continue)
         (key == :end_time) && (continue)
         if isa(val, Dict)
-            _clean(val)
+            _clear(val)
         else
             try
                 empty!(val)
@@ -707,5 +725,6 @@ export Time,
     record,
     reset_time!,
     interpolated_record,
+    get_measure_interval,
     add_endtime!,
     add_starttime!
