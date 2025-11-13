@@ -23,7 +23,12 @@ end
     gi::VFT = (12randn(N) .+ 20) .* 10nS
 end
 
-function synaptic_target(targets::Dict, post::T, sym=nothing, target=nothing) where {T<:IZ}
+function synaptic_target(
+    targets::Dict,
+    post::T,
+    sym = nothing,
+    target = nothing,
+) where {T<:IZ}
     g = getfield(post, sym)
     v_post = getfield(post, :v)
     push!(targets, :sym => sym)
@@ -47,7 +52,7 @@ function integrate!(p::IZ, param::IZParameter, dt::Float32)
         v[i] += 0.5f0 * dt * (0.04f0 * v[i]^2 + 5.0f0 * v[i] + 140.0f0 - u[i] + I[i])
         v[i] += 0.5f0 * dt * (0.04f0 * v[i]^2 + 5.0f0 * v[i] + 140.0f0 - u[i] + I[i])
         u[i] += dt * (a * (b * v[i] - u[i]))
-        v[i] += dt * (ge[i] * (param.Ee - v[i]) + gi[i] * (param.Ei - v[i])) 
+        v[i] += dt * (ge[i] * (param.Ee - v[i]) + gi[i] * (param.Ei - v[i]))
     end
     @inbounds for i = 1:N
         fire[i] = v[i] > 30.0f0

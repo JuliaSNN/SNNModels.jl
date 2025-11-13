@@ -29,7 +29,12 @@ end
     records::Dict = Dict()
 end
 
-function synaptic_target(targets::Dict, post::T, sym=nothing, target=nothing) where {T<:HH}
+function synaptic_target(
+    targets::Dict,
+    post::T,
+    sym = nothing,
+    target = nothing,
+) where {T<:HH}
     g = getfield(post, sym)
     v_post = getfield(post, :v)
     push!(targets, :sym => sym)
