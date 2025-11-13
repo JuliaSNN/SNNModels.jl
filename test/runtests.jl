@@ -31,7 +31,7 @@ with_logger(errorlogger) do
         include("stim/balanced.jl")
     end
 
-# Set the default logger to output only errors:
+    # Set the default logger to output only errors:
     @testset "Networks and synapses" begin
         @test include("network/if_net.jl")
         @test include("network/chain.jl")

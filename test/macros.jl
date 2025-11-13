@@ -1,13 +1,13 @@
 # Define test structs
 using Test
 @kwdef struct TestStruct
-    z
-    s
+    z::Any
+    s::Any
 end
 
 @kwdef struct AnotherStruct
-    x
-    y
+    x::Any
+    y::Any
 end
 # Test cases for @update and @update! macros with nested structs
 # function test_update_macros_with_structs()
@@ -24,7 +24,7 @@ end
     @test config1.a == 10
     @test config1.b == 2
     @test config1.c.z == 10
-    @test config1.c.s == AnotherStruct(5,6)
+    @test config1.c.s == AnotherStruct(5, 6)
 
     # Test case 2: Nested struct update
     struct_config2 = TestStruct(10, AnotherStruct(5, 6))
