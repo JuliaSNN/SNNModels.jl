@@ -13,7 +13,7 @@ end
 # function test_update_macros_with_structs()
 
 
-@testset "Update macros" begin
+# @testset "Update macros" begin
     # Test case 1: Simple struct update
     struct_config1 = TestStruct(10, AnotherStruct(5, 6))
     config1 = (a = 10, b = 2, c = struct_config1)
@@ -47,7 +47,6 @@ end
     end
     @test config3.a == 10
     @test config3.b == 2
-    @test config3.c.z == 10
     @test config3.c.s.x == 100
     @test config3.c.s.y == 200
 

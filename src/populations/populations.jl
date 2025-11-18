@@ -6,6 +6,13 @@ plasticity!(
     T::Time,
 ) = nothing
 
+struct NoPopulationParameter <: AbstractPopulationParameter end
+@snn_kw struct NoPopulation <: AbstractPopulation
+    param::NoPopulationParameter = NoPopulationParameter()
+end
+
+include("group.jl")
+
 ## Spikes
 abstract type AbstractSpikeParameter end
 include("spike/postspike.jl")
