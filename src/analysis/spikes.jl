@@ -70,6 +70,15 @@ function spiketimes(Ps::NamedTuple; kwargs...)
     return Spiketimes(st)
 end
 
+function spiketimes(Ps::Vector{T}; kwargs...) where {T<:Union{AbstractPopulation,AbstractStimulus}}
+    st = Vector{Vector{Float32}}()
+    for p in Ps
+        _st = spiketimes(p; kwargs...)
+        st = vcat(st, _st)
+    end
+    return Spiketimes(st)
+end
+
 """
     spiketimes_split(Ps; kwargs...)
 
@@ -611,7 +620,7 @@ end
     Return the local coefficient of variation of the interspike intervals
     Holt, G. R., Softky, W. R., Koch, C., & Douglas, R. J. (1996). Comparison of discharge variability in vitro and in vivo in cat visual cortex neurons. Journal of Neurophysiology, 75(5), 1806–1814. https://doi.org/10.1152/jn.1996.75.5.1806
 """
-function ISI_CV2(spiketime::Vector{Float32})
+function ISI_CV2(spiketime::Vector{Float32}; interval)
     ISI = diff(spiketime)
     CV2 = Float32[]
     for i in eachindex(ISI)
@@ -627,7 +636,7 @@ end
 
 
 
-function ISI_CV2(x::Spiketimes) 
+function ISI_CV2(x::Spiketimes; interval = nothing) 
     return ISI_CV2.(x)
 end
 
@@ -636,6 +645,33 @@ ISI_CV2(pop::T; interval = nothing) where {T<:AbstractPopulation} =
 
 
 export ISI_CV2
+
+
+"""
+    FanoFactor(spiketimes::Vector{Float32}; window=100ms)
+
+    Return the Fano Factor of the spike train
+    Softky, W. R., & Koch, C. (1993). The highly irregular firing of cortical cells is inconsistent with temporal integration of random EPSPs. Journal of Neuroscience, 13(1), 334–350. https://doi.org/10.1523/JNEUROSCI.13-01-00334.1993  
+
+"""
+function FanoFactor(spiketime::Vector{Float32}; interval)
+    bins, r = bin_spiketimes(spiketime; interval = interval) 
+    ff  = var(bins) / mean(bins)
+    isnan(ff) && (ff = 0.0)
+    return ff
+end
+
+function FanoFactor(spiketimes::Spiketimes; interval)
+    return FanoFactor.(spiketimes; interval)
+end
+
+function FanoFactor(pop::T; interval) where {T<:AbstractPopulation}
+    st = spiketimes(pop)
+    interval = isnothing(interval) ? (0.0f0, maximum(Iterators.flatten(st))) : interval
+    return FanoFactor.(st; interval)
+end
+
+export FanoFactor
 
 """
     st_order(spiketimes::Spiketimes)
