@@ -49,7 +49,7 @@ sim!(model, 5s)
 # SNN.raster(model.pop, [4s, 5s])
 p = SNN.vecplot!(p, E, :v, neurons = 1, r = 4s:5s, add_spikes = true)
 # p = plot()
-# p = SNN.vecplot!(p, E, :synvars_g, neurons = 1, r = 4s:5s, add_spikes = true, sym_id=2)
+# p = SNN.vecplot!(p, E, :g, variables=:synvars, neurons = 1, r = 4s:5s, add_spikes = true, sym_id=2)
 # using Plots
 # plot!(ylims=:auto)
 #   
