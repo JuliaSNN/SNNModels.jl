@@ -76,20 +76,20 @@ end
 
 # It consists in  using Normal kernels to approximate the data and then leverages a theorem on decreasing monotonicity of the number of maxima as function of the window span.
 
-# # Kernel Density Estimation
-# function KDE(t::Real, h::Real, ys)
-#     ndf(x, h) = exp(-x^2 / h)
-#     1 / length(data) * 1 / h * sum(ndf.(ys .- t, h))
-# end
+# Kernel Density Estimation
+function KDE(t::Real, h::Real, ys)
+    ndf(x, h) = exp(-x^2 / h)
+    1 / length(data) * 1 / h * sum(ndf.(ys .- t, h))
+end
 
-# # Distribution
-# function globalKDE(h::Real, ys; xs::AbstractVector, distance::Function )
-#     kde = zeros(Float64, length(xs))
-#     @fastmath @inbounds for n = eachindex(xs)
-#             kde[n] = KDE(xs[n], h, ys)
-#     end
-#     return kde
-# end
+# Distribution
+function globalKDE(h::Real, ys; xs::AbstractVector, distance::Function )
+    kde = zeros(Float64, length(xs))
+    @fastmath @inbounds for n = eachindex(xs)
+            kde[n] = KDE(xs[n], h, ys)
+    end
+    return kde
+end
 
 #Get its maxima
 function get_maxima(data)

@@ -3,16 +3,10 @@ using Interpolations
 using StatsBase
 using DSP
 
-function init_spiketimes(N)
-    _s = Vector{Vector{Float32}}()
-    for i = 1:N
-        push!(_s, Vector{Float32}())
-    end
-    return Spiketimes(_s)
-end
 
 """
-    spiketimes(p, interval = nothing, indices = nothing)
+    spiketimes(population::AbstractComponent, interval = nothing, indices = nothing)
+    
 
 Compute the spike times of a population.
 
@@ -28,13 +22,12 @@ function spiketimes(
     interval = nothing,
     kwargs...,
 ) where {T<:Union{AbstractPopulation,AbstractStimulus}}
-    _spiketimes = init_spiketimes(p.N)
-
+    _spiketimes = _init_spiketimes(p.N)
     firing_time = p.records[:fire][:time]
     neurons = p.records[:fire][:neurons]
 
+    # @warn "No spikes in population"
     if length(firing_time) < 2
-        # @warn "No spikes in population"
         return _spiketimes
     end
     if isnothing(interval)
@@ -53,14 +46,22 @@ function spiketimes(
     return _spiketimes
 end
 
+function _init_spiketimes(N)
+    _s = Vector{Vector{Float32}}()
+    for i = 1:N
+        push!(_s, Vector{Float32}())
+    end
+    return Spiketimes(_s)
+end
+
 
 
 """
-    spiketimes(Ps; kwargs...)
+    spiketimes(P::NamedTuple; kwargs...)
 
     Return the spiketimes of each population in single vector of Spiketimes.
 """
-function spiketimes(Ps; kwargs...)
+function spiketimes(Ps::NamedTuple; kwargs...)
     st = Vector{Vector{Float32}}[]
     for p in Ps
         _st = spiketimes(p; kwargs...)
@@ -552,7 +553,7 @@ end
 function spikes_in_intervals(
     spiketimes::Spiketimes,
     intervals::Vector{Vector{Float32}};
-    margin = 0,
+    margin = [0, 0],
     floor = true,
 )
     st = tmap(intervals) do interval
@@ -605,13 +606,13 @@ end
 
 
 """
-    CV_isi2(intervals::Vector{Float32})
+    ISI_CV2(spiketimes::Vector{Float32})
 
     Return the local coefficient of variation of the interspike intervals
     Holt, G. R., Softky, W. R., Koch, C., & Douglas, R. J. (1996). Comparison of discharge variability in vitro and in vivo in cat visual cortex neurons. Journal of Neurophysiology, 75(5), 1806–1814. https://doi.org/10.1152/jn.1996.75.5.1806
 """
-function CV_isi2(intervals::Vector{Float32})
-    ISI = diff(intervals)
+function ISI_CV2(spiketime::Vector{Float32})
+    ISI = diff(spiketime)
     CV2 = Float32[]
     for i in eachindex(ISI)
         i == 1 && continue
@@ -624,13 +625,17 @@ function CV_isi2(intervals::Vector{Float32})
     return isnan(_cv) ? 0.0 : _cv
 end
 
-# function isi_cv(spikes::Vector{NNSpikes}; kwargs...)
-#     spiketimes = merge_spiketimes(spikes; kwargs...)
-#     @unpack tt = spikes[end]
-#     return CV_isi2.(spiketimes)
-# end
 
-isi_cv(x::Spiketimes) = CV_isi2.(x)
+
+function ISI_CV2(x::Spiketimes) 
+    return ISI_CV2.(x)
+end
+
+ISI_CV2(pop::T; interval = nothing) where {T<:AbstractPopulation} =
+    spiketimes(pop; interval = interval) |> ISI_CV2
+
+
+export ISI_CV2
 
 """
     st_order(spiketimes::Spiketimes)
@@ -894,8 +899,7 @@ export spiketimes,
     bin_spiketimes,
     compute_covariance_density,
     isi,
-    CV,
-    CV_isi2,
+    ISI_CV2,
     firing_rate,
     average_firing_rate,
     firing_rate_average,
@@ -909,7 +913,6 @@ export spiketimes,
     relative_time!,
     st_order,
     isi_cv,
-    CV_isi2,
     sample_spikes,
     sample_inputs,
     resample_spikes
