@@ -55,7 +55,6 @@ function graph(model)
             @show "meta" * syn.name
             push!(meta_plast, k => syn)
         elseif haskey(syn.targets, :type)
-            @show "syn" * syn.name
             pre_id = syn.targets[:fire]
             post_id = syn.targets[:post]
             type = syn.targets[:type]
