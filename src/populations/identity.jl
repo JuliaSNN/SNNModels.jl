@@ -39,6 +39,10 @@ function integrate!(p::Identity, param::IdentityParam, dt::Float32)
     end
 end
 
+function Population(::IdentityParam; kwargs...)
+    return Identity(; kwargs...)
+end
+
 function synaptic_target(targets::Dict, post::Identity, sym::Symbol, target::Nothing)
     v = :spikecount
     g = getfield(post, sym)
