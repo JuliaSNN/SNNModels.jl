@@ -701,7 +701,9 @@ function clear_monitor!(objs::NamedTuple)
         try
             clear_monitor!(obj)
         catch
-            @warn "Could not clear monitor for $obj"
+            typeof(obj) == String && continue
+            typeof(obj) == Time && continue
+            @warn "Could not clear monitor for $(nameof(typeof(obj))): $obj"
         end
     end
 end

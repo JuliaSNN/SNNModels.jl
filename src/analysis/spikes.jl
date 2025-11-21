@@ -620,7 +620,7 @@ end
     Return the local coefficient of variation of the interspike intervals
     Holt, G. R., Softky, W. R., Koch, C., & Douglas, R. J. (1996). Comparison of discharge variability in vitro and in vivo in cat visual cortex neurons. Journal of Neurophysiology, 75(5), 1806–1814. https://doi.org/10.1152/jn.1996.75.5.1806
 """
-function ISI_CV2(spiketime::Vector{Float32}; interval)
+function ISI_CV2(spiketime::Vector{Float32}; interval=nothing)
     ISI = diff(spiketime)
     CV2 = Float32[]
     for i in eachindex(ISI)
@@ -637,7 +637,7 @@ end
 
 
 function ISI_CV2(x::Spiketimes; interval = nothing) 
-    return ISI_CV2.(x)
+    return ISI_CV2.(x, ; interval = interval)
 end
 
 ISI_CV2(pop::T; interval = nothing) where {T<:AbstractPopulation} =
