@@ -1,4 +1,3 @@
-using RollingFunctions
 using Interpolations
 using StatsBase
 using DSP
@@ -637,11 +636,11 @@ end
 
 
 function ISI_CV2(x::Spiketimes; interval = nothing) 
-    return ISI_CV2.(x, ; interval = interval)
+    return ISI_CV2.(x, ; interval)
 end
 
 ISI_CV2(pop::T; interval = nothing) where {T<:AbstractPopulation} =
-    spiketimes(pop; interval = interval) |> ISI_CV2
+    spiketimes(pop; interval) |> ISI_CV2
 
 
 export ISI_CV2
