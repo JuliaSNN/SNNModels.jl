@@ -168,6 +168,15 @@ function compute_connections(pre::Symbol, post::Symbol, points; conn, spatial)
     W = zeros(Float32, N_post, N_pre)
     P = zeros(Float32, N_post, N_pre)
 
+    dist = haskey(conn, :dist) ? conn.dist : Normal
+
+    σ = haskey(conn, :σ) ? conn.σ : 0.0
+    μ = conn.μ
+    if dist == :LogNormal
+        logmean(μ, σ) =  log(μ)-σ^2/2
+        μ = logmean(conn.μ, σ)
+    end
+
     if spatial.type == :critical_distance
         @unpack dc, ϵ, grid_size, p_long = spatial
         pl = getfield(spatial.p_long, pre)
@@ -176,6 +185,7 @@ function compute_connections(pre::Symbol, post::Symbol, points; conn, spatial)
         γl = area / (area - π * dc^2)
         p_short = (1 - pl) * γs * ϵ * conn.p
         p_long = (pl) * γl * ϵ * conn.p
+
         @inbounds for j = 1:N_pre
             for i = 1:N_post
                 pre == post && i == j && continue
@@ -183,12 +193,12 @@ function compute_connections(pre::Symbol, post::Symbol, points; conn, spatial)
                 if distance < dc
                     if rand() <= p_short
                         L[i, j] = true
-                        W[i, j] = conn.μ
+                        W[i, j] = rand(getfield(Distributions,dist)(μ, σ))
                     end
                 else
                     if rand() <= p_long
                         L[i, j] = true
-                        W[i, j] = conn.μ
+                        W[i, j] = rand(getfield(Distributions,dist)(μ, σ))
                     end
                 end
             end
@@ -226,7 +236,8 @@ function compute_connections(pre::Symbol, post::Symbol, points; conn, spatial)
                 randcache[i, j] > p && continue
                 if randcache[i, j] <= p * p0
                     L[i, j] = true
-                    W[i, j] = conn.μ
+                    # W[i, j] = conn.μ
+                    W[i, j] = rand(getfield(Distributions,dist)(μ, σ))
                 end
             end
         end
@@ -331,7 +342,6 @@ function spatial_activity(points, activity; N, L, grid_size = (x = [0, 0.1], y =
     y_range = ceil(Int, diff(collect(y))[1] / L)
 
     spatial_avg = Array{Any,3}(undef, x_range, y_range, length(time_indices))
-    @show size(spatial_avg)
     spatial_avg[:].=0
     for t in eachindex(time_indices)
         interval = time_indices[t]
