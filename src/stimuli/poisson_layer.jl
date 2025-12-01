@@ -185,4 +185,4 @@ function stimulate!(
     end
 end
 
-export PoissonLayer, stimulate!, PoissonStimulusLayer, Stimulus
+export PoissonLayer, stimulate!, PoissonStimulusLayer, Stimulus, PoissonLayerHet
