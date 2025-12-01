@@ -511,6 +511,7 @@ function record(
     range = false,
     interval = nothing,
     interpolate = true,
+    variables=  nothing,
     kwargs...,
 )
     if sym == :fire
@@ -519,6 +520,7 @@ function record(
     elseif sym == :spiketimes || sym == :spikes
         return spiketimes(p)
     else
+        sym = isnothing(variables) ? sym : Symbol(variables, "_", sym)
         # not interpolate
         if !interpolate
             v = getvariable(p, sym)
@@ -650,6 +652,7 @@ function _clear(z)
         (key == :plasticity) && (continue)
         (key == :start_time) && (continue)
         (key == :end_time) && (continue)
+        (key == :variables) && (continue)
         if isa(val, Dict)
             _clear(val)
         else

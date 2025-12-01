@@ -1,5 +1,5 @@
 ## Set physiology
-struct Physiology{T}
+@kwdef struct Physiology{T}
     Ri::T ## in Ω*cm
     Rd::T ## in Ω*cm^2
     Cd::T ## in pF/cm^2
