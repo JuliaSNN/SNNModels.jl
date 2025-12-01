@@ -8,8 +8,8 @@ abstract type TurnoverParam <: MetaPlasticityParameter end
 """
 RandomTurnoverParameter
 
-@snn_kw struct RandomTurnover{FT <: AbstractFloat} <: TurnoverParam
-    rate::FT = -1f0
+@snn_kw struct RandomTurnover{FT<:AbstractFloat} <: TurnoverParam
+    rate::FT = -1.0f0
     τ::FT = 1/rate
     threshold::FT = 0.1f0
     μ::FT = 3.0f0
@@ -21,11 +21,11 @@ end
 ActivityDependentTurnoverParameter
 
 @snn_kw struct ActivityDependentTurnover{FT} <: TurnoverParam
-    rate ::FT = -1
+    rate::FT = -1
     τ::FT = 1/rate
     fraction::FT = 0.1f0
-    τpre::FT = 250f0ms
-    τpost::FT = 250f0ms
+    τpre::FT = 250.0f0ms
+    τpost::FT = 250.0f0ms
     μ::FT = 3.0f0
 end
 
@@ -33,7 +33,7 @@ end
 @snn_kw struct Turnover{
     VFT = Vector{Float32},
     MFT = Matrix{Float32},
-    ST <: AbstractConnection,
+    ST<:AbstractConnection,
 } <: AbstractMetaPlasticity
     id::String = randstring(12)
     name::String = "Turnover"
@@ -49,21 +49,18 @@ end
 end
 
 
-function MetaPlasticity(param::T, synapse;  kwargs...) where {T<:TurnoverParam}
-    targets = Dict(
-            :synapses => [synapse.id],
-            :post => synapse.targets[:post]
-    )
-    Turnover(;param, kwargs..., synapse, targets)
+function MetaPlasticity(param::T, synapse; kwargs...) where {T<:TurnoverParam}
+    targets = Dict(:synapses => [synapse.id], :post => synapse.targets[:post])
+    Turnover(; param, kwargs..., synapse, targets)
 end
 
 function forward!(c::Turnover, param::T) where {T<:TurnoverParam} end
 
-function plasticity!(c::Turnover, param::ActivityDependentTurnover, dt::Float32, T::Time) where {TT<:TurnoverParam}
+function plasticity!(c::Turnover, param::ActivityDependentTurnover, dt::Float32, T::Time)
     @unpack synapse, p, pre, post, p_values = c
     @unpack fraction, μ, τpre, τpost = param
     @turbo for i in eachindex(synapse.fireJ)
-        pre[i] += (-pre[i]*dt + synapse.fireJ[i])/τpre 
+        pre[i] += (-pre[i]*dt + synapse.fireJ[i])/τpre
     end
     @turbo for i in eachindex(synapse.fireI)
         post[i] += (-post[i]*dt + synapse.fireI[i])/τpost
@@ -93,13 +90,13 @@ function plasticity!(c::Turnover, param::TT) where {TT<:TurnoverParam}
     @unpack μ = param
 
     synaptic_turnover!(
-        c.synapse, 
-        p_rewire = c.p_rewire[1], 
+        c.synapse,
+        p_rewire = c.p_rewire[1],
         p_new = (post, pre)->p[post, pre],
         p_values = c.p_values,
         μ = μ,
-    ) 
-end 
+    )
+end
 
 export TurnoverParam, RandomTurnover, ActivityDependentTurnover, Turnover, MetaPlasticity
 
@@ -158,7 +155,7 @@ function synaptic_turnover!(
         # @show "Changing $(post_n), p_rewire=$(p_rewire)"
         post_n == 0 && continue
         plausible_post, weights = new_connections[j]
-        append!(rep_neurons, sample(plausible_post, weights, post_n; replace=false))
+        append!(rep_neurons, sample(plausible_post, weights, post_n; replace = false))
     end
     for (s, new_post) in zip(rep_connections, rep_neurons)
         C.I[s] = new_post
@@ -166,6 +163,3 @@ function synaptic_turnover!(
     end
     update_sparse_matrix!(C)
 end
-
-
-

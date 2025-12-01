@@ -39,17 +39,31 @@ Calculate the periodic distance between two points in a 2D grid.
 - `distance::Float64`: The periodic distance between the two points.
 """
 function periodic_distance(point1::Float32, point2::Float32, grid_size::Float32)
-        abs(min(abs(point1 - point2), grid_size - abs(point1 - point2)))
+    abs(min(abs(point1 - point2), grid_size - abs(point1 - point2)))
 end
-function periodic_distance(point1::Vector{Float32}, point2::Vector{Float32}, grid_size::Vector{T}) where T<:Real
-    return sqrt( sum(
+function periodic_distance(
+    point1::Vector{Float32},
+    point2::Vector{Float32},
+    grid_size::Vector{T},
+) where {T<:Real}
+    return sqrt(
+        sum(
             map(eachindex(point1)) do n
                 min(abs(point1[n] - point2[n]), grid_size[n] - abs(point1[n] - point2[n]))
-                end,
-            ) .^ 2,)
+            end,
+        ) .^ 2,
+    )
 end
-function periodic_distance(point1::Vector{Float32}, point2::Vector{Float32}, grid_size::T) where T<:Real
-    return sqrt( sum([periodic_distance(point1[n], point2[n], grid_size)^2 for n in eachindex(point1)]) )
+function periodic_distance(
+    point1::Vector{Float32},
+    point2::Vector{Float32},
+    grid_size::T,
+) where {T<:Real}
+    return sqrt(
+        sum([
+            periodic_distance(point1[n], point2[n], grid_size)^2 for n in eachindex(point1)
+        ]),
+    )
 end
 
 """
@@ -106,7 +120,7 @@ Compute the Gaussian weight between pre- and post-synaptic neurons based on thei
 
 # Returns
 - `weight::Float32`: The Gaussian weight between the pre- and post-synaptic neurons.
-""" 
+"""
 function gaussian_weight(
     pre::Vector{Float32},
     post::Vector{Float32} = [0.0f0, 0.0f0];
@@ -154,6 +168,15 @@ function compute_connections(pre::Symbol, post::Symbol, points; conn, spatial)
     W = zeros(Float32, N_post, N_pre)
     P = zeros(Float32, N_post, N_pre)
 
+    dist = haskey(conn, :dist) ? conn.dist : Normal
+
+    σ = haskey(conn, :σ) ? conn.σ : 0.0
+    μ = conn.μ
+    if dist == :LogNormal
+        logmean(μ, σ) =  log(μ)-σ^2/2
+        μ = logmean(conn.μ, σ)
+    end
+
     if spatial.type == :critical_distance
         @unpack dc, ϵ, grid_size, p_long = spatial
         pl = getfield(spatial.p_long, pre)
@@ -162,6 +185,7 @@ function compute_connections(pre::Symbol, post::Symbol, points; conn, spatial)
         γl = area / (area - π * dc^2)
         p_short = (1 - pl) * γs * ϵ * conn.p
         p_long = (pl) * γl * ϵ * conn.p
+
         @inbounds for j = 1:N_pre
             for i = 1:N_post
                 pre == post && i == j && continue
@@ -169,12 +193,12 @@ function compute_connections(pre::Symbol, post::Symbol, points; conn, spatial)
                 if distance < dc
                     if rand() <= p_short
                         L[i, j] = true
-                        W[i, j] = conn.μ
+                        W[i, j] = rand(getfield(Distributions,dist)(μ, σ))
                     end
                 else
                     if rand() <= p_long
                         L[i, j] = true
-                        W[i, j] = conn.μ
+                        W[i, j] = rand(getfield(Distributions,dist)(μ, σ))
                     end
                 end
             end
@@ -188,9 +212,7 @@ function compute_connections(pre::Symbol, post::Symbol, points; conn, spatial)
         xs = range(-X/2, stop = X/2, length = 200) |> collect |> z->Float32.(z)
         ys = range(-Y/2, stop = Y/2, length = 200) |> collect |> z->Float32.(z)
         σx, σy = Float32.(getfield(σs, pre))
-        γ = 1/mean(
-            [gaussian_weight([_x, _y]; σx, σy, grid_size) for _x in xs for _y in ys]
-        )
+        γ = 1/mean([gaussian_weight([_x, _y]; σx, σy, grid_size) for _x in xs for _y in ys])
         p = Float32(conn.p * ϵ * γ)
         randcache = rand(N_post, N_pre)
         for j = 1:N_pre
@@ -212,9 +234,10 @@ function compute_connections(pre::Symbol, post::Symbol, points; conn, spatial)
                 pre == post && i == j && continue
                 p == 0 && continue
                 randcache[i, j] > p && continue
-                if randcache[i, j] <= p *  p0
+                if randcache[i, j] <= p * p0
                     L[i, j] = true
-                    W[i, j] = conn.μ
+                    # W[i, j] = conn.μ
+                    W[i, j] = rand(getfield(Distributions,dist)(μ, σ))
                 end
             end
         end
@@ -299,7 +322,7 @@ spatial_avg, x_range, y_range = spatial_activity(points, activity; N, L, grid_si
 function spatial_activity(points, activity; N, L, grid_size = (x = [0, 0.1], y = [0, 0.1]))
     xs, ys = points
     _, num_values = size(activity)
-    
+
     time_indices = Vector{}()
     if isa(N, Number)
         for t = 1:(num_values÷N)
@@ -319,7 +342,6 @@ function spatial_activity(points, activity; N, L, grid_size = (x = [0, 0.1], y =
     y_range = ceil(Int, diff(collect(y))[1] / L)
 
     spatial_avg = Array{Any,3}(undef, x_range, y_range, length(time_indices))
-    @show size(spatial_avg)
     spatial_avg[:].=0
     for t in eachindex(time_indices)
         interval = time_indices[t]

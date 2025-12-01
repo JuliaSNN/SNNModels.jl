@@ -102,9 +102,7 @@ result = infer_receptors(receptors)
 # result will be (; glu = [1, 3], gaba = [2])
 ```
 """
-function infer_receptors(
-    receptors::ReceptorArray,
-)::NamedTuple
+function infer_receptors(receptors::ReceptorArray)::NamedTuple
     rec_name = Symbol[]
     rec_id = Int[]
     for (i, receptor) in enumerate(receptors)
@@ -114,7 +112,7 @@ function infer_receptors(
         push!(rec_name, receptor.target)
         push!(rec_id, i)
     end
-    recs = Dict{Symbol, Vector{Int}}()
+    recs = Dict{Symbol,Vector{Int}}()
     for (name, id) in zip(rec_name, rec_id)
         if haskey(recs, name)
             push!(recs[name], id)
@@ -122,7 +120,7 @@ function infer_receptors(
             recs[name] = [id]
         end
     end
-    return (; recs...)  
+    return (; recs...)
 end
 
 
@@ -201,9 +199,8 @@ Calculate the normalization factor for a synapse given rise and decay time const
 - `Float32`: The normalization factor
 """
 function norm_synapse(τr, τd)
-    p = [1, τr, τd]
-    t_p = p[2] * p[3] / (p[3] - p[2]) * log(p[3] / p[2])
-    return 1 / (-exp(-t_p / p[2]) + exp(-t_p / p[3]))
+    t_p = τr * τd / (τd - τr) * log(τd / τr)
+    return 1 / (-exp(-t_p / τr) + exp(-t_p / τd))
 end
 
 """

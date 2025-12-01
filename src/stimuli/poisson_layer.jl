@@ -22,7 +22,7 @@ end
 
 @snn_kw struct PoissonLayerHet{VFT = Vector{Float32}} <: PoissonLayerParameter
     N::Int32 = 1
-    rates::VFT 
+    rates::VFT
     active::VBT = [true]
 end
 
@@ -62,7 +62,8 @@ This layer implements a Poisson stimulus where each neuron fires independently w
 and the connectivity is defined by sparse matrix representations.
 """
 PoissonStimulusLayer
-@snn_kw struct PoissonStimulusLayer{VFT = Vector{Float32}, PT <: PoissonLayerParameter} <: AbstractStimulus
+@snn_kw struct PoissonStimulusLayer{VFT = Vector{Float32},PT<:PoissonLayerParameter} <:
+               AbstractStimulus
     N::Int
     id::String = randstring(12)
     name::String = "Poisson"
@@ -88,7 +89,7 @@ function PoissonStimulusLayer(
     sym::Symbol,
     comp = nothing;
     conn::Connectivity,
-    param :: PoissonLayerParameter,
+    param::PoissonLayerParameter,
     name::String = "Poisson",
 ) where {T<:AbstractPopulation}
     # @warn "PoissonStimulusLayer is deprecated. Please use Stimulus(param, post, sym, comp; conn) instead."
@@ -110,7 +111,7 @@ function PoissonStimulusLayer(
 end
 
 function Stimulus(
-    param :: PoissonLayerParameter,
+    param::PoissonLayerParameter,
     post::T,
     sym::Symbol,
     comp = nothing;
@@ -163,7 +164,12 @@ function stimulate!(p::PoissonStimulusLayer, param::PoissonLayer, time::Time, dt
     end
 end
 
-function stimulate!(p::PoissonStimulusLayer, param::PoissonLayerHet, time::Time, dt::Float32)
+function stimulate!(
+    p::PoissonStimulusLayer,
+    param::PoissonLayerHet,
+    time::Time,
+    dt::Float32,
+)
     @unpack N, randcache, fire, colptr, W, I, g = p
     @unpack rates = param
     rand!(randcache)

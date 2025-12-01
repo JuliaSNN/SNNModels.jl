@@ -7,7 +7,7 @@ using Test
 
     # Test PoissonLayer constructor with default parameters
     @testset "PoissonLayer with default parameters" begin
-        param = PoissonLayer(rate=10Hz)
+        param = PoissonLayer(rate = 10Hz)
         @test param.rate ≈ 10Hz
         @test param.N == 1
         @test param.active == [true]

@@ -75,7 +75,7 @@ AdEx
     SYNT<:AbstractSynapseParameter,
     SYNV<:AbstractSynapseVariable,
     AdExt<:AdExParameter,
-    RECT<:NamedTuple
+    RECT<:NamedTuple,
 } <: AbstractGeneralizedIF
 
     name::String = "AdEx"

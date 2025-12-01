@@ -68,7 +68,7 @@ function update_synapses!(
     receptors::RECT,
     synvars::DoubleExpSynapseVars,
     dt::Float32,
-) where {P<:AbstractGeneralizedIF,T<:AbstractDoubleExpParameter, RECT<:NamedTuple}
+) where {P<:AbstractGeneralizedIF,T<:AbstractDoubleExpParameter,RECT<:NamedTuple}
     @unpack N, ge, gi, he, hi = synvars
     @unpack τde, τre, τdi, τri = synapse
     @unpack gaba, glu = receptors

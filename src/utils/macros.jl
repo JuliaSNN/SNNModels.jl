@@ -312,7 +312,9 @@ function update_with_merge(
 )
     if isstructwithfields(base_config)
         # Convert struct to NamedTuple
-        nt = (; [(f => getfield(base_config, f)) for f in fieldnames(typeof(base_config))]...)
+        nt = (;
+            [(f => getfield(base_config, f)) for f in fieldnames(typeof(base_config))]...
+        )
         updated_nt = update_with_merge(nt, path, value, full_path)
         # Convert back to struct
         return typeof(base_config).name.wrapper(; updated_nt...)

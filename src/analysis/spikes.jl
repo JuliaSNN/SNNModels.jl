@@ -1,18 +1,11 @@
-using RollingFunctions
 using Interpolations
 using StatsBase
 using DSP
 
-function init_spiketimes(N)
-    _s = Vector{Vector{Float32}}()
-    for i = 1:N
-        push!(_s, Vector{Float32}())
-    end
-    return Spiketimes(_s)
-end
 
 """
-    spiketimes(p, interval = nothing, indices = nothing)
+    spiketimes(population::AbstractComponent, interval = nothing, indices = nothing)
+    
 
 Compute the spike times of a population.
 
@@ -28,13 +21,12 @@ function spiketimes(
     interval = nothing,
     kwargs...,
 ) where {T<:Union{AbstractPopulation,AbstractStimulus}}
-    _spiketimes = init_spiketimes(p.N)
-
+    _spiketimes = _init_spiketimes(p.N)
     firing_time = p.records[:fire][:time]
     neurons = p.records[:fire][:neurons]
 
+    # @warn "No spikes in population"
     if length(firing_time) < 2
-        # @warn "No spikes in population"
         return _spiketimes
     end
     if isnothing(interval)
@@ -53,15 +45,32 @@ function spiketimes(
     return _spiketimes
 end
 
+function _init_spiketimes(N)
+    _s = Vector{Vector{Float32}}()
+    for i = 1:N
+        push!(_s, Vector{Float32}())
+    end
+    return Spiketimes(_s)
+end
+
 
 
 """
-    spiketimes(Ps; kwargs...)
+    spiketimes(P::NamedTuple; kwargs...)
 
     Return the spiketimes of each population in single vector of Spiketimes.
 """
-function spiketimes(Ps; kwargs...)
+function spiketimes(Ps::NamedTuple; kwargs...)
     st = Vector{Vector{Float32}}[]
+    for p in Ps
+        _st = spiketimes(p; kwargs...)
+        st = vcat(st, _st)
+    end
+    return Spiketimes(st)
+end
+
+function spiketimes(Ps::Vector{T}; kwargs...) where {T<:Union{AbstractPopulation,AbstractStimulus}}
+    st = Vector{Vector{Float32}}()
     for p in Ps
         _st = spiketimes(p; kwargs...)
         st = vcat(st, _st)
@@ -486,9 +495,9 @@ bin_spiketimes(P::AbstractStimulus; kwargs...) = bin_spiketimes(spiketimes(P); k
 bin_spiketimes(P, interval::T; kwargs...) where {T<:AbstractRange} =
     bin_spiketimes(P; interval, kwargs...)
 
-function bin_spiketimes(populations; interval, kwargs...)
+function bin_spiketimes(populations::NamedTuple; interval, do_sparse = true)
     st_pops, names_pop = spiketimes_split(populations)
-    ss = map(st->bin_spiketimes(st; interval, kwargs...)[1], eachindex(st_pops))
+    ss = map(st->bin_spiketimes(st; interval, do_sparse)[1], st_pops)
     return ss, interval, names_pop
 end
 
@@ -552,7 +561,7 @@ end
 function spikes_in_intervals(
     spiketimes::Spiketimes,
     intervals::Vector{Vector{Float32}};
-    margin = 0,
+    margin = [0, 0],
     floor = true,
 )
     st = tmap(intervals) do interval
@@ -605,13 +614,13 @@ end
 
 
 """
-    CV_isi2(intervals::Vector{Float32})
+    ISI_CV2(spiketimes::Vector{Float32})
 
     Return the local coefficient of variation of the interspike intervals
     Holt, G. R., Softky, W. R., Koch, C., & Douglas, R. J. (1996). Comparison of discharge variability in vitro and in vivo in cat visual cortex neurons. Journal of Neurophysiology, 75(5), 1806–1814. https://doi.org/10.1152/jn.1996.75.5.1806
 """
-function CV_isi2(intervals::Vector{Float32})
-    ISI = diff(intervals)
+function ISI_CV2(spiketime::Vector{Float32}; interval=nothing)
+    ISI = diff(spiketime)
     CV2 = Float32[]
     for i in eachindex(ISI)
         i == 1 && continue
@@ -624,13 +633,44 @@ function CV_isi2(intervals::Vector{Float32})
     return isnan(_cv) ? 0.0 : _cv
 end
 
-# function isi_cv(spikes::Vector{NNSpikes}; kwargs...)
-#     spiketimes = merge_spiketimes(spikes; kwargs...)
-#     @unpack tt = spikes[end]
-#     return CV_isi2.(spiketimes)
-# end
 
-isi_cv(x::Spiketimes) = CV_isi2.(x)
+
+function ISI_CV2(x::Spiketimes; interval = nothing) 
+    return ISI_CV2.(x, ; interval)
+end
+
+ISI_CV2(pop::T; interval = nothing) where {T<:AbstractPopulation} =
+    spiketimes(pop; interval) |> ISI_CV2
+
+
+export ISI_CV2
+
+
+"""
+    FanoFactor(spiketimes::Vector{Float32}; window=100ms)
+
+    Return the Fano Factor of the spike train
+    Softky, W. R., & Koch, C. (1993). The highly irregular firing of cortical cells is inconsistent with temporal integration of random EPSPs. Journal of Neuroscience, 13(1), 334–350. https://doi.org/10.1523/JNEUROSCI.13-01-00334.1993  
+
+"""
+function FanoFactor(spiketime::Vector{Float32}; interval)
+    bins, r = bin_spiketimes(spiketime; interval = interval) 
+    ff  = var(bins) / mean(bins)
+    isnan(ff) && (ff = 0.0)
+    return ff
+end
+
+function FanoFactor(spiketimes::Spiketimes; interval)
+    return FanoFactor.(spiketimes; interval)
+end
+
+function FanoFactor(pop::T; interval) where {T<:AbstractPopulation}
+    st = spiketimes(pop)
+    interval = isnothing(interval) ? (0.0f0, maximum(Iterators.flatten(st))) : interval
+    return FanoFactor.(st; interval)
+end
+
+export FanoFactor
 
 """
     st_order(spiketimes::Spiketimes)
@@ -894,8 +934,7 @@ export spiketimes,
     bin_spiketimes,
     compute_covariance_density,
     isi,
-    CV,
-    CV_isi2,
+    ISI_CV2,
     firing_rate,
     average_firing_rate,
     firing_rate_average,
@@ -909,7 +948,6 @@ export spiketimes,
     relative_time!,
     st_order,
     isi_cv,
-    CV_isi2,
     sample_spikes,
     sample_inputs,
     resample_spikes

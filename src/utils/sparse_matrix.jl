@@ -28,12 +28,13 @@ end
 
 
 function matrix(c::C, W::AbstractArray, time::Number) where {C<:AbstractConnection}
-    return sparse(c.I, c.J, W(axes(W,1), time), length(c.rowptr) - 1, length(c.colptr) - 1)
+    return sparse(c.I, c.J, W(axes(W, 1), time), length(c.rowptr) - 1, length(c.colptr) - 1)
 end
 
 function matrix(c::C, W::AbstractArray, time::AbstractVector) where {C<:AbstractConnection}
     return [
-        sparse(c.I, c.J, W(axes(W,1), t), length(c.rowptr) - 1, length(c.colptr) - 1) for t in time
+        sparse(c.I, c.J, W(axes(W, 1), t), length(c.rowptr) - 1, length(c.colptr) - 1) for
+        t in time
     ] |> x -> cat(x..., dims = 3)
 end
 

@@ -74,7 +74,7 @@ IF
     PST = PostSpike{Float32},
     SYNT<:AbstractSynapseParameter,
     SYNV<:AbstractSynapseVariable,
-    RECT<:NamedTuple
+    RECT<:NamedTuple,
 } <: AbstractGeneralizedIF
 
     param::IFParameter = IFParameter()

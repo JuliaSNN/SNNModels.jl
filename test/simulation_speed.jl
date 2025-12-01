@@ -11,10 +11,7 @@ my_rec = SNN.SomaReceptors
 # zz = Receptor(E_rev = -70.0, τr = 0.1, τd = 15.0, g0 = 0.38, target = :zz) 
 # push!(my_rec, zz)
 
-my_syn = SNN.ReceptorSynapse(
-    syn=my_rec,
-    NMDA=SNN.SomaNMDA,
-)
+my_syn = SNN.ReceptorSynapse(syn = my_rec, NMDA = SNN.SomaNMDA)
 
 E = Population(AdExParameter(), N = 100, synapse = my_syn, spike = PostSpike())
 
@@ -28,11 +25,11 @@ poisson_inh = PoissonLayer(
 )
 
 exc_conn = (
-    p = .20f0,  # Probability of connecting to a neuron
+    p = 0.20f0,  # Probability of connecting to a neuron
     μ = 3.0f0,  # Synaptic strength (nS)
 )
 inh_conn = (
-    p = .20f0,   # Probability of connecting to a neuron
+    p = 0.20f0,   # Probability of connecting to a neuron
     μ = 4.0f0,   # Synaptic strength (nS)
 )
 # Create the Poisson layers for excitatory and inhibitory inputs
@@ -46,13 +43,13 @@ model = compose(; E, stim_exc, stim_inh, silent = true)
 # # @profview sim!(model, 50s)
 #
 SNN.monitor!(E, [:fire, :v])
-SNN.monitor!(E, [:g], variables=:synvars)
+SNN.monitor!(E, [:g], variables = :synvars)
 sim!(model, 5s)
 # @profview sim!(model, 50s)
 # SNN.raster(model.pop, [4s, 5s])
 p = SNN.vecplot!(p, E, :v, neurons = 1, r = 4s:5s, add_spikes = true)
 # p = plot()
-# p = SNN.vecplot!(p, E, :synvars_g, neurons = 1, r = 4s:5s, add_spikes = true, sym_id=2)
+# p = SNN.vecplot!(p, E, :g, variables=:synvars, neurons = 1, r = 4s:5s, add_spikes = true, sym_id=2)
 # using Plots
 # plot!(ylims=:auto)
 #   
@@ -66,7 +63,7 @@ Random.seed!(1234)
 
 dend_neuron = SNN.DendNeuronParameter(; spike = SNN.PostSpike(At = 0, τA = 30ms, up = 1))
 E = SNNModels.Population(dend_neuron, N = 1)
-E  = SNN.Tripod(N=1)
+E = SNN.Tripod(N = 1)
 
 poisson_exc = PoissonLayer(
     10.2Hz,    # Mean firing rate (Hz) 

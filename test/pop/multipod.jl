@@ -32,15 +32,6 @@ vecplot!(p1, model.pop.E, :v_s, neurons = 1, r = 1s:0.1:7s, sym_id = 3)
 plot!(ylims = :auto, title = "Multipod")
 
 # ##
-# g_d = E.records[:g_d]
-# plot([E.records[:g_d][i][1,1,2] for i in eachindex(g_d)])
-# v = getrecord(model.pop.E, :v_d)
-# v_d, r_t = interpolated_record(model.pop.E, :v_d)
-# v_d, r_t = interpolated_record(model.pop.E, :v_d)
-# plot(r_t,v_d[1,1,r_t])
-# cor(v_d[1,1,r_t], v_d[1,3,r_t])
-##
-
 using Random
 Random.seed!(1234)
 dendrites = [200um, 300um]
