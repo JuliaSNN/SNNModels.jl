@@ -271,7 +271,7 @@ function update_with_merge(
     if length(path) == 1
         # If it's the final field, update the value
         @debug "Updating field $(join(full_path,".")) to $value"
-        !haskey(base_config, path[1]) && @warn "The updated field was not present in config"
+        !haskey(base_config, path[1]) && @warn "The field $(join(full_path,".")) was not present in config"
         return merge(base_config, (path[1] => value,))
     else
         key = path[1]
