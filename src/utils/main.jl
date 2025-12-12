@@ -101,6 +101,7 @@ function train!(
         plasticity!(c, c.param, dt, T)
         record!(c, T)
     end
+    flush(stdout)
 end
 
 function record_zero!(P, C, S, T)
@@ -196,6 +197,7 @@ function sim!(
         forward!(c, getfield(c, :param))
         record!(c, T)
     end
+    flush(stdout)
 end
 
 
