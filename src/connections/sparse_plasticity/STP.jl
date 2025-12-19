@@ -33,11 +33,18 @@ end
     u::VFT = zeros(Npre) # presynaptic state
     x::VFT = ones(Npre)  # presynaptic state
     _ρ::VFT = ones(Npre) # presynaptic state
+    last_spike::VFT = fill(-Inf, Npre)
     active::VBT = [true]
 end
 
-plasticityvariables(param::MarkramSTPParameter, Npre, Npost) =
-    MarkramSTPVariables(Npre = Npre, Npost = Npost)
+function plasticityvariables(param::MarkramSTPParameter, Npre, Npost)
+    variables = MarkramSTPVariables(Npre = Npre, Npost = Npost)
+    ## initialize variables
+    variables.u .= param.U
+    variables.x .= 1.0
+    variables._ρ .= param.U
+    return variables
+end
 
 
 function plasticity!(
@@ -51,22 +58,23 @@ function plasticity!(
     @unpack u, x, _ρ = plasticity
     @unpack U, τF, τD, Wmax, Wmin = param
 
-    @simd for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
+    @fastmath @inbounds @simd for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
         if fireJ[j]
-            u[j] += U * (1 - u[j])
-            x[j] += (-u[j] * x[j])
+            ΔT = get_time(T) - plasticity.last_spike[j]
+            plasticity.last_spike[j] = get_time(T)
+            # update u and x based on time since last spike
+            begin
+                u[j] = U + (U - u[j]) * exp64(-ΔT / τF) 
+                x[j] = 1 + (1 - x[j]) * exp64(-ΔT / τD)
+                u[j] += U * (1 - u[j])
+                x[j] += (-u[j] * x[j])
+                _ρ[j] = u[j] * x[j]
+            end
         end
     end
 
-    # update pre-synaptic spike trace
-    @turbo for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
-        @fastmath u[j] += dt * (U - u[j]) / τF # facilitation
-        @fastmath x[j] += dt * (1 - x[j]) / τD # depression
-        @fastmath _ρ[j] = u[j] * x[j]
-    end
-
-    Threads.@threads :static for j in eachindex(fireJ) # Iterate over postsynaptic neurons
-        @inbounds @simd for s = colptr[j]:(colptr[j+1]-1)
+    @simd for j in eachindex(fireJ) # Iterate over postsynaptic neurons
+        @turbo for s = colptr[j]:(colptr[j+1]-1)
             ρ[s] = _ρ[j]
         end
     end

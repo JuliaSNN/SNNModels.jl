@@ -22,7 +22,7 @@
     records::Dict = Dict()
 end
 
-@snn_kw mutable struct SpikingSynapseDelay{VIT = Vector{Int32},VFT = Vector{Float32}} <:
+@snn_kw mutable struct SpikingSynapseDelay{VIT = Vector{Int32},VVFT =Vector{Vector{Float32}}, VFT = Vector{Float32}} <:
                        AbstractSpikingSynapse
     id::String = randstring(12)
     name::String = "SpikingSynapseDelay"
@@ -42,8 +42,9 @@ end
     fireJ::VBT # presynaptic firing
     v_post::VFT
     g::VFT  # rise conductance
-    delayspikes::VIT = []
-    delaytime::VIT = []
+    delaytime::VFT
+    spike_time::VVFT
+    spike_w::VVFT
     targets::Dict = Dict()
     records::Dict = Dict()
 end
@@ -110,13 +111,15 @@ function SpikingSynapse(
         )
 
     else
-        delayspikes = fill(-1, length(W))
-        delaytime = round.(Int, rand(delay_dist, length(W))/dt)
+        delaytime = rand(delay_dist, length(W))
+        spike_time = [[] for _ in 1:length(fireI)]
+        spike_w = [[] for _ in 1:length(fireI)]
 
         return SpikingSynapseDelay(;
             ρ = ρ,
-            delayspikes = delayspikes,
             delaytime = delaytime,
+            spike_time = spike_time,
+            spike_w = spike_w,
             g = g,
             targets = targets,
             @symdict(rowptr, colptr, I, J, index, W, fireI, fireJ, v_post)...,
@@ -141,7 +144,7 @@ function update_plasticity!(c::SpikingSynapse; LTP = nothing, STP = nothing)
 end
 
 
-function forward!(c::SpikingSynapse, param::SpikingSynapseParameter)
+function forward!(c::SpikingSynapse, param::SpikingSynapseParameter, dt::Float32, T::Time)
     @unpack colptr, I, W, fireJ, g, ρ = c
     @inbounds for j ∈ eachindex(fireJ) # loop on presynaptic neurons
         if fireJ[j] # presynaptic fire
@@ -154,23 +157,36 @@ end
 
 
 
-function forward!(c::SpikingSynapseDelay, param::SpikingSynapseParameter)
-    @unpack colptr, I, W, fireJ, g, ρ = c
-    @unpack delayspikes, delaytime = c
-    # Threads.@threads 
+function forward!(c::SpikingSynapseDelay, param::SpikingSynapseParameter, dt::Float32, T::Time)
+    @unpack colptr, I, W, fireJ, fireI, g, ρ = c
+    @unpack delaytime, spike_time, spike_w = c
+
     for j ∈ eachindex(fireJ) # loop on presynaptic neurons
         if fireJ[j] # presynaptic fire
             @inbounds @fastmath @simd for s ∈ colptr[j]:(colptr[j+1]-1)
-                delayspikes[s] = delaytime[s]
+                i = I[s]
+                times = spike_time[i]
+                weights = spike_w[i]
+                spike = get_time(T) + delaytime[s]
+                first_spike_id = findlast(.<(spike), times)
+                first_spike_id = first_spike_id === nothing ? 0 : first_spike_id
+                insert!(times, first_spike_id+1, spike)
+                insert!(weights, first_spike_id+1, W[s] * ρ[s])
             end
         end
     end
-    @fastmath @inbounds @simd for s ∈ eachindex(delayspikes)
-        delayspikes[s] -= 1
-        if delayspikes[s] == 0
-            g[I[s]] += W[s] * ρ[s]
+    @fastmath @inbounds @simd for i ∈ eachindex(fireI)
+        if !isempty(spike_time[i])
+            times = spike_time[i]
+            weights = spike_w[i]
+            while !isempty(times) && times[1] <= get_time(T)
+                g[i] += weights[1]
+                popfirst!(times)
+                popfirst!(weights)
+            end
         end
     end
 end
+
 
 export SpikingSynapse, SpikingSynapseDelay, update_plasticity!
