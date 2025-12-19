@@ -27,8 +27,8 @@ end
     id::String = randstring(12)
     name::String = "SpikingSynapseDelay"
     param::SpikingSynapseParameter = SpikingSynapseParameter()
-    LTPParam::SpikingSynapseParameter = NoLTP()
-    STPParam::SpikingSynapseParameter = noSTP()
+    LTPParam::LTPParameter = NoLTP()
+    STPParam::STPParameter = noSTP()
     LTPVars::PlasticityVariables = NoPlasticityVariables()
     STPVars::PlasticityVariables = NoPlasticityVariables()
     rowptr::VIT # row pointer of sparse W
@@ -165,13 +165,10 @@ function forward!(c::SpikingSynapseDelay, param::SpikingSynapseParameter)
             end
         end
     end
-    delayspikes .-= 1 # decrement the delay on 1 timestep
-    @inbounds for j ∈ eachindex(fireJ) # loop on presynaptic neurons
-        @inbounds @fastmath @simd for s ∈ colptr[j]:(colptr[j+1]-1)
-            if delayspikes[s] == 0
-                delayspikes[s] = -1
-                g[I[s]] += W[s] * ρ[s]
-            end
+    @fastmath @inbounds @simd for s ∈ eachindex(delayspikes)
+        delayspikes[s] -= 1
+        if delayspikes[s] == 0
+            g[I[s]] += W[s] * ρ[s]
         end
     end
 end

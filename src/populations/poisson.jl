@@ -14,6 +14,10 @@ end
     records::Dict = Dict()
 end
 
+function Population(p::PoissonParameter; kwargs...)
+    return Poisson(param = p; kwargs...)
+end
+
 """
 [Poisson Neuron](https://www.cns.nyu.edu/~david/handouts/poisson.pdf)
 """

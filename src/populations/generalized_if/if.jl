@@ -20,13 +20,13 @@ This struct implements the Integrate-and-Fire neuron model with optional adaptat
 IFParameter
 
 @snn_kw struct IFParameter{FT = Float32} <: AbstractGeneralizedIFParameter
-    C::FT = 281pF        #(pF)
-    gl::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
-    τm::FT = 20ms
+    C::FT = -1pF        #(pF)
+    gl::FT = -1nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
+    τm::FT = C>0 && gl>0 ? C / gl : 15ms
     Vt::FT = -50mV # Membrane threshold potential
     Vr::FT = -60mV # Membrane reset potential
     El::FT = -70mV    # Membrane leak potential
-    R::FT = nS / gl # Resistance
+    R::FT = gl>0 ? 1nS / gl : 0.06 # Resistance
     ΔT::FT = 2mV # Slope factor
     a::FT = 0.0 # Subthreshold adaptation parameter
     b::FT = 0.0 #80.5pA # 'sra' current increment

@@ -49,6 +49,7 @@ SynapseNormalization
 } <: AbstractNormalization
     id::String = randstring(12)
     param::NormParam = MultiplicativeNorm()
+    name::String = "SynapseNormalization"
     synapses::VST
     t::VIT = [0, 1]
     W0::VFT = [0.0f0]
@@ -59,21 +60,28 @@ SynapseNormalization
 end
 
 """
-    SynapseNormalization(N; param, kwargs...)
+    SynapseNormalization(synapses; param, kwargs...)
 
 Constructor function for the SynapseNormalization struct.
-- N: The number of synapses.
 - param: Normalization parameter, can be either MultiplicativeNorm or AdditiveNorm.
 - kwargs: Other optional parameters.
 Returns a SynapseNormalization object with the specified parameters.
 """
-function SynapseNormalization(N, synapses; param::NormParam, kwargs...)
-    if !isa(N, Int)
-        @unpack N = N
+function SynapseNormalization(synapses; param::NormParam, kwargs...)
+    @assert length(synapses) > 0
+    EE = synapses[1]
+    for syn in synapses
+        @assert isa(syn, AbstractSparseSynapse)
+        @assert syn.fireI === EE.fireI "Synapses must have the same postsynaptic population"
     end
+    N = length(synapses[1].fireI)
+
     W0 = zeros(Float32, N)
     W1 = zeros(Float32, N)
     μ = zeros(Float32, N)
+
+    # Test that all synapses have the same postsynaptic neurons
+
     targets = Dict()
     posts = [syn.targets[:post] for syn in synapses]
     @assert length(unique(posts)) == 1
@@ -91,6 +99,10 @@ function SynapseNormalization(N, synapses; param::NormParam, kwargs...)
         end
     end
     SynapseNormalization(; @symdict(param, W0, W1, μ, synapses)..., targets, kwargs...)
+end
+
+function MetaPlasticity(param::NormParam, synapses; kwargs...)
+    SynapseNormalization(synapses; param, kwargs...)
 end
 
 
