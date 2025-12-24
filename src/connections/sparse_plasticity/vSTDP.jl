@@ -93,24 +93,26 @@ function plasticity!(
             v[i] += dt * (-v[i] + v_post[i]) / τv # postsynaptic neuron
         end
         # @simd for s = colptr[j]:(colptr[j+1]-1) 
-        Threads.@threads :static for j in eachindex(fireJ) # Iterate over presynaptic neurons
-            if fireJ[j]
-                @turbo for s = colptr[j]:(colptr[j+1]-1)
-                    W[s] += -A_LTD * clamp(u[I[s]] - θ_LTD, 0.0f0, Inf)
+        chunks = Iterators.partition(eachindex(fireJ), cld(length(fireJ), Threads.nthreads())) |> collect
+        Threads.@threads for c in eachindex(chunks) # Iterate over presynaptic neurons
+            @simd for j in chunks[c]
+                if fireJ[j]
+                    @turbo for s = colptr[j]:(colptr[j+1]-1)
+                        W[s] = -A_LTD * clamp(u[I[s]] - θ_LTD, 0.0f0, Inf)
+                        W[s] < Wmin && (W[s] = Wmin)
+                    end
                 end
-            end
-            @turbo for s = colptr[j]:(colptr[j+1]-1)
-                W[s] +=
-                    A_LTP *
-                    x[j] *
-                    clamp(v[I[s]] - θ_LTD, 0.0f0, Inf) *
-                    clamp(v_post[I[s]] - θ_LTP, 0.0f0, Inf)
+                @turbo for s = colptr[j]:(colptr[j+1]-1)
+                    W[s] +=
+                        A_LTP *
+                        x[j] *
+                        clamp(v[I[s]] - θ_LTD, 0.0f0, Inf) *
+                        clamp(v_post[I[s]] - θ_LTP, 0.0f0, Inf)
+                    W[s] > Wmax && (W[s] = Wmax)
+                end
             end
         end
 
-        @turbo for i in eachindex(W)
-            W[i] = clamp(W[i], Wmin, Wmax)
-        end
     end
 end
 
