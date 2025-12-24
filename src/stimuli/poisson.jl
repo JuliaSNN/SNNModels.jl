@@ -134,6 +134,7 @@ function stimulate!(
     @unpack neurons, g = p
     poisson_rate = get_poisson_rate(param, time) * dt
     poisson_rate ≈ 0 && return
+    poisson_rate < 0 && return
     my_rate = Distributions.Poisson{Float32}(poisson_rate)
     @fastmath @simd for n in neurons
         g[n] += μ * rand(my_rate)
