@@ -25,6 +25,14 @@ include("spike_rate_synapse.jl")
 forward!(c::C, param::P, dt::Float32, T::Time) where {C<:AbstractConnection, P<:AbstractConnectionParameter} =
 forward!(c, param)
 
+update_traces!(
+    p::C,
+    param::P,
+    dt::Float32,
+    T::Time,
+) where {C<:AbstractConnection, P<:AbstractConnectionParameter} = nothing
+
+
 
 """
     AbstractSparseSynapse <: AbstractConnection

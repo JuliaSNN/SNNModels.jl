@@ -29,6 +29,24 @@ function plasticity!(
     any(c.LTPVars.active) && plasticity!(c, c.LTPParam, c.LTPVars, dt, T)
 end
 
+function update_traces!(
+    c::PT,
+    param::SpikingSynapseParameter,
+    dt::Float32,
+    T::Time,
+) where {PT<:AbstractSparseSynapse}
+    any(c.STPVars.active) && update_traces!(c, c.STPParam, c.STPVars, dt, T)
+    any(c.LTPVars.active) && update_traces!(c, c.LTPParam, c.LTPVars, dt, T)
+end
+
+function update_traces!(
+    c::PT,
+    param::PlasticityParameter,
+    variables::PlasticityVariables,
+    dt::Float32,
+    T::Time,
+) where {PT<:AbstractSparseSynapse} end
+
 function set_plasticity!(c::AbstractSparseSynapse, param::LTPParameter, state::Bool)
     c.LTPVars.active .= state
 end

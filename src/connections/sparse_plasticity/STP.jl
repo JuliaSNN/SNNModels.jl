@@ -46,38 +46,86 @@ function plasticityvariables(param::MarkramSTPParameter, Npre, Npost)
     return variables
 end
 
-
-function plasticity!(
+function update_traces!(
     c::PT,
     param::MarkramSTPParameter,
-    plasticity::MarkramSTPVariables,
+    variables::MarkramSTPVariables,
     dt::Float32,
     T::Time,
 ) where {PT<:AbstractSparseSynapse}
     @unpack rowptr, colptr, I, J, index, W, v_post, fireJ, g, ρ, index = c
-    @unpack u, x, _ρ = plasticity
+    @unpack u, x, _ρ = variables
     @unpack U, τF, τD, Wmax, Wmin = param
 
-    @fastmath @inbounds @simd for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
+    # @inbounds @simd 
+    for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
         if fireJ[j]
-            ΔT = get_time(T) - plasticity.last_spike[j]
-            plasticity.last_spike[j] = get_time(T)
+            ΔT = get_time(T) - variables.last_spike[j]
+            variables.last_spike[j] = get_time(T)
             # update u and x based on time since last spike
-            begin
-                u[j] = U + (U - u[j]) * exp64(-ΔT / τF) 
-                x[j] = 1 + (1 - x[j]) * exp64(-ΔT / τD)
-                u[j] += U * (1 - u[j])
-                x[j] += (-u[j] * x[j])
-                _ρ[j] = u[j] * x[j]
-            end
-        end
-    end
-
-    @simd for j in eachindex(fireJ) # Iterate over postsynaptic neurons
-        @turbo for s = colptr[j]:(colptr[j+1]-1)
-            ρ[s] = _ρ[j]
+            u[j] = U - (U - u[j]) * exp(-ΔT / τF) 
+            x[j] = 1 - (1 - x[j]) * exp(-ΔT / τD)
         end
     end
 end
+
+
+function plasticity!(
+    c::PT,
+    param::MarkramSTPParameter,
+    variables::MarkramSTPVariables,
+    dt::Float32,
+    T::Time,
+) where {PT<:AbstractSparseSynapse}
+    @unpack rowptr, colptr, I, J, index, W, v_post, fireJ, g, ρ, index = c
+    @unpack u, x, _ρ = variables
+    @unpack U, τF, τD, Wmax, Wmin = param
+
+    # @inbounds @simd 
+    for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
+        if fireJ[j]
+            # update u and x based on time since last spike
+            u[j] += U * (1 - u[j])
+            x[j] += (-u[j] * x[j])
+            _ρ[j] = u[j] * x[j]
+            @turbo for s = colptr[j]:(colptr[j+1]-1)
+                ρ[s] = _ρ[j]
+            end
+        end
+    end
+end
+
+# function plasticity!(
+#     c::PT,
+#     param::MarkramSTPParameter,
+#     plasticity::MarkramSTPVariables,
+#     dt::Float32,
+#     T::Time,
+# ) where {PT<:AbstractSparseSynapse}
+#     @unpack rowptr, colptr, I, J, index, W, v_post, fireJ, g, ρ, index = c
+#     @unpack u, x, _ρ = plasticity
+#     @unpack U, τF, τD, Wmax, Wmin = param
+
+#     @simd for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
+#         if fireJ[j]
+#             u[j] += U * (1 - u[j])
+#             x[j] += (-u[j] * x[j])
+#         end
+#     end
+
+#     # update pre-synaptic spike trace
+#     @turbo for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
+#         @fastmath u[j] += dt * (U - u[j]) / τF # facilitation
+#         @fastmath x[j] += dt * (1 - x[j]) / τD # depression
+#         @fastmath _ρ[j] = u[j] * x[j]
+#     end
+
+#     Threads.@threads :static for j in eachindex(fireJ) # Iterate over postsynaptic neurons
+#         @inbounds @simd for s = colptr[j]:(colptr[j+1]-1)
+#             ρ[s] = _ρ[j]
+#         end
+#     end
+# end
+
 
 export MarkramSTPParameter, MarkramSTPVariables, plasticityvariables, plasticity!

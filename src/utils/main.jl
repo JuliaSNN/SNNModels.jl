@@ -92,11 +92,13 @@ function train!(
         record!(s, T)
     end
     for p in P
+        update_traces!(p, p.param, dt, T)
         integrate!(p, p.param, dt)
         plasticity!(p, p.param, dt, T)
         record!(p, T)
     end
     for c in C
+        update_traces!(c, c.param, dt, T)
         forward!(c, c.param, dt, T)
         plasticity!(c, c.param, dt, T)
         record!(c, T)
