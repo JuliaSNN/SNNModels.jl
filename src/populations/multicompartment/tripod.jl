@@ -143,7 +143,7 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
 
     @unpack spike, adex, soma_syn, dend_syn = p
     @unpack AP_membrane, up, τabs, At, τA = spike
-    @unpack El, Vr, Vt, τw, a, b = adex
+    @unpack Vr, Vt, b = adex
 
     # Update all synaptic conductance
     update_synapses!(p, soma_syn, receptors_s, synvars_s, dt)
