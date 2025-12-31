@@ -6,5 +6,12 @@
 end
 
 function forward!(p::EmptySynapse, param::EmptyParam) end
+function forward!(
+    p::EmptySynapse,
+    param::EmptyParam,
+    dt::Float32,
+    T::Time,
+) 
+end
 
 export EmptySynapse
