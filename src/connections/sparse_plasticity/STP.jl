@@ -17,14 +17,41 @@
 This struct is used to configure the short-term plasticity dynamics in synaptic connections
 following the model described by Markram et al. (1998).
 """
-MarkramSTPParameter
-@snn_kw struct MarkramSTPParameter{FT = Float32} <: STPParameter
+abstract type MarkramSTPParameter <: STPParameter end
+
+@snn_kw struct MarkramSTPParameterEvent{FT = Float32} <: MarkramSTPParameter
     τD::FT = 200ms # τx
     τF::FT = 1500ms # τu
     U::FT = 0.2
     Wmax::FT = 1.0pF
     Wmin::FT = 0.0pF
 end
+
+@snn_kw struct MarkramSTPParameterTimestep{FT = Float32} <: MarkramSTPParameter
+    τD::FT = 200ms # τx
+    τF::FT = 1500ms # τu
+    U::FT = 0.2
+    Wmax::FT = 1.0pF
+    Wmin::FT = 0.0pF
+end
+
+function MarkramSTPParameter(args...; kw...)
+    return MarkramSTPParameterEvent(args...; kw...)
+end
+
+"""
+    MarkramSTPVariables{VFT <: AbstractVector{<:AbstractFloat}, IT <: Integer} <: STPVariables
+    Variables for Markram Short-Term Plasticity (STP) model.
+# Fields
+- `Npost::IT`: Number of postsynaptic neurons.
+- `Npre::IT`: Number of presynaptic neurons.
+- `u::VFT`: Utilization of synaptic efficacy for each presynaptic neuron.
+- `x::VFT`: Fraction of available synaptic resources for each presynaptic neuron.
+- `_ρ::VFT`: Intermediate variable representing the product of `u` and `x`.
+- `last_spike::VFT`: Time of the last spike for each presynaptic neuron.
+- `active::VBT`: Boolean vector indicating active synapses.
+This struct holds the dynamic variables required to implement the Markram STP model in synaptic connections.
+"""
 
 @snn_kw struct MarkramSTPVariables{VFT = Vector{Float32},IT = Int} <: STPVariables
     ## Plasticity variables
@@ -37,7 +64,7 @@ end
     active::VBT = [true]
 end
 
-function plasticityvariables(param::MarkramSTPParameter, Npre, Npost)
+function plasticityvariables(param::T, Npre, Npost) where {T<:MarkramSTPParameter}
     variables = MarkramSTPVariables(Npre = Npre, Npost = Npost)
     ## initialize variables
     variables.u .= param.U
@@ -48,7 +75,7 @@ end
 
 function update_traces!(
     c::PT,
-    param::MarkramSTPParameter,
+    param::MarkramSTPParameterEvent,
     variables::MarkramSTPVariables,
     dt::Float32,
     T::Time,
@@ -65,6 +92,10 @@ function update_traces!(
             # update u and x based on time since last spike
             u[j] = U - (U - u[j]) * exp(-ΔT / τF) 
             x[j] = 1 - (1 - x[j]) * exp(-ΔT / τD)
+            _ρ[j] = u[j] * x[j]
+            @turbo for s = colptr[j]:(colptr[j+1]-1)
+                ρ[s] = _ρ[j]
+            end
         end
     end
 end
@@ -72,7 +103,7 @@ end
 
 function plasticity!(
     c::PT,
-    param::MarkramSTPParameter,
+    param::MarkramSTPParameterEvent,
     variables::MarkramSTPVariables,
     dt::Float32,
     T::Time,
@@ -84,48 +115,43 @@ function plasticity!(
     # @inbounds @simd 
     for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
         if fireJ[j]
-            # update u and x based on time since last spike
             u[j] += U * (1 - u[j])
             x[j] += (-u[j] * x[j])
-            _ρ[j] = u[j] * x[j]
-            @turbo for s = colptr[j]:(colptr[j+1]-1)
-                ρ[s] = _ρ[j]
-            end
         end
     end
 end
 
-# function plasticity!(
-#     c::PT,
-#     param::MarkramSTPParameter,
-#     plasticity::MarkramSTPVariables,
-#     dt::Float32,
-#     T::Time,
-# ) where {PT<:AbstractSparseSynapse}
-#     @unpack rowptr, colptr, I, J, index, W, v_post, fireJ, g, ρ, index = c
-#     @unpack u, x, _ρ = plasticity
-#     @unpack U, τF, τD, Wmax, Wmin = param
+function plasticity!(
+    c::PT,
+    param::MarkramSTPParameterTimestep,
+    plasticity::MarkramSTPVariables,
+    dt::Float32,
+    T::Time,
+) where {PT<:AbstractSparseSynapse}
+    @unpack rowptr, colptr, I, J, index, W, v_post, fireJ, g, ρ, index = c
+    @unpack u, x, _ρ = plasticity
+    @unpack U, τF, τD, Wmax, Wmin = param
 
-#     @simd for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
-#         if fireJ[j]
-#             u[j] += U * (1 - u[j])
-#             x[j] += (-u[j] * x[j])
-#         end
-#     end
+    @simd for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
+        if fireJ[j]
+            u[j] += U * (1 - u[j])
+            x[j] += (-u[j] * x[j])
+        end
+    end
 
-#     # update pre-synaptic spike trace
-#     @turbo for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
-#         @fastmath u[j] += dt * (U - u[j]) / τF # facilitation
-#         @fastmath x[j] += dt * (1 - x[j]) / τD # depression
-#         @fastmath _ρ[j] = u[j] * x[j]
-#     end
+    # update pre-synaptic spike trace
+    @turbo for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
+        @fastmath u[j] += dt * (U - u[j]) / τF # facilitation
+        @fastmath x[j] += dt * (1 - x[j]) / τD # depression
+        @fastmath _ρ[j] = u[j] * x[j]
+    end
 
-#     Threads.@threads :static for j in eachindex(fireJ) # Iterate over postsynaptic neurons
-#         @inbounds @simd for s = colptr[j]:(colptr[j+1]-1)
-#             ρ[s] = _ρ[j]
-#         end
-#     end
-# end
+    Threads.@threads :static for j in eachindex(fireJ) # Iterate over postsynaptic neurons
+        @inbounds @simd for s = colptr[j]:(colptr[j+1]-1)
+            ρ[s] = _ρ[j]
+        end
+    end
+end
 
 
-export MarkramSTPParameter, MarkramSTPVariables, plasticityvariables, plasticity!
+export MarkramSTPParameter, MarkramSTPVariables, plasticityvariables, plasticity! , update_traces! , MarkramSTPParameterEvent, MarkramSTPParameterTimestep
