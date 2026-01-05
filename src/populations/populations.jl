@@ -22,6 +22,13 @@ plasticity!(
     T::Time,
 ) = nothing
 
+update_traces!(
+    p::AbstractPopulation,
+    param::AbstractPopulationParameter,
+    dt::Float32,
+    T::Time,
+) = nothing
+
 ## Spikes
 abstract type AbstractSpikeParameter end
 include("spike/postspike.jl")

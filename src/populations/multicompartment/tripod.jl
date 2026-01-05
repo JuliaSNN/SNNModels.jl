@@ -143,7 +143,7 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
 
     @unpack spike, adex, soma_syn, dend_syn = p
     @unpack AP_membrane, up, τabs, At, τA = spike
-    @unpack El, Vr, Vt, τw, a, b = adex
+    @unpack Vr, Vt, b = adex
 
     # Update all synaptic conductance
     update_synapses!(p, soma_syn, receptors_s, synvars_s, dt)
@@ -211,10 +211,10 @@ end
         ic[1] = -((v_d1[i] + Δv[i, 2] * dt) - (v_s[i] + Δv[i, 1] * dt)) * d1.gax[i]
         ic[2] = -((v_d2[i] + Δv[i, 3] * dt) - (v_s[i] + Δv[i, 1] * dt)) * d2.gax[i]
         Δv[i, 2] =
-            ((-(v_d1[i] + Δv[i, 2] * dt) + El) * d1.gm[i] - is[2] + ic[1] + I_d[i]) /
+            ((-(v_d1[i] + Δv[i, 2] * dt) + El) * d1.gm[i] - is[i, 2] + ic[1] + I_d[i]) /
             d1.C[i]
         Δv[i, 3] =
-            ((-(v_d2[i] + Δv[i, 3] * dt) + El) * d2.gm[i] - is[3] + ic[2] + I_d[i]) /
+            ((-(v_d2[i] + Δv[i, 3] * dt) + El) * d2.gm[i] - is[i, 3] + ic[2] + I_d[i]) /
             d2.C[i]
         Δv[i, 1] =
             1/C * (

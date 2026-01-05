@@ -2,6 +2,7 @@ abstract type LTPVariables <: PlasticityVariables end
 abstract type LTPParameter <: PlasticityParameter end
 abstract type STPVariables <: PlasticityVariables end
 abstract type STPParameter <: PlasticityParameter end
+abstract type AbstractSpikingSynapseParameter <: AbstractSparseSynapse end
 
 @snn_kw struct NoLTP <: LTPParameter
     active::VBT = [false]
@@ -21,13 +22,31 @@ plasticityvariables(param::NoSTP, Npre, Npost) = NoVariables()
 
 function plasticity!(
     c::PT,
-    param::SpikingSynapseParameter,
+    param::ST,
     dt::Float32,
     T::Time,
-) where {PT<:AbstractSparseSynapse}
+) where {PT<:AbstractSparseSynapse, ST<:AbstractSpikingSynapseParameter}
     any(c.STPVars.active) && plasticity!(c, c.STPParam, c.STPVars, dt, T)
     any(c.LTPVars.active) && plasticity!(c, c.LTPParam, c.LTPVars, dt, T)
 end
+
+function update_traces!(
+    c::PT,
+    param::ST,
+    dt::Float32,
+    T::Time,
+) where {PT<:AbstractSparseSynapse, ST<:AbstractSpikingSynapseParameter}
+    any(c.STPVars.active) && update_traces!(c, c.STPParam, c.STPVars, dt, T)
+    any(c.LTPVars.active) && update_traces!(c, c.LTPParam, c.LTPVars, dt, T)
+end
+
+function update_traces!(
+    c::PT,
+    param::PlasticityParameter,
+    variables::PlasticityVariables,
+    dt::Float32,
+    T::Time,
+) where {PT<:AbstractSparseSynapse} end
 
 function set_plasticity!(c::AbstractSparseSynapse, param::LTPParameter, state::Bool)
     c.LTPVars.active .= state

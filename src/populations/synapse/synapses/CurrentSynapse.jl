@@ -21,8 +21,6 @@ CurrentSynapse
 @snn_kw struct CurrentSynapse{FT = Float32} <: AbstractCurrentParameter
     τe::FT = 6ms # Decay time for excitatory synapses
     τi::FT = 2ms # Decay time for inhibitory synapses
-    E_i::FT = -75mV # Reversal potential for inhibitory synapses
-    E_e::FT = 0mV # Reversal potential for excitatory synapses
 end
 
 """
@@ -69,11 +67,10 @@ end
     param::T,
     synvars::CurrentSynapseVars,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractCurrentParameter}
-    @unpack E_e, E_i = param
     @unpack N, v, syn_curr = p
     @unpack ge, gi = synvars
     @inbounds @simd for i ∈ 1:N
-        syn_curr[i] = ge[i] * (v[i] - E_e) - gi[i] * (v[i] - E_i)
+        syn_curr[i] = -(ge[i] - gi[i])
     end
 end
 

@@ -157,7 +157,7 @@ The total number of connections per the post-synaptic neuron is: ϵ * N_pre * p_
 - `P::Matrix{Bool}`: A matrix indicating the presence of connections.
 - `W::Matrix{Float32}`: A matrix containing the weights of the connections.
 """
-function compute_connections(pre::Symbol, post::Symbol, points; conn, spatial)
+function compute_connections(pre::Symbol, post::Symbol, points; conn::NamedTuple, spatial::NamedTuple, dist::Sampleable)
     @unpack grid_size = spatial
     @assert length(grid_size) == 2 "grid_size must be a vector of length 2"
     pre_points = getfield(points, pre)
@@ -167,15 +167,6 @@ function compute_connections(pre::Symbol, post::Symbol, points; conn, spatial)
     L = falses(N_post, N_pre)
     W = zeros(Float32, N_post, N_pre)
     P = zeros(Float32, N_post, N_pre)
-
-    dist = haskey(conn, :dist) ? conn.dist : Normal
-
-    σ = haskey(conn, :σ) ? conn.σ : 0.0
-    μ = conn.μ
-    if dist == :LogNormal
-        logmean(μ, σ) =  log(μ)-σ^2/2
-        μ = logmean(conn.μ, σ)
-    end
 
     if spatial.type == :critical_distance
         @unpack dc, ϵ, grid_size, p_long = spatial
@@ -193,12 +184,12 @@ function compute_connections(pre::Symbol, post::Symbol, points; conn, spatial)
                 if distance < dc
                     if rand() <= p_short
                         L[i, j] = true
-                        W[i, j] = rand(getfield(Distributions,dist)(μ, σ))
+                        W[i, j] = rand(dist)
                     end
                 else
                     if rand() <= p_long
                         L[i, j] = true
-                        W[i, j] = rand(getfield(Distributions,dist)(μ, σ))
+                        W[i, j] = rand(dist)
                     end
                 end
             end
@@ -237,7 +228,7 @@ function compute_connections(pre::Symbol, post::Symbol, points; conn, spatial)
                 if randcache[i, j] <= p * p0
                     L[i, j] = true
                     # W[i, j] = conn.μ
-                    W[i, j] = rand(getfield(Distributions,dist)(μ, σ))
+                    W[i, j] = rand(dist)
                 end
             end
         end

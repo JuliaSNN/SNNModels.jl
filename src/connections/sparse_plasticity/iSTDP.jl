@@ -30,6 +30,7 @@ end
     Npre::IT
     tpost::VFT = zeros(Npost) # postsynaptic spiking time 
     tpre::VFT = zeros(Npre) # presynaptic spiking time
+    last_spike::VFT = zeros(Npost) # last spike time for each postsynaptic neuron
     active::VBT = [true]
 end
 
@@ -93,61 +94,22 @@ function plasticity!(
     end
 end
 
-##
-function plasticity!(
-    c::AbstractSparseSynapse,
-    param::iSTDPTime,
-    plasticity::iSTDPVariables,
-    dt::Float32,
-    T::Time,
-)
-    @unpack rowptr, colptr, index, I, J, W, fireI, fireJ, g = c
-    @unpack η, τy, Wmax, Wmin = param
-    @unpack tpre, tpost = plasticity
-    # @inbounds 
-    # if pre-synaptic inhibitory neuron fires, it aims to modify the synaptic weight to achieve the target post synaptic rate
-    @fastmath begin
-        @inbounds for j in eachindex(fireJ) # presynaptic indices j
-            tpre[j] += dt * (-tpre[j]) / τy
-            if fireJ[j] # presynaptic neuron
-                tpre[j] += 1
-                @turbo for st = colptr[j]:(colptr[j+1]-1)
-                    W[st] = clamp(W[st] + η * (tpost[I[st]] - 1 / τy), Wmin, Wmax)
-                end
-            end
-        end
-        # if post-synaptic excitatory neuron fires
-        @inbounds for i in eachindex(fireI) # postsynaptic indices i
-            tpost[i] += dt * (-tpost[i]) / τy
-            if fireI[i] # postsynaptic neuron
-                tpost[i] += 1
-                @turbo for st = rowptr[i]:(rowptr[i+1]-1) ## 
-                    st = index[st]
-                    W[st] = clamp(W[st] + η * (tpre[J[st]]), Wmin, Wmax)
-                end
-            end
-        end
-    end
-end
-
-
 """
-    plasticity!(c::AbstractSparseSynapse, param::iSTDPRate, dt::Float32)
-
-Performs the synaptic plasticity calculation based on the inihibitory spike-timing dependent plasticity (iSTDP) model from Vogels (2011) adapted to control the membrane potential. 
+    plasticity!(c::AbstractSparseSynapse, param::iSTDPPotential, dt::Float32)
+Performs the synaptic plasticity calculation based on the inihibitory spike-timing dependent plasticity (iSTDP) model from Vogels (2011) using membrane potential traces.
 The function updates synaptic weights `W` of each synapse in the network according to the firing status of pre and post-synaptic neurons.
 This is an in-place operation that modifies the input `AbstractSparseSynapse` object `c`.
 
 # Arguments
 - `c::AbstractSparseSynapse`: The current spiking synapse object which contains data structures to represent the synapse network.
-- `param::iSTDPParameterVoltage`: Parameters needed for the iSTDP model, including learning rate `η`, target membrane potenital `v0`, STDP time constant `τy`, maximal and minimal synaptic weight (`Wmax` and `Wmin`).
-- `dt::Float32`: The time step for the numerical integration.
+- `param::iSTDPPotential`: Parameters needed for the iSTDP model, including learning rate `η`, reference membrane potential `v0`, STDP time constant `τy`, maximal and minimal synaptic weight (`Wmax` and `Wmin`).
+- `dt::Float32`: The time step for the numerical integration. 
 
 # Algorithm
-- For each pre-synaptic neuron, if it fires, it reduces the synaptic weight by an amount proportional to the difference between the target membrane potential and the actual one. 
-- For each pre-synaptic neuron, if it fires, increases the inhibitory term, otherwise the inhibitory term decays exponentially over time with a time constant `τy`.
-- For each post-synaptic neuron, if it fires, it increases the synaptic weight by an amount proportional to the pre-synaptic trace and increases the excitatory term, otherwise the excitatory term decays exponentially over time with a time constant `τy`.
+- For each pre-synaptic neuron, if it fires, it increases the synaptic weight by an amount proportional to the difference between the post-synaptic membrane potential trace and a reference potential `v0`, otherwise the pre-synaptic trace decays exponentially over time with a time constant `τy`.
+- For each post-synaptic neuron, if it fires, it increases the synaptic weight by an amount proportional to the pre-synaptic trace, otherwise the post-synaptic trace decays exponentially over time with a time constant `τy`.
 - The synaptic weights are bounded by `Wmin` and `Wmax`.
+
 """
 function plasticity!(
     c::AbstractSparseSynapse,
@@ -171,6 +133,7 @@ function plasticity!(
             end
         end
     end
+
     # if post-synaptic excitatory neuron fires
     @fastmath @inbounds for i in eachindex(fireI) # postsynaptic indices i
         # trace of the membrane potential

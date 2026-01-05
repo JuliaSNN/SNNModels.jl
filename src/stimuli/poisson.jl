@@ -12,8 +12,7 @@ abstract type PoissonStimulusParameter <: AbstractStimulusParameter end
 """
 PoissonVariable
 
-@snn_kw struct PoissonVariable{FT = Float32,VDT = Dict{Symbol,Any}} <:
-               PoissonStimulusParameter
+@snn_kw struct PoissonVariable{FT = Float32,VDT = Dict{Symbol,Any}} <: PoissonStimulusParameter
     variables::VDT
     rate::Function
     μ::FT = 1.0f0
@@ -51,10 +50,9 @@ end
 """
 PoissonInterval
 
-@snn_kw struct PoissonInterval{R = Float32,VVFT = Vector{Vector{Float32}}} <:
-               PoissonStimulusParameter
+@snn_kw struct PoissonInterval{R = Float32,VVFT = Vector{Vector{Float32}}} <: PoissonStimulusParameter
     rate::R
-    intervals::VVFT
+    intervals::VVFT= Vector{Vector{Float32}}([])
     μ::R = 1.0f0
     active::VBT = [true]
 end
@@ -93,6 +91,7 @@ function PoissonStimulus(
         kwargs...,
     )
 end
+
 
 function Stimulus(
     param::PoissonStimulusParameter,
@@ -133,7 +132,10 @@ function stimulate!(
     end
     @unpack μ = param
     @unpack neurons, g = p
-    my_rate = Distributions.Poisson{Float32}(get_poisson_rate(param, time) * dt)
+    poisson_rate = get_poisson_rate(param, time) * dt
+    poisson_rate ≈ 0 && return
+    poisson_rate < 0 && return
+    my_rate = Distributions.Poisson{Float32}(poisson_rate)
     @fastmath @simd for n in neurons
         g[n] += μ * rand(my_rate)
     end

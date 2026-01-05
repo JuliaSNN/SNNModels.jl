@@ -186,7 +186,7 @@ end
 
     @fastmath @inbounds for i ∈ 1:p.N
         ic[1] = -((v_d[i] + Δv[i, 2] * dt) - (v_s[i] + Δv[i, 1] * dt)) * d.gax[i]
-        Δv[i, 2] = ((-(v_d[i] + Δv[i, 2] * dt) + El) * d.gm[i] - is[2] + ic[1]) / d.C[i]
+
 
         Δv[i, 1] =
             1/C * (
@@ -196,6 +196,8 @@ end
                 - ic[1] # axial currents
                 # + I[i]  # external current
             )
+
+        Δv[i, 2] = ((-(v_d[i] + Δv[i, 2] * dt) + El) * d.gm[i] - is[i, 2] + ic[1]) / d.C[i]
         Δv[i, 3] = (a * ((v_s[i] + Δv[i, 1]) - El) - (w_s[i] + Δv[i, 3])) / τw
     end
 end

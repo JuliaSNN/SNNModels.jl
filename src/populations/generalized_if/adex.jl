@@ -156,7 +156,7 @@ function update_neuron!(
                 - R * syn_curr[i] # excitatory synapses
                 - R * w[i] # adaptation
                 + R * I[i] # external current
-            ) / (τm[i])
+            ) / τm
 
         θ[i] += dt * (Vt - θ[i]) / τA
         fire[i] = v[i] >= 0mV#$param.AP_membrane

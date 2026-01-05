@@ -22,6 +22,17 @@ include("pinning_synapse.jl")
 include("pinning_sparse_synapse.jl")
 include("spike_rate_synapse.jl")
 
+forward!(c::C, param::P, dt::Float32, T::Time) where {C<:AbstractConnection, P<:AbstractConnectionParameter} = forward!(c, param)
+
+update_traces!(
+    p::C,
+    param::P,
+    dt::Float32,
+    T::Time,
+) where {C<:AbstractConnection, P<:AbstractConnectionParameter} = nothing
+
+
+
 """
     AbstractSparseSynapse <: AbstractConnection
 """
@@ -30,10 +41,7 @@ abstract type AbstractSparseSynapse <: AbstractConnection end
     AbstractSpikingSynapse <: AbstractSparseSynapse
 """
 abstract type AbstractSpikingSynapse <: AbstractSparseSynapse end
-"""
-    SpikingSynapseParameter <: AbstractConnectionParameter
-"""
-struct SpikingSynapseParameter <: AbstractConnectionParameter end
+
 """
     PlasticityVariables
 """
