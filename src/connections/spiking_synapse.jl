@@ -1,8 +1,23 @@
-@snn_kw mutable struct SpikingSynapse{VIT = Vector{Int32},VFT = Vector{Float32}} <:
-                       AbstractSpikingSynapse
+
+"""
+    SpikingSynapseParameter <: AbstractConnectionParameter
+"""
+struct SpikingSynapseParameter <: AbstractSpikingSynapseParameter end
+
+@snn_kw struct SpikingSynapseDelayParameter{VVFT =Vector{Vector{Float32}}, VFT = Vector{Float32}} <: AbstractSpikingSynapseParameter
+    delaytime::VFT
+    spike_time::VVFT
+    spike_w::VVFT
+end
+
+@snn_kw mutable struct SpikingSynapse{
+                VIT = Vector{Int32},
+                VFT = Vector{Float32},
+                SYNP <: AbstractSpikingSynapseParameter
+                } <: AbstractSpikingSynapse
     id::String = randstring(12)
     name::String = "SpikingSynapse"
-    param::SpikingSynapseParameter = SpikingSynapseParameter()
+    param::SYNP = SpikingSynapseParameter()
     LTPParam::LTPParameter = NoLTP()
     STPParam::STPParameter = NoSTP()
     LTPVars::PlasticityVariables = NoPlasticityVariables()
@@ -18,33 +33,6 @@
     fireJ::VBT # presynaptic firing
     v_post::VFT
     g::VFT  # rise conductance
-    targets::Dict = Dict()
-    records::Dict = Dict()
-end
-
-@snn_kw mutable struct SpikingSynapseDelay{VIT = Vector{Int32},VVFT =Vector{Vector{Float32}}, VFT = Vector{Float32}} <:
-                       AbstractSpikingSynapse
-    id::String = randstring(12)
-    name::String = "SpikingSynapseDelay"
-    param::SpikingSynapseParameter = SpikingSynapseParameter()
-    LTPParam::LTPParameter = NoLTP()
-    STPParam::STPParameter = noSTP()
-    LTPVars::PlasticityVariables = NoPlasticityVariables()
-    STPVars::PlasticityVariables = NoPlasticityVariables()
-    rowptr::VIT # row pointer of sparse W
-    colptr::VIT # column pointer of sparse W
-    I::VIT      # postsynaptic index of W
-    J::VIT      # presynaptic index of W
-    index::VIT  # index mapping: W[index[i]] = Wt[i], Wt = sparse(dense(W)')
-    W::VFT  # synaptic weight
-    ρ::VFT  # short-term plasticity
-    fireI::VBT # postsynaptic firing
-    fireJ::VBT # presynaptic firing
-    v_post::VFT
-    g::VFT  # rise conductance
-    delaytime::VFT
-    spike_time::VVFT
-    spike_w::VVFT
     targets::Dict = Dict()
     records::Dict = Dict()
 end
@@ -96,30 +84,20 @@ function SpikingSynapse(
     # Network targets
 
     if isnothing(delay_dist)
-
-        # Construct the SpikingSynapse instance
-        return SpikingSynapse(;
-            ρ = ρ,
-            g = g,
-            targets = targets,
-            @symdict(rowptr, colptr, I, J, index, W, fireI, fireJ, v_post)...,
-            LTPVars,
-            STPVars,
-            LTPParam,
-            STPParam,
-            name,
-        )
-
+        param = SpikingSynapseParameter()
     else
         delaytime = rand(delay_dist, length(W))
         spike_time = [[] for _ in 1:length(fireI)]
         spike_w = [[] for _ in 1:length(fireI)]
-
-        return SpikingSynapseDelay(;
+        param = SpikingSynapseDelayParameter(;
+            delaytime,
+            spike_time,
+            spike_w,
+        )
+    end
+    return SpikingSynapse(;
             ρ = ρ,
-            delaytime = delaytime,
-            spike_time = spike_time,
-            spike_w = spike_w,
+            param = param,
             g = g,
             targets = targets,
             @symdict(rowptr, colptr, I, J, index, W, fireI, fireJ, v_post)...,
@@ -128,8 +106,7 @@ function SpikingSynapse(
             LTPParam,
             STPParam,
             name,
-        )
-    end
+        )   
 end
 
 function update_plasticity!(c::SpikingSynapse; LTP = nothing, STP = nothing)
@@ -157,9 +134,9 @@ end
 
 
 
-function forward!(c::SpikingSynapseDelay, param::SpikingSynapseParameter, dt::Float32, T::Time)
+function forward!(c::SpikingSynapse, param::SpikingSynapseDelayParameter, dt::Float32, T::Time)
     @unpack colptr, I, W, fireJ, fireI, g, ρ = c
-    @unpack delaytime, spike_time, spike_w = c
+    @unpack delaytime, spike_time, spike_w = param
 
     for j ∈ eachindex(fireJ) # loop on presynaptic neurons
         if fireJ[j] # presynaptic fire
