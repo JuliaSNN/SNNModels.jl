@@ -6,7 +6,7 @@ abstract type TurnoverParam <: MetaPlasticityParameter end
 """
     RandomTurnover{FT = Float32} <: TurnoverParam
 """
-RandomTurnoverParameter
+RandomTurnover
 
 @snn_kw struct RandomTurnover{FT<:AbstractFloat} <: TurnoverParam
     rate::FT = -1.0f0
@@ -18,7 +18,7 @@ end
 """
     ActivityDependentTurnover{VFT <: Vector{Float32}} <: TurnoverParam
 """
-ActivityDependentTurnoverParameter
+ActivityDependentTurnover
 
 @snn_kw struct ActivityDependentTurnover{FT} <: TurnoverParam
     rate::FT = -1
