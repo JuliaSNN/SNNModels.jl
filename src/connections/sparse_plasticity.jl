@@ -2,7 +2,6 @@ abstract type LTPVariables <: PlasticityVariables end
 abstract type LTPParameter <: PlasticityParameter end
 abstract type STPVariables <: PlasticityVariables end
 abstract type STPParameter <: PlasticityParameter end
-abstract type AbstractSpikingSynapseParameter <: AbstractSparseSynapse end
 
 @snn_kw struct NoLTP <: LTPParameter
     active::VBT = [false]
