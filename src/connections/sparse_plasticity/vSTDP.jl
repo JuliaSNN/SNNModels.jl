@@ -98,13 +98,12 @@ function plasticity!(
             @simd for j in chunks[c]
                 if fireJ[j]
                     @turbo for s = colptr[j]:(colptr[j+1]-1)
-                        W[s] = -A_LTD * clamp(u[I[s]] - θ_LTD, 0.0f0, Inf)
+                        W[s] += - A_LTD * clamp(u[I[s]] - θ_LTD, 0.0f0, Inf)
                         W[s] < Wmin && (W[s] = Wmin)
                     end
                 end
                 @turbo for s = colptr[j]:(colptr[j+1]-1)
-                    W[s] +=
-                        A_LTP *
+                    W[s] += A_LTP *
                         x[j] *
                         clamp(v[I[s]] - θ_LTD, 0.0f0, Inf) *
                         clamp(v_post[I[s]] - θ_LTP, 0.0f0, Inf)
