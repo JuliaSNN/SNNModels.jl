@@ -83,9 +83,10 @@ function update_traces!(
     @unpack U, τF, τD, Wmax, Wmin = param
 
     # @inbounds @simd 
+    ΔT::Float32 = 0.f0
     for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
         if fireJ[j]
-            ΔT = get_time(T) - variables.last_spike[j]
+            ΔT = get_time(T) > variables.last_spike[j] ? get_time(T) - variables.last_spike[j] : 0.f0
             variables.last_spike[j] = get_time(T)
             # update u and x based on time since last spike
             u[j] = U - (U - u[j]) * exp(-ΔT / τF) 
