@@ -163,7 +163,7 @@ function print_model(model, get_keys = false)
             end
             push!(
                 synapses,
-                "$(f2l(name, 18)) : $(f2l(syn_pop, 30)):$(f2l(meta)) : $(f2l(ltp_name)) : $(f2l(stp_name))",
+                "$(f2l(name, 18)) : $(f2l(syn_pop, 30)) || $(f2l(ltp_name))- $(f2l(meta)) : $(f2l(stp_name))",
             )
         end
     end

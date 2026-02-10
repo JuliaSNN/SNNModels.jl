@@ -549,6 +549,21 @@ function record(
     end
 end
 
+function record(pops::Vector, sym::Symbol; interval=nothing, interpolate=true, kwargs...)
+    @assert !isnothing(interval) "Interval must be provided for recording of multiple populations"
+    v_dt = map(pops) do pop
+        !haskey(pop.records, sym) && return fill(0.0f0, (0, length(interval)))
+        rr = record(pop, sym; interval, range = false, interpolate, kwargs...)
+        rr(axes(rr, 1), interval)
+    end |> x-> vcat(x...)
+    r = interval
+    ax = map(i -> axes(v_dt, i), 1:(length(size(v_dt))-1))
+    scale(
+        Interpolations.interpolate(v_dt, get_interpolator(v_dt)),
+        ax...,
+        r,
+    )
+end
 
 
 record(p, sym::Symbol, interval::R; kwargs...) where {R<:AbstractRange} =

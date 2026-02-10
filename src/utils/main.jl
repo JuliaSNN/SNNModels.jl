@@ -199,7 +199,7 @@ function sim!(
         forward!(c, getfield(c, :param), dt, T)
         record!(c, T)
     end
-    flush(stdout)
+    # flush(stdout)
 end
 
 

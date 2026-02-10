@@ -43,6 +43,11 @@ abstract type AbstractSparseSynapse <: AbstractConnection end
 abstract type AbstractSpikingSynapse <: AbstractSparseSynapse end
 
 """
+    AbstractSpikingSynapseParameter <: AbstractConnectionParameter
+"""
+abstract type AbstractSpikingSynapseParameter <: AbstractConnectionParameter end
+
+"""
     PlasticityVariables
 """
 abstract type PlasticityVariables end

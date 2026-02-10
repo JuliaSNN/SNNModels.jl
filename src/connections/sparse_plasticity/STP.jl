@@ -17,9 +17,9 @@
 This struct is used to configure the short-term plasticity dynamics in synaptic connections
 following the model described by Markram et al. (1998).
 """
-abstract type MarkramSTPParameter <: STPParameter end
+abstract type AbstractMarkramSTPParameter <: STPParameter end
 
-@snn_kw struct MarkramSTPParameterEvent{FT = Float32} <: MarkramSTPParameter
+@snn_kw struct MarkramSTPParameterEvent{FT = Float32} <: AbstractMarkramSTPParameter
     τD::FT = 200ms # τx
     τF::FT = 1500ms # τu
     U::FT = 0.2
@@ -27,7 +27,7 @@ abstract type MarkramSTPParameter <: STPParameter end
     Wmin::FT = 0.0pF
 end
 
-@snn_kw struct MarkramSTPParameterTimestep{FT = Float32} <: MarkramSTPParameter
+@snn_kw struct MarkramSTPParameterTimestep{FT = Float32} <: AbstractMarkramSTPParameter
     τD::FT = 200ms # τx
     τF::FT = 1500ms # τu
     U::FT = 0.2
@@ -35,9 +35,7 @@ end
     Wmin::FT = 0.0pF
 end
 
-function MarkramSTPParameter(args...; kw...)
-    return MarkramSTPParameterEvent(args...; kw...)
-end
+MarkramSTPParameter =  MarkramSTPParameterEvent 
 
 """
     MarkramSTPVariables{VFT <: AbstractVector{<:AbstractFloat}, IT <: Integer} <: STPVariables
@@ -64,7 +62,7 @@ This struct holds the dynamic variables required to implement the Markram STP mo
     active::VBT = [true]
 end
 
-function plasticityvariables(param::T, Npre, Npost) where {T<:MarkramSTPParameter}
+function plasticityvariables(param::T, Npre, Npost) where {T<:AbstractMarkramSTPParameter}
     variables = MarkramSTPVariables(Npre = Npre, Npost = Npost)
     ## initialize variables
     variables.u .= param.U
@@ -85,9 +83,10 @@ function update_traces!(
     @unpack U, τF, τD, Wmax, Wmin = param
 
     # @inbounds @simd 
+    ΔT::Float32 = 0.f0
     for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
         if fireJ[j]
-            ΔT = get_time(T) - variables.last_spike[j]
+            ΔT = get_time(T) > variables.last_spike[j] ? get_time(T) - variables.last_spike[j] : 0.f0
             variables.last_spike[j] = get_time(T)
             # update u and x based on time since last spike
             u[j] = U - (U - u[j]) * exp(-ΔT / τF) 
