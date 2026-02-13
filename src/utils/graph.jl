@@ -52,7 +52,6 @@ function graph(model)
     end
     for (k, syn) in pairs(syn)
         if typeof(syn) <: AbstractMetaPlasticity
-            @show "meta" * syn.name
             push!(meta_plast, k => syn)
         elseif haskey(syn.targets, :type)
             pre_id = syn.targets[:fire]
@@ -89,7 +88,7 @@ function add_connection!(graph, pre_id, post_id, k, syn, type)
     post_node = find_id_vertex(graph, post_id)
     pre_name = get_prop(graph, pre_node, :name)
     post_name = get_prop(graph, post_node, :name)
-    sym = haskey(syn.targets, :sym) ? syn.targets[:sym] : :soma
+    sym = haskey(syn.targets, :sym) ? syn.targets[:sym] : "missing"
     syn_name = "$(syn.name)"
     syn_pop = "$(pre_name) -> $(post_name).$sym"
     id = syn.id
