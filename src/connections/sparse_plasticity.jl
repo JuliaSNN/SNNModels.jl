@@ -55,6 +55,14 @@ function set_plasticity!(c::AbstractSparseSynapse, param::STPParameter, state::B
     c.STPVars.active .= state
 end
 
+function set_STP!(c::AbstractSparseSynapse, state::Bool)
+    c.STPVars.active .= state
+end
+
+function set_LTP!(c::AbstractSparseSynapse, state::Bool)
+    c.LTPVars.active .= state
+end
+
 function plasticity!(
     c::AbstractSparseSynapse,
     param::PT,
@@ -96,8 +104,11 @@ export SpikingSynapse,
     NoSTDP,
     no_PlasticityVariables,
     plasticityvariables,
-    plasticity!
-change_plasticity!, set_plasticity!
+    plasticity!,
+    change_plasticity!, set_plasticity!,
+    set_STP!, set_LTP!,
+     update_traces!,
+     NoVariables
 
 
 export LTP, STP, NoLTP, NoSTP
