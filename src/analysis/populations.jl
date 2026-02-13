@@ -75,11 +75,11 @@ function subpopulations(stim, merge = true)
     for key in my_keys
         target = merge ? "" : "_$(getfield(stim, key).targets[:sym])"
         name = getfield(stim, key).name * "$target"
-        neurons = getfield(stim, key).neurons
+        pop_neurons = vcat(neurons(getfield(stim, key))...)
         if haskey(populations, name)
-            populations[name] = vcat(populations[name], neurons) |> unique |> collect
+            populations[name] = vcat(populations[name], pop_neurons) |> unique |> collect
         else
-            push!(populations, name => neurons)
+            push!(populations, name => pop_neurons)
         end
     end
     names = collect(keys(populations))
