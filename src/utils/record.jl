@@ -272,6 +272,7 @@ function monitor!(
     keys::Vector;
     sr = 1000Hz,
     variables::Symbol = :none,
+    verbose = false
 ) where {Item<:Union{AbstractPopulation,AbstractStimulus,AbstractConnection}}
     if !haskey(obj.records, :indices)
         obj.records[:indices] = Dict{Symbol,Vector{Int}}()
@@ -304,12 +305,9 @@ function monitor!(
             if hasfield(typeof(obj), sym)
                 typ = typeof(getfield(obj, sym))
                 key = sym
-                # !isempty(ind) && (obj.records[:indices][key] = ind)
-                # obj.records[:sr][key] = sr
-                # obj.records[key] = Vector{typ}()
             else
-                @warn "Field $sym not found in $(nameof(typeof(obj)))"
-                continue
+                verbose && @warn "Field $sym not found in $(nameof(typeof(obj)))"
+                continue 
             end
         else
             if hasproperty(obj, variables)
@@ -321,18 +319,18 @@ function monitor!(
                         push!(obj.records[:variables], variables)
                     end
                 else
-                    @warn "Field $sym not found in $(nameof(typeof(getfield(obj, variables))))"
+                    verbose && @warn "Field $sym not found in $(nameof(typeof(getfield(obj, variables))))"
                     continue
                 end
             else
-                @warn "Field $variables not found in $(nameof(typeof(obj)))"
+                verbose && @warn "Field $variables not found in $(nameof(typeof(obj)))"
                 continue
             end
         end
         @debug "Monitoring :$(key) in $(obj.name)"
 
         if haskey(obj.records, key)
-            @warn "Key $key already being monitored in $(obj.name)"
+            verbose && @warn "Key $key already being monitored in $(obj.name)"
             continue
         end
         !isempty(ind) && (obj.records[:indices][key] = ind)
