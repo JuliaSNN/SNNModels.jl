@@ -254,9 +254,8 @@ function firing_rate(
     else
         spiketimes = spiketimes[neurons]
         alpha_kernel = get_alpha_kernel(τ, interval)
-        rates = map(eachindex(spiketimes)) do n
-            spike_train, _ =
-                bin_spiketimes(spiketimes[n]; interval = interval, do_sparse = false)
+        rates = tmap(eachindex(spiketimes)) do n
+            spike_train, _ = @views bin_spiketimes(spiketimes[n]; interval = interval, do_sparse = false)
             conv(spike_train, alpha_kernel)[1:length(interval)] .* s # times
         end
         rates = hcat(rates...)'
@@ -468,7 +467,9 @@ function bin_spiketimes(
     bin_width = step(interval)
     spike_train = zeros(length(interval))
     st = sort(spike_times) .- first(interval)
-    for i in findall(x -> x > 0 && x < length(interval)*bin_width, st)
+    first_st = findfirst(x -> x > 0, st) |> x-> isnothing(x) ? length(st)+1 : x
+    last_st = findlast(x -> x < length(interval)*bin_width, st) |> x-> isnothing(x) ? length(st) : x
+    for i in first_st:last_st
         index = floor(Int, st[i] / bin_width) + 1
         if index <= length(spike_train)
             spike_train[index] += 1.0
@@ -886,6 +887,63 @@ function sample_spikes(
     spiketimes
 end
 
+function infer_spikes(
+    n_spikes::Vector{In},
+    interval::R;
+    dt = 0.125f0,
+) where {R<:AbstractRange, In<:Integer}
+    spiketimes = Vector{Float32}[[]]
+    @assert length(n_spikes) == length(interval)
+    step_int = step(interval)
+    t = dt + Float32(interval[1])
+    for i in eachindex(interval)
+        t = Float32(interval[i])
+        local_interval  = t .+(dt :dt:step_int) 
+        r = n_spikes[i]
+        if r > 0
+            for spiketime in sample(local_interval, r; replace = false)
+                push!(spiketimes[1], spiketime)
+            end
+        end
+    end
+    spiketimes
+end
+
+function infer_spiketimes(
+    rate::Matrix{In},
+    interval::R;
+    dt = 0.125f0,
+    seed = nothing,
+) where {R<:AbstractRange, In<:Integer}
+    !isnothing(seed) && (Random.seed!(seed))
+    inputs = Vector{Float32}[]
+    for i = 1:size(rate, 1)
+        for n in infer_spikes(rate[i, :], interval; dt = dt)
+            push!(inputs, n)
+        end
+    end
+    inputs
+end
+
+function sample_inputs(
+    N::Int, 
+    rate::Matrix{In},
+    interval::R;
+    dt = 0.125f0,  
+    rate_factor = 1.0f0,
+    seed = nothing,
+) where {R<:AbstractRange, In<:Integer}
+    !isnothing(seed) && (Random.seed!(seed))
+    inputs = Vector{Float32}[]
+    for i = 1:size(rate, 1)
+        for n in infer_spikes(rate[i, :], interval; dt = dt)
+            push!(inputs, n)
+        end
+    end
+    inputs
+end
+
+
 function sample_inputs(
     N,
     rate::Matrix{F},
@@ -950,4 +1008,6 @@ export spiketimes,
     isi_cv,
     sample_spikes,
     sample_inputs,
+    infer_spiketimes,
+    infer_spikes,
     resample_spikes
