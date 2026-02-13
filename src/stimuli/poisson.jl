@@ -76,11 +76,23 @@ function PoissonStimulus(
     param::PoissonStimulusParameter,
     neurons = :ALL,
     comp = nothing,
+    p_post = -1,
     kwargs...,
 ) where {T<:AbstractPopulation}
     targets = Dict(:pre => :PoissonStim, :post => post.id)
     g, _ = synaptic_target(targets, post, sym, comp)
-    neurons = neurons == :ALL ? eachindex(1:post.N) : neurons
+    if neurons == :ALL
+        neurons = eachindex(1:post.N)
+    elseif isa(neurons, Vector{Int})
+        neurons = neurons
+    elseif neurons == :p_post
+        if p_post < 0 || p_post > 1
+            @warn "p_post should be between 0 and 1. Setting neurons to :ALL."
+            neurons = eachindex(1:post.N)
+        else
+            neurons = sample(1:post.N, round(Int, p_post * post.N); replace = false)
+        end
+    end
 
     # Construct the SpikingSynapse instance
     return PoissonStimulus(;
