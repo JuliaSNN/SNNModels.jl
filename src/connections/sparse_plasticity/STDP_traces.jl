@@ -4,8 +4,8 @@ Gerstner, W., Kempter, R., van Hemmen, J. L., & Wagner, H. (1996). A neuronal le
 STDPGerstner
 
 @snn_kw struct STDPGerstner{FT = Float32} <: STDPParameter
-    A_post::FT = 10e-2pA / mV         # LTD learning rate (inhibitory synapses)
-    A_pre::FT = 10e-2pA / (mV * mV)  # LTP learning rate (inhibitory synapses)
+    A_post::FT = 10e-5pA / mV         # LTD learning rate (inhibitory synapses)
+    A_pre::FT = 10e-5pA / (mV * mV)  # LTP learning rate (inhibitory synapses)
     τpre::FT = 20ms                   # Time constant for pre-synaptic spike trace
     τpost::FT = 20ms                  # Time constant for post-synaptic spike trace
     Wmax::FT = 30.0pF                 # Max weight
@@ -36,6 +36,8 @@ end
     Npre::IT                       # Number of pre-synaptic neurons
     tpre::VFT = zeros(Npre)           # Pre-synaptic spike trace
     tpost::VFT = zeros(Npost)          # Post-synaptic spike trace
+    last_pre::VFT = zeros(Npre)          # Last pre-synaptic spike time
+    last_post::VFT = zeros(Npost)         # Last post-synaptic spike
     active::VBT = [true]
 end
 
@@ -49,53 +51,78 @@ end
 function plasticity!(
     c::PT,
     param::STDPGerstner,
-    plasticity::STDPVariables,
+    variables::STDPVariables,
     dt::Float32,
     T::Time,
 ) where {PT<:AbstractSparseSynapse}
     @unpack rowptr, colptr, I, J, index, W, fireJ, fireI, g, index = c
-    @unpack tpre, tpost = plasticity
+    @unpack tpre, tpost, last_pre, last_post = variables
     @unpack A_pre, A_post, τpre, τpost, Wmax, Wmin = param
 
 
     # Update weights based on pre-post spike timing
     @inbounds @fastmath begin
-        for i = 1:(length(rowptr)-1) # loop over post-synaptic neurons
-            @simd for st = rowptr[i]:(rowptr[i+1]-1)
-                s = index[st]
-                if fireJ[J[s]]
-                    W[s] += tpost[i]  # pre-post
-                end
-            end
-        end
+        t = get_time(T)
+        last_pre[findall(fireJ)] .= t
+        last_post[findall(fireI)] .= t
 
-        # Update weights based on pre-post spike timing
-        for j = 1:(length(colptr)-1) # loop over pre-synaptic neurons
-            @simd for s = colptr[j]:(colptr[j+1]-1)
-                if fireI[I[s]]
-                    W[s] += tpre[j]  # pre-post
-                end
-            end
-        end
-        @turbo for i in eachindex(fireI)
-            tpost[i] += dt * (-tpost[i]) / τpost
-        end
-        @simd for i in findall(fireI)
-            tpost[i] += A_post
-        end
+        Δ_pre = exp.(-(t .- last_pre) ./ τpre)
+        Δ_post = exp.(-(t .- last_post) ./ τpost)
+        Δ_pre[Δ_pre .> 1f0] .= 0
+        Δ_post[Δ_post .> 1f0] .= 0
 
-        @turbo for j in eachindex(fireJ)
-            tpre[j] += dt * (-tpre[j]) / τpre
-        end
-        @simd for j in findall(fireJ)
-            tpre[j] += A_pre
-        end
+        # @turbo 
+        @simd for s in eachindex(W)
+            i, j = I[s], J[s]
+            if fireJ[j]
+                W[s] +=  A_pre * Δ_pre[i] # post-pre
+            end
+            if fireI[i] 
+                W[s] += A_post * Δ_post[j]
+            end
+            # W[s] = clamp(W[i], Wmin, Wmax)
+         end
+
+        # for i in eachindex(findall(fireI)) # loop over post-synaptic neurons
+        #     for st = rowptr[i]:(rowptr[i+1]-1)
+        #         s = index[st]
+        #         if my_fireJ[st]
+        #             W[s] += Δ * A_post  # pre-post
+        #             # W[s] = clamp(W[s], Wmin, Wmax)
+        #         end
+        #     end
+        # end
+
+        # # Update weights based on pre-post spike timing
+        # for j in eachindex(fireJ) # loop over pre-synaptic neurons
+        #     Δ = exp(-( t - last_pre[j])/τpre)
+        #     Δ > 1f0 && (Δ = 0)
+        #     @simd for s = colptr[j]:(colptr[j+1]-1)
+        #         if fireI[I[s]]
+        #             W[s] += Δ * A_pre  # pre-post
+        #             # W[s] = clamp(W[s], Wmin, Wmax)
+        #         end
+        #     end
+        # end
+        # @turbo for i in eachindex(fireI)
+        #     tpost[i] += dt * (-tpost[i]) / τpost
+        # end
+        # @simd for i in findall(fireI)
+        #     tpost[i] += A_post
+        # end
+
+        # @turbo for j in eachindex(fireJ)
+        #     tpre[j] += dt * (-tpre[j]) / τpre
+        # end
+        # @simd for j in findall(fireJ)
+        #     tpre[j] += A_pre
+        # end
 
     end
     # Clamp weights to the specified bounds
-    @turbo for i in eachindex(W)
-        @inbounds W[i] = clamp(W[i], Wmin, Wmax)
-    end
+    # @turbo for i in eachindex(W)
+    #     @inbounds W[i] = clamp(W[i], Wmin, Wmax)
+    # end
 end
 
 
