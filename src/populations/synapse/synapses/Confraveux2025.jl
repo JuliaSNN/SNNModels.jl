@@ -6,14 +6,12 @@ abstract type AbstractConfavreux2025 <: AbstractSynapseParameter end
 A synaptic parameter type that models double exponential synaptic dynamics.
 
 # Fields
-- `τre::FT`: Rise time constant for excitatory synapses (default: 1ms)
-- `τde::FT`: Decay time constant for excitatory synapses (default: 6ms)
-- `τri::FT`: Rise time constant for inhibitory synapses (default: 0.5ms)
-- `τdi::FT`: Decay time constant for inhibitory synapses (default: 2ms)
-- `E_i::FT`: Reversal potential for inhibitory synapses (default: -75mV)
+- `τAMPA::FT`: Rise time constant for excitatory synapses (default: 5ms)
+- `τNMDA::FT`: Decay time constant for excitatory synapses (default: 100ms)
+- `τGABA::FT`: Rise time constant for inhibitory synapses (default: 10ms)
+- `E_i::FT`: Reversal potential for inhibitory synapses (default: -80mV)
 - `E_e::FT`: Reversal potential for excitatory synapses (default: 0mV)
-- `gsyn_e::FT`: Synaptic conductance for excitatory synapses (default: 1.0f0)
-- `gsyn_i::FT`: Synaptic conductance for inhibitory synapses (default: 1.0f0)
+- `α::FT`: NMDA voltage dependence parameter (default: 0.23f0)
 
 # Type Parameters
 - `FT`: Floating point type (default: `Float32`)
@@ -36,10 +34,9 @@ end
 A synaptic variable type that stores the state variables for double exponential synaptic dynamics.
 # Fields
 - `N::Int`: Number of synapses
-- `ge::VFT`: Vector of excitatory conductances
-- `gi::VFT`: Vector of inhibitory conductances
-- `he::VFT`: Vector of auxiliary variables for excitatory synapses
-- `hi::VFT`: Vector of auxiliary variables for inhibitory synapses
+- `gAMPA::VFT`: Vector of AMPA conductances
+- `gNMDA::VFT`: Vector of NMDA conductances
+- `gGABA::VFT`: Vector of GABA conductances
 """
 Confavreux2025SynapseVars
 
