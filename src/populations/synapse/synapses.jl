@@ -38,6 +38,7 @@ include("synapses/SingleExpSynapse.jl")
 include("synapses/ReceptorSynapse.jl")
 # include("synapses/MultiReceptorSynapse.jl")
 include("synapses/DoubleExpCurrentSynapse.jl")
+include("synapses/Confraveux2025.jl")
 
 function get_synapse_symbol(synapse::T, sym::Symbol) where {T<:AbstractSynapseParameter}
     sym == :glu && return :glu
