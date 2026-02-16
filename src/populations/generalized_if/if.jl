@@ -11,7 +11,6 @@ This struct implements the Integrate-and-Fire neuron model with optional adaptat
 - `Vr::FT`: Membrane reset potential (default: -60 mV)
 - `El::FT`: Membrane leak potential (default: -70 mV)
 - `R::FT`: Membrane resistance (calculated as 1/gl)
-- `ΔT::FT`: Slope factor for exponential spiking (default: 2 mV)
 - `a::FT`: Subthreshold adaptation parameter (default: 0.0)
 - `b::FT`: Spike-triggered adaptation current increment (default: 0.0)
 - `τw::FT`: Adaptation time constant (default: 0.0)
@@ -115,7 +114,7 @@ function synaptic_target(
     targets::Dict,
     post::T,
     sym::Symbol,
-    target::Nothing = nothing,
+    target = nothing,
 ) where {T<:IF}
     syn = get_synapse_symbol(post.synapse, sym)
     sym = Symbol(syn)
