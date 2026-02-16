@@ -21,6 +21,7 @@ with_logger(errorlogger) do
         include("pop/ballandstick.jl")
         include("pop/tripod.jl")
         include("pop/dendrite.jl")
+        include("pop/poisson.jl")
     end
 
     @testset "Stimuli" begin
