@@ -85,7 +85,7 @@ function subpopulations(stim, merge = true)
     names = collect(keys(populations))
     pops = collect(values(populations))
     order = sort(1:length(pops), by = x -> names[x])
-    return names[order], pops[order]
+    return (names = names[order], populations = pops[order])
 end
 
 function average_conn_strength(M::Matrix, neurons::Vector{Vector{Int}})
