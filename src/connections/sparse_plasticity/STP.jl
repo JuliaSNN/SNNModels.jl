@@ -18,14 +18,7 @@ This struct is used to configure the short-term plasticity dynamics in synaptic 
 following the model described by Markram et al. (1998).
 """
 abstract type AbstractMarkramSTPParameter <: STPParameter end
-
-@snn_kw struct MarkramSTPParameterEvent{FT = Float32} <: AbstractMarkramSTPParameter
-    τD::FT = 200ms # τx
-    τF::FT = 1500ms # τu
-    U::FT = 0.2
-    Wmax::FT = 1.0pF
-    Wmin::FT = 0.0pF
-end
+abstract type AbstractMarkramSTPParameterEvent <: AbstractMarkramSTPParameter end
 
 @snn_kw struct MarkramSTPParameterTimestep{FT = Float32} <: AbstractMarkramSTPParameter
     τD::FT = 200ms # τx
@@ -33,6 +26,19 @@ end
     U::FT = 0.2
     Wmax::FT = 1.0pF
     Wmin::FT = 0.0pF
+end
+
+@snn_kw struct MarkramSTPParameterEvent{FT = Float32} <: AbstractMarkramSTPParameterEvent
+    τD::FT = 200ms # τx
+    τF::FT = 1500ms # τu
+    U::FT = 0.2
+    Wmax::FT = 1.0pF
+    Wmin::FT = 0.0pF
+end
+@snn_kw struct MarkramSTPParameterHet{VFT = Vector{Float32}} <: AbstractMarkramSTPParameterEvent
+    τD::VFT
+    τF::VFT
+    U::VFT
 end
 
 MarkramSTPParameter =  MarkramSTPParameterEvent 
@@ -80,7 +86,7 @@ function update_traces!(
 ) where {PT<:AbstractSparseSynapse}
     @unpack rowptr, colptr, I, J, index, W, v_post, fireJ, g, ρ, index = c
     @unpack u, x, _ρ = variables
-    @unpack U, τF, τD, Wmax, Wmin = param
+    @unpack U, τF, τD = param
 
     # @inbounds @simd 
     ΔT::Float32 = 0.f0
@@ -95,6 +101,38 @@ function update_traces!(
             @turbo for s = colptr[j]:(colptr[j+1]-1)
                 ρ[s] = _ρ[j]
             end
+            u[j] += U * (1 - u[j])
+            x[j] += (-u[j] * x[j])
+        end
+    end
+end
+
+function update_traces!(
+    c::PT,
+    param::MarkramSTPParameterHet,
+    variables::MarkramSTPVariables,
+    dt::Float32,
+    T::Time,
+) where {PT<:AbstractSparseSynapse}
+    @unpack rowptr, colptr, I, J, index, W, v_post, fireJ, g, ρ, index = c
+    @unpack u, x, _ρ = variables
+    @unpack U, τF, τD = param
+
+    # @inbounds @simd 
+    ΔT::Float32 = 0.f0
+    for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
+        if fireJ[j]
+            ΔT = get_time(T) > variables.last_spike[j] ? get_time(T) - variables.last_spike[j] : 0.f0
+            variables.last_spike[j] = get_time(T)
+            # update u and x based on time since last spike
+            u[j] = U[j] - (U[j] - u[j]) * exp(-ΔT / τF[j])
+            x[j] = 1 - (1 - x[j]) * exp(-ΔT / τD[j])
+            _ρ[j] = u[j] * x[j]
+            @turbo for s = colptr[j]:(colptr[j+1]-1)
+                ρ[s] = _ρ[j]
+            end
+            u[j] += U[j] * (1 - u[j])
+            x[j] += (-u[j] * x[j])
         end
     end
 end
@@ -102,22 +140,11 @@ end
 
 function plasticity!(
     c::PT,
-    param::MarkramSTPParameterEvent,
+    param::MET,
     variables::MarkramSTPVariables,
     dt::Float32,
     T::Time,
-) where {PT<:AbstractSparseSynapse}
-    @unpack rowptr, colptr, I, J, index, W, v_post, fireJ, g, ρ, index = c
-    @unpack u, x, _ρ = variables
-    @unpack U, τF, τD, Wmax, Wmin = param
-
-    # @inbounds @simd 
-    for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
-        if fireJ[j]
-            u[j] += U * (1 - u[j])
-            x[j] += (-u[j] * x[j])
-        end
-    end
+) where {PT<:AbstractSparseSynapse, MET<:AbstractMarkramSTPParameterEvent}
 end
 
 function plasticity!(
@@ -153,4 +180,4 @@ function plasticity!(
 end
 
 
-export MarkramSTPParameter, MarkramSTPVariables, plasticityvariables, plasticity! , update_traces! , MarkramSTPParameterEvent, MarkramSTPParameterTimestep
+export MarkramSTPParameter, MarkramSTPVariables, plasticityvariables, plasticity! , update_traces! , MarkramSTPParameterEvent, MarkramSTPParameterTimestep, MarkramSTPParameterHet
