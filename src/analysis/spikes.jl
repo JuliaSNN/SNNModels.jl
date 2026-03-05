@@ -148,7 +148,7 @@ function get_alpha_kernel(τ, interval)
 end
 
 """
-    merge_spiketimes(spikes::Vector{Spiketimes}; )
+    merge_spiketimes(spikes::Vector{Spiketimes}; start::Float32=0.0f0)
 
     Merge spiketimes from different simulations. 
     This function is not thread safe, it is not recommended to use it in parallel.
@@ -161,7 +161,14 @@ end
     neurons: Spiketimes
         Single vector of spiketimes 
 """
-function merge_spiketimes(spikes::Vector{Spiketimes};)
+function merge_spiketimes(spikes::Vector{Spiketimes}; start::Float32=0.0f0)
+    if start > 0.0f0
+        for s in eachindex(spikes)
+            for n in eachindex(spikes[s])
+                spikes[s][n] .+= start * (s - 1)
+            end
+        end
+    end
     neurons = [Vector{Float32}() for _ = 1:length(spikes[1])]
     neuron_ids = collect(1:length(spikes[1]))
     sub_indices = k_fold(neuron_ids, Threads.nthreads())
@@ -169,7 +176,7 @@ function merge_spiketimes(spikes::Vector{Spiketimes};)
     Threads.@threads for p in eachindex(sub_indices)
         for spiketimes in spikes
             for (n, id) in zip(sub_indices[p], sub_neurons[p])
-                push!(neurons[n], spiketimes[id]...)
+                push!(neurons[n], spiketimes[id]... )
             end
         end
     end
@@ -258,7 +265,11 @@ function firing_rate(
             spike_train, _ = @views bin_spiketimes(spiketimes[n]; interval = interval, do_sparse = false)
             conv(spike_train, alpha_kernel)[1:length(interval)] .* s # times
         end
-        rates = hcat(rates...)'
+        my_rates = zeros(length(rates[1]), length(rates))
+        for i in eachindex(rates)
+            my_rates[:,i] = rates[i]
+        end
+        rates = copy(my_rates')
     end
 
     if interpolate
@@ -485,7 +496,7 @@ end
 function bin_spiketimes(spike_times::Spiketimes; kwargs...)
     sample, r = bin_spiketimes(spike_times[1]; kwargs..., do_sparse = false)
     bin_array = zeros(length(spike_times), length(sample))
-    for n in eachindex(spike_times)
+    tmap(eachindex(spike_times)) do n
         bin_array[n, :] = bin_spiketimes(spike_times[n]; kwargs...)[1]
     end
     return bin_array, r
@@ -496,7 +507,7 @@ bin_spiketimes(P::AbstractStimulus; kwargs...) = bin_spiketimes(spiketimes(P); k
 bin_spiketimes(P, interval::T; kwargs...) where {T<:AbstractRange} =
     bin_spiketimes(P; interval, kwargs...)
 
-function bin_spiketimes(populations::NamedTuple; interval, do_sparse = true)
+function bin_spiketimes(populations::NamedTuple; interval=nothing, do_sparse = true)
     st_pops, names_pop = spiketimes_split(populations)
     ss = map(st->bin_spiketimes(st; interval, do_sparse)[1], st_pops)
     return ss, interval, names_pop
@@ -546,29 +557,30 @@ function spikes_in_interval(
     interval,
     margin = [0, 0];
     collapse::Bool = false,
-)
+) where {Z <:AbstractVector}
     neurons = [Vector{Float32}() for x = 1:length(spiketimes)]
     @inbounds @fastmath for n in eachindex(neurons)
         ff = findfirst(x -> x > interval[1] + margin[1], spiketimes[n])
         ll = findlast(x -> x <= interval[end] + margin[2], spiketimes[n])
         if !isnothing(ff) && !isnothing(ll)
             append!(neurons[n], copy(spiketimes[n][ff:ll]))
-            # @views append!(neurons[n], spiketimes[n][ff:ll])
         end
     end
     return neurons
 end
 
+
+
 function spikes_in_intervals(
     spiketimes::Spiketimes,
-    intervals::Vector{Vector{Float32}};
+    intervals::Vector{Vector{R}};
     margin = [0, 0],
     floor = true,
-)
+) where {R<:Real}
     st = tmap(intervals) do interval
         spikes_in_interval(spiketimes, interval, margin)
     end
-    (floor) && (interval_standard_spikes!(st, intervals))
+    (floor) && (interval_standard_spikes!(st, intervals; margin))
     return st
 end
 
@@ -588,31 +600,45 @@ end
 Standardize the spiketimes to the interval [0, interval_duration].
 Return a copy of the 'Spiketimes' vector. 
 """
-function interval_standard_spikes(spiketimes, interval)
-    zerod_spiketimes = deepcopy(spiketimes)
-    for i in eachindex(spiketimes)
-        zerod_spiketimes[i] .-= interval[1]
-    end
-    return Spiketimes(zerod_spiketimes)
+function interval_standard_spikes(spiketimes::Spiketimes, interval::Vector{R}; margin = [0, 0]) where {R<:Real}
+    interval_standard_spikes!(deepcopy(spiketimes), interval; margin)
 end
 
 function interval_standard_spikes!(
     spiketimes::Vector{Spiketimes},
-    intervals::Vector{Vector{Float32}},
-)
+    intervals::Vector{Vector{R}};
+    margin = [0, 0]
+) where {R<:Real}
     @assert length(spiketimes) == length(intervals)
     for i in eachindex(spiketimes)
-        interval_standard_spikes!(spiketimes[i], intervals[i])
+        interval_standard_spikes!(spiketimes[i], intervals[i]; margin)
     end
 end
 
-function interval_standard_spikes!(spiketimes, interval::Vector{Float32})
+function interval_standard_spikes!(spiketimes, interval::Vector{R}; margin = [0, 0]) where {R<:Real}
     for i in eachindex(spiketimes)
-        spiketimes[i] .-= interval[1]
+        spiketimes[i] .-= interval[1] + margin[1]
     end
     return spiketimes
 end
 
+function gaussian_smooth(points, signal; σ, n)
+    gaussian_filter = gaussian(n, σ / (points[2] - points[1]) / 2) # Adjust σ based on bin size
+    gaussian_filter ./= sum(gaussian_filter)
+    @assert n % 2 == 1 "n must be odd for symmetric smoothing"
+    n_start = (n - 1) ÷ 2 +1
+    n_end = n - n_start
+    new_pps = (n_start):length(signal)-n_end
+    smoothed_signal  = zeros(length(new_pps))
+    for i in new_pps
+        zz = 1+i-n_start:i+n_end
+        xx = i - n_start + 1
+        smoothed_signal[xx] = sum(signal[zz] .* gaussian_filter)
+    end
+
+    xvals = points[n_start:length(points)-n_start+1]
+    return smoothed_signal, xvals
+end
 
 """
     ISI_CV2(spiketimes::Vector{Float32})
@@ -654,14 +680,14 @@ export ISI_CV2
     Softky, W. R., & Koch, C. (1993). The highly irregular firing of cortical cells is inconsistent with temporal integration of random EPSPs. Journal of Neuroscience, 13(1), 334–350. https://doi.org/10.1523/JNEUROSCI.13-01-00334.1993  
 
 """
-function FanoFactor(spiketime::Vector{Float32}; interval)
-    bins, r = bin_spiketimes(spiketime; interval = interval) 
+function FanoFactor(spiketime::Vector{Float32}; interval=nothing)
+    bins, r = bin_spiketimes(spiketime; interval) 
     ff  = var(bins) / mean(bins)
     isnan(ff) && (ff = 0.0)
     return ff
 end
 
-function FanoFactor(spiketimes::Spiketimes; interval)
+function FanoFactor(spiketimes::Spiketimes; interval=nothing)
     return FanoFactor.(spiketimes; interval)
 end
 
@@ -1010,4 +1036,5 @@ export spiketimes,
     sample_inputs,
     infer_spiketimes,
     infer_spikes,
-    resample_spikes
+    resample_spikes,
+    gaussian_smooth
