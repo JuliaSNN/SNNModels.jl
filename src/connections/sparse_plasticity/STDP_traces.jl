@@ -13,7 +13,7 @@ STDPGerstner
 end
 
 @snn_kw struct STDPConfavreux2025{FT = Float32} <: STDPParameter
-    η::FT = 0.001
+    η::FT = 0.01
     α::FT = 0 ## baseline rate dependency post
     β::FT = 0 ## baseline rate dependency pre
     κ::FT = 1.0f0 # stdp pre->post
@@ -141,24 +141,6 @@ function plasticity!(
             end
             Δpost[i] = t > last_post[i] ? tpost[i] * exp(-(t - last_post[i]) / τpost) : 0f0
         end
-
-        # @simd for i = 1:(length(rowptr)-1)
-        #     @simd for st = rowptr[i]:(rowptr[i+1]-1)
-        #         s = index[st]
-        #         if fireJ[J[s]] 
-        #             W[s] += η * (κ * Δpost[i] + α) # pre-post
-        #             W[s] = clamp(W[s], Wmin, Wmax)
-        #         end
-        #     end
-        # end
-        # @simd for j = 1:(length(colptr)-1)
-        #     @simd for s = colptr[j]:(colptr[j+1]-1)
-        #         if fireI[I[s]] 
-        #             W[s] +=  η * (γ * Δpre[j] + β) # post-pre
-        #             W[s] = clamp(W[s], Wmin, Wmax)
-        #         end
-        #     end
-        # end
 
         chunks = Iterators.partition(eachindex(W), cld(length(W), Threads.nthreads())) |> collect
         Threads.@threads for c in eachindex(chunks) # Iterate over presynaptic neurons

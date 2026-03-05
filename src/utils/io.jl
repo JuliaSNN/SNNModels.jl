@@ -105,7 +105,7 @@ function SNNload(;
     tic = time()
     DATA = JLD2.load(file)
     @info "$type $(name)"
-    @info "Loading time:  $(time()-tic) seconds"
+    @info "Loading time:  $(round(time()-tic, digits=2)) seconds"
     return dict2ntuple(DATA)
 end
 

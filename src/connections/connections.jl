@@ -3,17 +3,6 @@
 """
 abstract type AbstractConnectionParameter <: AbstractParameter end
 
-"""
-    AbstractConnection
-
-An abstract type representing a connection. Any struct inheriting from this type must implement:
-
-# Methods
-- `forward!(c::Receptors, param::SynapseParameter)`: Propagates the signal through the synapse.
-- `plasticity!(c::Receptors, param::SynapseParameter, dt::Float32, T::Time)`: Updates the synapse parameters based on plasticity rules.
-"""
-abstract type AbstractConnection <: AbstractComponent end
-
 include("empty.jl")
 include("rate_synapse.jl")
 include("fl_synapse.jl")
