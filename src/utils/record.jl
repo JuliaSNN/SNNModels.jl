@@ -504,14 +504,14 @@ spikes = record(p, :spiketimes)
 ```
 """
 function record(
-    p,
+    p::C,
     sym::Symbol;
     range = false,
     interval = nothing,
     interpolate = true,
     variables=  nothing,
     kwargs...,
-)
+) where {C<:Component}
     if sym == :fire
         @assert !isnothing(interval) "Range must be provided for firing rate recording"
         v, r = firing_rate(p, interval; interpolate, kwargs...)
@@ -547,7 +547,7 @@ function record(
     end
 end
 
-function record(pops::Vector, sym::Symbol; interval=nothing, interpolate=true, kwargs...)
+function record(pops, sym::Symbol; interval=nothing, interpolate=true, kwargs...)
     @assert !isnothing(interval) "Interval must be provided for recording of multiple populations"
     v_dt = map(pops) do pop
         !haskey(pop.records, sym) && return fill(0.0f0, (0, length(interval)))
@@ -564,7 +564,7 @@ function record(pops::Vector, sym::Symbol; interval=nothing, interpolate=true, k
 end
 
 
-record(p, sym::Symbol, interval::R; kwargs...) where {R<:AbstractRange} =
+record(p::T, sym::Symbol, interval::R; kwargs...) where {R<:AbstractRange, T<:Union{Component, Vector{<:Component}}} =
     record(p, sym; interval, kwargs...)
 
 
@@ -642,9 +642,13 @@ function clear_records!(obj)
         for v in obj
             if v isa AbstractPopulation ||
                v isa AbstractStimulus ||
-               v isa AbstractConnection
+               v isa AbstractConnection 
                 @debug "Removing records from $(v.name)"
                 _clear(v.records)
+            elseif v isa AbstractGroup
+                for g in v.elements
+                    clear_records!(g)
+                end
             elseif v isa String
                 continue
             elseif v isa Time

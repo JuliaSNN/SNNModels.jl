@@ -272,7 +272,7 @@ function print_model(model, get_keys = false)
             syn_pop = props(model_graph, e)[:pop][i]
             _k = get_keys ? "($k)" : ""
             # @info "$name $(_k): $(nameof(typeof(getfield(stim,k)))): $(nameof(typeof(getfield(stim,k).param)))"
-            @assert typeof(getfield(stim, k)) <: AbstractStimulus "Expected stimulus, got $(typeof(getfield(network.stim,k)))"
+            @assert (typeof(getfield(stim, k)) <: AbstractStimulus || typeof(getfield(stim, k)) <: AbstractStimulusGroup) "Expected stimulus, got $(typeof(getfield(network.stim,k)))"
             push!(
                 stimuli,
                 "$(f2l(name)) $(_k): $(f2l(syn_pop, 30)) $(nameof(typeof(getfield(stim,k))))",
@@ -344,7 +344,7 @@ function extract_items(
     elseif typeof(v) <: AbstractConnection
         @assert !haskey(syn, root) "Receptors $(root) already exists"
         push!(syn, root => v)
-    elseif typeof(v) <: AbstractStimulus
+    elseif typeof(v) <: AbstractStimulus || typeof(v) <: AbstractStimulusGroup
         @assert !haskey(stim, root) "Stimulus $(root) already exists"
         push!(stim, root => v)
     elseif typeof(v) <: Time
@@ -367,7 +367,7 @@ function extract_items(
             elseif typeof(v) <: AbstractConnection
                 @assert !haskey(syn, new_key) "Receptors $(new_key) already exists"
                 push!(syn, new_key => v)
-            elseif typeof(v) <: AbstractStimulus
+            elseif typeof(v) <: AbstractStimulus || typeof(v) <: AbstractStimulusGroup
                 @assert !haskey(stim, new_key) "Stimulus $(new_key) already exists"
                 push!(stim, new_key => v)
             else

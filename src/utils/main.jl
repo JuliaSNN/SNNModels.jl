@@ -45,7 +45,13 @@ function _args_model(args, model)
     stim = Vector{AbstractStimulus}([])
     haskey(model, :pop) && append!(pop, model.pop)
     haskey(model, :syn) && append!(syn, model.syn)
-    haskey(model, :stim) && append!(stim, model.stim)
+    if haskey(model, :stim) 
+        for s in model.stim 
+            isa(s, AbstractStimulus) && push!(stim, s)
+            isa(s, AbstractStimulusGroup) && append!(stim, s.elements)
+        end
+    end
+
     for arg in args
         if typeof(arg) <: AbstractPopulation
             push!(pop, arg)
@@ -156,8 +162,11 @@ function sim!(
     dt = Float32(dt)
     duration = Float32(duration)
     dts = 0.0f0:dt:(duration-dt)
-    pbar = pbar ? ProgressBar(dts) : dts
-    for t in pbar
+    iter = pbar ? ProgressBar(dts) : dts
+    for t in iter
+        if pbar
+            set_multiline_postfix(iter, join(["$(p.name)rate =  $(round(mean(p.fire)*1000, digits=2))\n" for p in P]))
+        end
         sim!(P, C, S, dt, time)
     end
     return time
