@@ -7,6 +7,7 @@ abstract type AbstractParameter end
 
 abstract type AbstractComponent end
 
+abstract type AbstractGroup <: AbstractComponent end
 """
     Spiketimes
 
@@ -75,7 +76,52 @@ export AbstractParameter,
     AbstractConnectionParameter,
     AbstractPopulationParameter,
     AbstractStimulusParameter
+
+
+"""
+    AbstractStimulus
+
+An abstract type representing a stimulus. Any struct inheriting from this type must implement:
+
+# Methods
+- `stimulate!(p::Stimulus, param::StimulusParameter, time::Time, dt::Float32)`: Applies the stimulus to the population.
+"""
+abstract type AbstractStimulus <: AbstractComponent end
+
+"""
+    AbstractStimulusGroup
+An abstract type representing a group of stimuli. Any struct inheriting from this type must implement: 
+# Methods
+- `stimulate!(p::StimulusGroup, param::StimulusParameter, time::Time, dt::Float32)`: Applies the stimulus group to the population.
+"""
+abstract type AbstractStimulusGroup <: AbstractComponent end
+
+"""
+    AbstractPopulation
+
+An abstract type representing a population. Any struct inheriting from this type must implement:
+
+# Methods
+- `integrate!(p::NeuronModel, param::NeuronModelParam, dt::Float32)`: Integrates the neuron model over a time step `dt` using the given parameters.
+- `plasticity!(p::NeuronModel, param::NeuronModelParam, dt::Float32, T::Time)`: Updates the neuron model parameters based on plasticity rules.
+"""
+abstract type AbstractPopulation <: AbstractComponent end
+
+"""
+    AbstractConnection
+
+An abstract type representing a connection. Any struct inheriting from this type must implement:
+
+# Methods
+- `forward!(c::Receptors, param::SynapseParameter)`: Propagates the signal through the synapse.
+- `plasticity!(c::Receptors, param::SynapseParameter, dt::Float32, T::Time)`: Updates the synapse parameters based on plasticity rules.
+"""
+abstract type AbstractConnection <: AbstractComponent end
+
+
 export AbstractConnection, AbstractPopulation, AbstractStimulus
+Component = Union{AbstractPopulation, AbstractConnection, AbstractStimulus}
+
 
 
 NetworkModel = NamedTuple

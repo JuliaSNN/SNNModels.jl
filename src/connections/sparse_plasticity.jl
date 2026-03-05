@@ -63,6 +63,9 @@ function set_LTP!(c::AbstractSparseSynapse, state::Bool)
     c.LTPVars.active .= state
 end
 
+set_LTP!(c::AbstractConnection, state) = nothing
+set_STP!(c::AbstractConnection, state) = nothing
+
 function plasticity!(
     c::AbstractSparseSynapse,
     param::PT,
