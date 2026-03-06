@@ -67,14 +67,14 @@ Extracts the names and the neuron ids projected from a given set of stimuli.
 
 # Example
 """
-function subpopulations(stim, merge = true)
+function subpopulations(stim)
     # names = Vector{String}()
     # pops = Vector{Int}[]
     populations = Dict{String,Vector{Int}}()
     my_keys = collect(keys(stim))
     for key in my_keys
-        target = merge ? "" : "_$(getfield(stim, key).targets[:sym])"
-        name = getfield(stim, key).name * "$target"
+        # target = merge ? "" : "_$(getfield(stim, key).targets[:sym])"
+        name = getfield(stim, key).name
         pop_neurons = vcat(neurons(getfield(stim, key))...)
         if haskey(populations, name)
             populations[name] = vcat(populations[name], pop_neurons) |> unique |> collect
@@ -82,10 +82,11 @@ function subpopulations(stim, merge = true)
             push!(populations, name => pop_neurons)
         end
     end
-    names = collect(keys(populations))
-    pops = collect(values(populations))
-    order = sort(1:length(pops), by = x -> names[x])
-    return (names = names[order], populations = pops[order])
+    return dict2ntuple(populations)
+    # names = collect(keys(populations))
+    # pops = collect(values(populations))
+    # order = sort(1:length(pops), by = x -> names[x])
+    # return (names = names[order], populations = pops[order])
 end
 
 function average_conn_strength(M::Matrix, neurons::Vector{Vector{Int}})
