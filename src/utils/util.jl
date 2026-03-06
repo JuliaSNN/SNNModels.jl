@@ -404,9 +404,17 @@ function remove_element(model, key)
     elseif haskey(model.stim, key)
         delete!(stim, key)
     else
-        throw(ArgumentError("Element not found"))
+        # throw(ArgumentError("Element not found"))
+        @warn "Element with key $(key) not found in model. No element removed."
     end
-    compose(pop, syn, stim)
+    compose(;model..., pop, syn, stim, silent = true)
+end
+
+function remove_element(model, key::Vector)
+    for k in key
+        model = remove_element(model, k)
+    end
+    return model
 end
 
 
