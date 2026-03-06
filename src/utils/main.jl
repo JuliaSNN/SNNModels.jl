@@ -32,8 +32,22 @@ function train!(
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
     dt = Float32(dt)
     dts = 0.0f0:dt:(duration-dt)
-    pbar = pbar ? ProgressBar(dts) : dts
-    for t in pbar
+    iter = pbar ? ProgressBar(dts, printing_delay=0.1) : dts
+    firing_rates = Dict{String, Float32}(p.name => 0.f0 for p in P if haskey(p.records, :fire))
+    for t in iter
+        if pbar
+            map(P) do p
+                if haskey(p.records, :fire)
+                    rate = mean(p.fire)
+                    firing_rates[p.name] += rate / p.N - firing_rates[p.name]/100ms
+                end
+            end
+            set_multiline_postfix(iter, join(vcat(
+                        ["$(name) rate =  $(round(mean(firing_rates[name])*1000 *100, digits=2))Hz\n" 
+                        for name in keys(firing_rates)],
+                        "Time = $(round(get_time(time), digits=2))ms")
+                        ))
+        end
         train!(P, C, S, dt, time)
     end
     return time
@@ -162,10 +176,21 @@ function sim!(
     dt = Float32(dt)
     duration = Float32(duration)
     dts = 0.0f0:dt:(duration-dt)
-    iter = pbar ? ProgressBar(dts) : dts
+    iter = pbar ? ProgressBar(dts, printing_delay=0.1) : dts
+    firing_rates = Dict{String, Float32}(p.name => 0.f0 for p in P if haskey(p.records, :fire))
     for t in iter
         if pbar
-            set_multiline_postfix(iter, join(["$(p.name)rate =  $(round(mean(p.fire)*1000, digits=2))\n" for p in P]))
+            map(P) do p
+                if haskey(p.records, :fire)
+                    rate = mean(p.fire)
+                    firing_rates[p.name] += rate / p.N - firing_rates[p.name]/100ms
+                end
+            end
+            set_multiline_postfix(iter, join(vcat(
+                        ["$(name) rate =  $(round(mean(firing_rates[name])*1000 *100, digits=2))Hz\n" 
+                        for name in keys(firing_rates)],
+                        "Time = $(round(get_time(time), digits=2))ms")
+                        ))
         end
         sim!(P, C, S, dt, time)
     end

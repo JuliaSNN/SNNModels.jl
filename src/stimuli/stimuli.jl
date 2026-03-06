@@ -16,7 +16,7 @@ function neurons(stim::G) where {G<:AbstractStimulus}
     if hasfield(typeof(stim), :neurons) 
         return stim.neurons
     else
-        @warn "Stimulus: $stim does not have a :neurons field."
+        @warn "Stimulus: $(typeof(stim)) does not have a :neurons field."
         return nothing
     end
 end
