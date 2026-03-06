@@ -94,7 +94,7 @@ An abstract type representing a group of stimuli. Any struct inheriting from thi
 # Methods
 - `stimulate!(p::StimulusGroup, param::StimulusParameter, time::Time, dt::Float32)`: Applies the stimulus group to the population.
 """
-abstract type AbstractStimulusGroup <: AbstractComponent end
+abstract type AbstractStimulusGroup <: AbstractGroup end
 
 """
     AbstractPopulation
