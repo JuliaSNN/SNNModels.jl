@@ -1,3 +1,22 @@
+"""
+    IZParameter{FT<:AbstractFloat}
+
+Parameters for the Izhikevich neuron model.
+
+# Fields
+- `a::FT`: Time scale of recovery variable u (default: 0.01)
+- `b::FT`: Sensitivity of u to v (default: 0.2)
+- `c::FT`: After-spike reset value of v in mV (default: -65)
+- `d::FT`: After-spike increment of u (default: 2)
+- `τe::FT`: Excitatory synaptic time constant (default: 5ms)
+- `τi::FT`: Inhibitory synaptic time constant (default: 10ms)
+- `Ee::FT`: Excitatory reversal potential (default: 0mV)
+- `Ei::FT`: Inhibitory reversal potential (default: -80mV)
+
+# References
+- Izhikevich, E. M. (2003). Simple model of spiking neurons. IEEE Transactions on neural networks, 14(6), 1569-1572.
+"""
+IZParameter
 @snn_kw struct IZParameter{FT = Float32}
     a::FT = 0.01
     b::FT = 0.2
@@ -8,6 +27,41 @@
     Ee::FT = 0mV
     Ei::FT = -80mV
 end
+
+"""
+    IZ{VFT, VBT} <: AbstractPopulation
+
+Izhikevich neuron population model. Simple yet biologically plausible model that can reproduce various spiking patterns.
+
+# Fields
+## Population Info
+- `id::String`: Unique identifier (default: random 12-character string)
+- `name::String`: Population name (default: "IZ")
+- `N::Int32`: Number of neurons (default: 100)
+
+## Parameters
+- `param::IZParameter`: Model parameters (default: `IZParameter()`)
+
+## State Variables
+- `v::VFT`: Membrane potential (initialized to -65mV)
+- `u::VFT`: Recovery variable (initialized to b*v)
+- `fire::VBT`: Spike flags (default: false)
+- `I::VFT`: External input current (default: zeros)
+- `ge::VFT`: Excitatory conductance (initialized with random values)
+- `gi::VFT`: Inhibitory conductance (initialized with random values)
+
+## Recordings
+- `records::Dict`: Dictionary for storing simulation data
+
+# Model Equations
+- dv/dt = 0.04v² + 5v + 140 - u + I
+- du/dt = a(bv - u)
+- if v ≥ 30mV: v ← c, u ← u + d
+
+# References
+- [Izhikevich, 2003](https://www.izhikevich.org/publications/spikes.htm)
+"""
+IZ
 
 @snn_kw mutable struct IZ{VFT = Vector{Float32},VBT = Vector{Bool}} <: AbstractPopulation
     id::String = randstring(12)
@@ -36,10 +90,22 @@ function synaptic_target(
 end
 
 """
-[Izhikevich Neuron](https://www.izhikevich.org/publications/spikes.htm)
-"""
-IZ
+    integrate!(p::IZ, param::IZParameter, dt::Float32)
 
+Update Izhikevich neuron population for one timestep.
+
+# Arguments
+- `p::IZ`: The neuron population
+- `param::IZParameter`: Model parameters
+- `dt::Float32`: Time step size
+
+# Details
+- Updates synaptic conductances exponentially
+- Integrates membrane potential using Euler method (two half-steps for stability)
+- Updates recovery variable u
+- Applies synaptic currents
+- Detects spikes (v > 30mV) and applies reset
+"""
 function integrate!(p::IZ, param::IZParameter, dt::Float32)
     @unpack N, v, u, fire, I = p
     @unpack a, b, c, d = param

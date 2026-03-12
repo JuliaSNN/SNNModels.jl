@@ -7,6 +7,7 @@ abstract type AbstractParameter end
 
 abstract type AbstractComponent end
 
+abstract type AbstractGroup <: AbstractComponent end
 """
     Spiketimes
 
@@ -49,6 +50,21 @@ Time
     dt::Float32 = 0.125f0
 end
 
+"""
+    Time(time::Number)
+
+Create a Time struct from a numeric time value.
+
+# Arguments
+- `time::Number`: Time value (in ms units typically)
+
+# Returns
+- Time struct with t, tt, and dt fields initialized
+
+# Details
+- Converts time to timesteps using dt=0.125ms
+- Initializes vectors for current time and timestep
+"""
 function Time(time::Number)
     tts = time / 0.125f0
     return Time([Float32(time)], Int32[Int32(tts)], 0.125f0)
@@ -60,7 +76,52 @@ export AbstractParameter,
     AbstractConnectionParameter,
     AbstractPopulationParameter,
     AbstractStimulusParameter
+
+
+"""
+    AbstractStimulus
+
+An abstract type representing a stimulus. Any struct inheriting from this type must implement:
+
+# Methods
+- `stimulate!(p::Stimulus, param::StimulusParameter, time::Time, dt::Float32)`: Applies the stimulus to the population.
+"""
+abstract type AbstractStimulus <: AbstractComponent end
+
+"""
+    AbstractStimulusGroup
+An abstract type representing a group of stimuli. Any struct inheriting from this type must implement: 
+# Methods
+- `stimulate!(p::StimulusGroup, param::StimulusParameter, time::Time, dt::Float32)`: Applies the stimulus group to the population.
+"""
+abstract type AbstractStimulusGroup <: AbstractGroup end
+
+"""
+    AbstractPopulation
+
+An abstract type representing a population. Any struct inheriting from this type must implement:
+
+# Methods
+- `integrate!(p::NeuronModel, param::NeuronModelParam, dt::Float32)`: Integrates the neuron model over a time step `dt` using the given parameters.
+- `plasticity!(p::NeuronModel, param::NeuronModelParam, dt::Float32, T::Time)`: Updates the neuron model parameters based on plasticity rules.
+"""
+abstract type AbstractPopulation <: AbstractComponent end
+
+"""
+    AbstractConnection
+
+An abstract type representing a connection. Any struct inheriting from this type must implement:
+
+# Methods
+- `forward!(c::Receptors, param::SynapseParameter)`: Propagates the signal through the synapse.
+- `plasticity!(c::Receptors, param::SynapseParameter, dt::Float32, T::Time)`: Updates the synapse parameters based on plasticity rules.
+"""
+abstract type AbstractConnection <: AbstractComponent end
+
+
 export AbstractConnection, AbstractPopulation, AbstractStimulus
+Component = Union{AbstractPopulation, AbstractConnection, AbstractStimulus}
+
 
 
 NetworkModel = NamedTuple
@@ -70,6 +131,26 @@ VIT = Vector{Int}
 # VDT =Dict{Symbol,Any}
 
 
+"""
+    isa_model(model)
+
+Validate that a model has the required structure for a network model.
+
+# Arguments
+- `model`: The model to validate
+
+# Returns
+- `true` if valid
+
+# Throws
+- AssertionError if required fields (pop, syn, stim, time, name) are missing
+- AssertionError if any component fails validation
+
+# Details
+- Checks for presence of all required fields
+- Validates each population, synapse, and stimulus
+- Ensures time field is a Time struct
+"""
 function isa_model(model)
     # assert it has all the fields of a network model
     @assert hasproperty(model, :pop)
@@ -90,6 +171,19 @@ function isa_model(model)
     return true
 end
 
+"""
+    validate_population_model(model)
+
+Validate a population model structure.
+
+# Arguments
+- `model`: The population model to validate
+
+# Throws
+- AssertionError if model doesn't inherit from AbstractPopulation
+- AssertionError if param doesn't inherit from AbstractPopulationParameter  
+- AssertionError if required fields (N, param, id, name, records) are missing
+"""
 function validate_population_model(model)
     # Validate the population model structure and types
     @assert typeof(model) <: AbstractPopulation "Population $(model.name) must inherit from AbstractPopulation"
@@ -102,6 +196,19 @@ function validate_population_model(model)
     end
 end
 
+"""
+    validate_synapse_model(model)
+
+Validate a synapse/connection model structure.
+
+# Arguments
+- `model`: The synapse model to validate
+
+# Throws
+- AssertionError if model doesn't inherit from AbstractConnection
+- AssertionError if param doesn't inherit from AbstractConnectionParameter
+- AssertionError if required fields (param, id, name, records) are missing
+"""
 function validate_synapse_model(model)
     # Validate the synapse model structure and types
     @assert typeof(model) <: AbstractConnection "Receptors $(model.name) must inherit from AbstractConnection"
@@ -114,6 +221,19 @@ function validate_synapse_model(model)
     end
 end
 
+"""
+    validate_stimulus_model(model)
+
+Validate a stimulus model structure.
+
+# Arguments
+- `model`: The stimulus model to validate
+
+# Throws
+- AssertionError if model doesn't inherit from AbstractStimulus
+- AssertionError if param doesn't inherit from AbstractStimulusParameter
+- AssertionError if required fields (param, id, name, records) are missing
+"""
 function validate_stimulus_model(model)
     # Validate the stimulus model structure and types
     @assert typeof(model) <: AbstractStimulus "Stimulus $(model.name) must inherit from AbstractStimulus"

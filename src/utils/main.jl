@@ -32,8 +32,23 @@ function train!(
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
     dt = Float32(dt)
     dts = 0.0f0:dt:(duration-dt)
-    pbar = pbar ? ProgressBar(dts) : dts
-    for t in pbar
+    iter = pbar ? ProgressBar(dts, printing_delay=0.1) : dts
+    firing_rates = Dict{String, Float32}(p.name => 0.f0 for p in P if haskey(p.records, :fire))
+    τ_rate = 100.0f0
+    for t in iter
+        if pbar
+            map(P) do p
+                if haskey(p.records, :fire)
+                    rate = mean(p.fire)
+                    firing_rates[p.name] += rate / p.N - firing_rates[p.name]/τ_rate
+                end
+            end
+            set_multiline_postfix(iter, join(vcat(
+                        ["$(name) rate =  $(round(mean(firing_rates[name])*s*dt *τ_rate, digits=2))Hz\n" 
+                        for name in keys(firing_rates)],
+                        "Time = $(round(get_time(time)/s, digits=3))s")
+                        ))
+        end
         train!(P, C, S, dt, time)
     end
     return time
@@ -45,7 +60,13 @@ function _args_model(args, model)
     stim = Vector{AbstractStimulus}([])
     haskey(model, :pop) && append!(pop, model.pop)
     haskey(model, :syn) && append!(syn, model.syn)
-    haskey(model, :stim) && append!(stim, model.stim)
+    if haskey(model, :stim) 
+        for s in model.stim 
+            isa(s, AbstractStimulus) && push!(stim, s)
+            isa(s, AbstractStimulusGroup) && append!(stim, s.elements)
+        end
+    end
+
     for arg in args
         if typeof(arg) <: AbstractPopulation
             push!(pop, arg)
@@ -156,8 +177,23 @@ function sim!(
     dt = Float32(dt)
     duration = Float32(duration)
     dts = 0.0f0:dt:(duration-dt)
-    pbar = pbar ? ProgressBar(dts) : dts
-    for t in pbar
+    iter = pbar ? ProgressBar(dts, printing_delay=0.1) : dts
+    firing_rates = Dict{String, Float32}(p.name => 0.f0 for p in P if haskey(p.records, :fire))
+    τ_rate = 100.0f0
+    for t in iter
+        if pbar
+            map(P) do p
+                if haskey(p.records, :fire)
+                    rate = mean(p.fire)
+                    firing_rates[p.name] += rate / p.N - firing_rates[p.name]/100ms
+                end
+            end
+            set_multiline_postfix(iter, join(vcat(
+                        ["$(name) rate =  $(round(mean(firing_rates[name])*s*dt *τ_rate, digits=2))Hz\n" 
+                        for name in keys(firing_rates)],
+                        "Time = $(round(get_time(time)/s, digits=3))s")
+                        ))
+        end
         sim!(P, C, S, dt, time)
     end
     return time
@@ -199,7 +235,7 @@ function sim!(
         forward!(c, getfield(c, :param), dt, T)
         record!(c, T)
     end
-    flush(stdout)
+    # flush(stdout)
 end
 
 

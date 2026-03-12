@@ -2,7 +2,6 @@ abstract type LTPVariables <: PlasticityVariables end
 abstract type LTPParameter <: PlasticityParameter end
 abstract type STPVariables <: PlasticityVariables end
 abstract type STPParameter <: PlasticityParameter end
-abstract type AbstractSpikingSynapseParameter <: AbstractSparseSynapse end
 
 @snn_kw struct NoLTP <: LTPParameter
     active::VBT = [false]
@@ -56,6 +55,17 @@ function set_plasticity!(c::AbstractSparseSynapse, param::STPParameter, state::B
     c.STPVars.active .= state
 end
 
+function set_STP!(c::AbstractSparseSynapse, state::Bool)
+    c.STPVars.active .= state
+end
+
+function set_LTP!(c::AbstractSparseSynapse, state::Bool)
+    c.LTPVars.active .= state
+end
+
+set_LTP!(c::AbstractConnection, state) = nothing
+set_STP!(c::AbstractConnection, state) = nothing
+
 function plasticity!(
     c::AbstractSparseSynapse,
     param::PT,
@@ -97,8 +107,11 @@ export SpikingSynapse,
     NoSTDP,
     no_PlasticityVariables,
     plasticityvariables,
-    plasticity!
-change_plasticity!, set_plasticity!
+    plasticity!,
+    change_plasticity!, set_plasticity!,
+    set_STP!, set_LTP!,
+     update_traces!,
+     NoVariables
 
 
 export LTP, STP, NoLTP, NoSTP

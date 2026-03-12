@@ -1,6 +1,29 @@
+"""
+    rand_value(N, p1, p2)
 
+Generate N random values uniformly distributed between p1 and p2.
+
+# Arguments
+- `N`: Number of random values to generate
+- `p1`: First boundary value
+- `p2`: Second boundary value
+
+# Returns
+- Vector of N random values between min(p1,p2) and max(p1,p2)
+"""
 rand_value(N, p1, p2) = minimum([p1, p2]) .+ rand(N) .* abs(p1-p2)
 
+"""
+    exp32(x::R) where {R<:Real}
+
+Fast approximation of exp(x) using 32 iterations. Clamps input to avoid underflow.
+
+# Arguments
+- `x::Real`: Input value
+
+# Returns
+- Approximation of exp(x)
+"""
 @inline function exp32(x::R) where {R<:Real}
     x = ifelse(x < -10.0f0, -32.0f0, x)
     x = 1.0f0 + x / 32.0f0
@@ -12,6 +35,17 @@ rand_value(N, p1, p2) = minimum([p1, p2]) .+ rand(N) .* abs(p1-p2)
     return x
 end
 
+"""
+    exp64(x::R) where {R<:Real}
+
+Fast approximation of exp(x) using 64 iterations. Clamps input to avoid underflow.
+
+# Arguments
+- `x::Real`: Input value
+
+# Returns
+- Approximation of exp(x)
+"""
 @inline function exp64(x::R) where {R<:Real}
     x = ifelse(x < -10.0f0, -64.0f0, x)
     x = 1.0f0 + x / 64.0f0
@@ -24,6 +58,17 @@ end
     return x
 end
 
+"""
+    exp256(x::Float32)
+
+Fast approximation of exp(x) using 256 iterations. Clamps input to avoid underflow.
+
+# Arguments
+- `x::Float32`: Input value
+
+# Returns
+- Approximation of exp(x)
+"""
 @inline function exp256(x::Float32)
     x = ifelse(x < -10.0f0, -256.0f0, x)
     x = 1.0f0 + x / 256.0f0
@@ -38,10 +83,50 @@ end
     return x
 end
 
+"""
+    name(pre, post, k=nothing)
+
+Generate a Symbol name for connections between populations.
+
+# Arguments
+- `pre`: Pre-synaptic population name
+- `post`: Post-synaptic population name
+- `k`: Optional suffix for the name
+
+# Returns
+- Symbol in format `:pre_to_post` or `:pre_to_post_k` if k is provided
+"""
 name(pre, post, k = nothing) =
     isnothing(k) ? Symbol("$(pre)_to_$(post)") : Symbol("$(pre)_to_$(post)_$(k)")
+
+"""
+    str_name(pre, post, k=nothing)
+
+Generate a String name for connections between populations.
+
+# Arguments
+- `pre`: Pre-synaptic population name (String or Symbol)
+- `post`: Post-synaptic population name
+- `k`: Optional suffix for the name
+
+# Returns
+- String in format "pre_to_post" or "pre_to_post_k" if k is provided
+"""
 str_name(pre, post, k = nothing) =
     isnothing(k) ? "$(pre)_to_$(post)" : "$(pre)_to_$(post)_$(k)"
+
+"""
+    str_name(pre::String, k=nothing)
+
+Generate a String name with optional suffix.
+
+# Arguments
+- `pre::String`: Base name
+- `k`: Optional suffix
+
+# Returns
+- String in format "pre" or "pre_k" if k is provided
+"""
 str_name(pre::String, k = nothing) = isnothing(k) ? "$pre" : "$(pre)_$(k)"
 
 
@@ -98,6 +183,18 @@ function compose(args...; name = randstring(10), silent = false, time = Time(), 
 end
 
 
+"""
+    f2l(s, l=10)
+
+Format string to fixed length by padding or truncating.
+
+# Arguments
+- `s`: Input value to convert to string
+- `l`: Target length (default: 10)
+
+# Returns
+- String of exactly length `l`, padded with spaces or truncated
+"""
 function f2l(s, l = 10)
     s = string(s)
     if length(s) < l
@@ -163,7 +260,7 @@ function print_model(model, get_keys = false)
             end
             push!(
                 synapses,
-                "$(f2l(name, 18)) : $(f2l(syn_pop, 30)):$(f2l(meta)) : $(f2l(ltp_name)) : $(f2l(stp_name))",
+                "$(f2l(name, 18)) : $(f2l(syn_pop, 30)) || $(f2l(ltp_name))- $(f2l(meta)) : $(f2l(stp_name))",
             )
         end
     end
@@ -175,7 +272,7 @@ function print_model(model, get_keys = false)
             syn_pop = props(model_graph, e)[:pop][i]
             _k = get_keys ? "($k)" : ""
             # @info "$name $(_k): $(nameof(typeof(getfield(stim,k)))): $(nameof(typeof(getfield(stim,k).param)))"
-            @assert typeof(getfield(stim, k)) <: AbstractStimulus "Expected stimulus, got $(typeof(getfield(network.stim,k)))"
+            @assert (typeof(getfield(stim, k)) <: AbstractStimulus || typeof(getfield(stim, k)) <: AbstractStimulusGroup) "Expected stimulus, got $(typeof(getfield(network.stim,k)))"
             push!(
                 stimuli,
                 "$(f2l(name)) $(_k): $(f2l(syn_pop, 30)) $(nameof(typeof(getfield(stim,k))))",
@@ -247,7 +344,7 @@ function extract_items(
     elseif typeof(v) <: AbstractConnection
         @assert !haskey(syn, root) "Receptors $(root) already exists"
         push!(syn, root => v)
-    elseif typeof(v) <: AbstractStimulus
+    elseif typeof(v) <: AbstractStimulus || typeof(v) <: AbstractStimulusGroup
         @assert !haskey(stim, root) "Stimulus $(root) already exists"
         push!(stim, root => v)
     elseif typeof(v) <: Time
@@ -270,7 +367,7 @@ function extract_items(
             elseif typeof(v) <: AbstractConnection
                 @assert !haskey(syn, new_key) "Receptors $(new_key) already exists"
                 push!(syn, new_key => v)
-            elseif typeof(v) <: AbstractStimulus
+            elseif typeof(v) <: AbstractStimulus || typeof(v) <: AbstractStimulusGroup
                 @assert !haskey(stim, new_key) "Stimulus $(new_key) already exists"
                 push!(stim, new_key => v)
             else
@@ -281,6 +378,21 @@ function extract_items(
     return true
 end
 
+"""
+    remove_element(model, key)
+
+Remove an element (population, synapse, or stimulus) from a model by its key.
+
+# Arguments
+- `model`: The network model
+- `key`: Symbol key of the element to remove
+
+# Returns
+- New model with the element removed
+
+# Throws
+- `ArgumentError` if the key is not found in the model
+"""
 function remove_element(model, key)
     pop = Dict(pairs(model.pop))
     syn = Dict(pairs(model.syn))
@@ -292,9 +404,17 @@ function remove_element(model, key)
     elseif haskey(model.stim, key)
         delete!(stim, key)
     else
-        throw(ArgumentError("Element not found"))
+        # throw(ArgumentError("Element not found"))
+        @info "Element with key $(key) not found in model. No element removed."
     end
-    compose(pop, syn, stim)
+    compose(;model..., pop, syn, stim, silent = true)
+end
+
+function remove_element(model, key::Vector)
+    for k in key
+        model = remove_element(model, k)
+    end
+    return model
 end
 
 

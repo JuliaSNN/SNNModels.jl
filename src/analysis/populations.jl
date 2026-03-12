@@ -67,36 +67,37 @@ Extracts the names and the neuron ids projected from a given set of stimuli.
 
 # Example
 """
-function subpopulations(stim, merge = true)
-    # names = Vector{String}()
-    # pops = Vector{Int}[]
+function subpopulations(stim, subset=nothing)
     populations = Dict{String,Vector{Int}}()
     my_keys = collect(keys(stim))
     for key in my_keys
-        target = merge ? "" : "_$(getfield(stim, key).targets[:sym])"
-        name = getfield(stim, key).name * "$target"
-        neurons = getfield(stim, key).neurons
-        if haskey(populations, name)
-            populations[name] = vcat(populations[name], neurons) |> unique |> collect
-        else
-            push!(populations, name => neurons)
-        end
+        name = getfield(stim, key).name
+        !isnothing(subset) && !(string(name) ∈ subset) && continue
+        populations[name] = vcat(neurons(getfield(stim, key))...) |> unique |> collect
     end
-    names = collect(keys(populations))
-    pops = collect(values(populations))
-    order = sort(1:length(pops), by = x -> names[x])
-    return names[order], pops[order]
+    return dict2ntuple(sort(populations))
 end
 
-function average_conn_strength(M::Matrix, neurons::Vector{Vector{Int}})
-    ave_conn = zeros(length(neurons), length(neurons))
-    for i in eachindex(neurons)
-        for j in eachindex(neurons)
-            ave_conn[i, j] = mean(M[neurons[i], neurons[j]]) / 0.20
+function target_neurons(stim, targets=nothing)
+    t_neurons = Vector{Int}[]
+    for key in targets
+        haskey(stim, Symbol(key)) || throw("Stimulus does not contain target: $key")
+        name = getfield(stim, Symbol(key)).name
+        push!(t_neurons, vcat(neurons(getfield(stim, Symbol(key)))...) |> unique |> collect)
+    end
+    return t_neurons
+end
+
+function average_conn_strength(M::T, pops::Vector{Vector{Int}}, sparsity=0.2) where {T<:AbstractMatrix}
+    pre = pops
+    post = pops
+    ave_conn = zeros(Float32, length(post), length(pre))
+    for i in eachindex(post)
+        for j in eachindex(pre)
+            ave_conn[i, j] = mean(M[post[i], pre[j]])/sparsity
         end
     end
     return ave_conn
 end
 
-export population_indices,
-    filter_populations, subpopulations, filter_items, average_conn_strength
+export population_indices, target_neurons, filter_populations, subpopulations, filter_items, average_conn_strength

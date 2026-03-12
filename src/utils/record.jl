@@ -272,6 +272,7 @@ function monitor!(
     keys::Vector;
     sr = 1000Hz,
     variables::Symbol = :none,
+    verbose = false
 ) where {Item<:Union{AbstractPopulation,AbstractStimulus,AbstractConnection}}
     if !haskey(obj.records, :indices)
         obj.records[:indices] = Dict{Symbol,Vector{Int}}()
@@ -304,12 +305,9 @@ function monitor!(
             if hasfield(typeof(obj), sym)
                 typ = typeof(getfield(obj, sym))
                 key = sym
-                # !isempty(ind) && (obj.records[:indices][key] = ind)
-                # obj.records[:sr][key] = sr
-                # obj.records[key] = Vector{typ}()
             else
-                @warn "Field $sym not found in $(nameof(typeof(obj)))"
-                continue
+                verbose && @warn "Field $sym not found in $(nameof(typeof(obj)))"
+                continue 
             end
         else
             if hasproperty(obj, variables)
@@ -321,18 +319,18 @@ function monitor!(
                         push!(obj.records[:variables], variables)
                     end
                 else
-                    @warn "Field $sym not found in $(nameof(typeof(getfield(obj, variables))))"
+                    verbose && @warn "Field $sym not found in $(nameof(typeof(getfield(obj, variables))))"
                     continue
                 end
             else
-                @warn "Field $variables not found in $(nameof(typeof(obj)))"
+                verbose && @warn "Field $variables not found in $(nameof(typeof(obj)))"
                 continue
             end
         end
         @debug "Monitoring :$(key) in $(obj.name)"
 
         if haskey(obj.records, key)
-            @warn "Key $key already being monitored in $(obj.name)"
+            verbose && @warn "Key $key already being monitored in $(obj.name)"
             continue
         end
         !isempty(ind) && (obj.records[:indices][key] = ind)
@@ -506,14 +504,14 @@ spikes = record(p, :spiketimes)
 ```
 """
 function record(
-    p,
+    p::C,
     sym::Symbol;
     range = false,
     interval = nothing,
     interpolate = true,
     variables=  nothing,
     kwargs...,
-)
+) where {C<:Component}
     if sym == :fire
         @assert !isnothing(interval) "Range must be provided for firing rate recording"
         v, r = firing_rate(p, interval; interpolate, kwargs...)
@@ -549,9 +547,24 @@ function record(
     end
 end
 
+function record(pops, sym::Symbol; interval=nothing, interpolate=true, kwargs...)
+    @assert !isnothing(interval) "Interval must be provided for recording of multiple populations"
+    v_dt = map(pops) do pop
+        !haskey(pop.records, sym) && return fill(0.0f0, (0, length(interval)))
+        rr = record(pop, sym; interval, range = false, interpolate, kwargs...)
+        rr(axes(rr, 1), interval)
+    end |> x-> vcat(x...)
+    r = interval
+    ax = map(i -> axes(v_dt, i), 1:(length(size(v_dt))-1))
+    scale(
+        Interpolations.interpolate(v_dt, get_interpolator(v_dt)),
+        ax...,
+        r,
+    )
+end
 
 
-record(p, sym::Symbol, interval::R; kwargs...) where {R<:AbstractRange} =
+record(p::T, sym::Symbol, interval::R; kwargs...) where {R<:AbstractRange, T<:Union{Component, Vector{<:Component}}} =
     record(p, sym; interval, kwargs...)
 
 
@@ -629,9 +642,13 @@ function clear_records!(obj)
         for v in obj
             if v isa AbstractPopulation ||
                v isa AbstractStimulus ||
-               v isa AbstractConnection
+               v isa AbstractConnection 
                 @debug "Removing records from $(v.name)"
                 _clear(v.records)
+            elseif v isa AbstractGroup
+                for g in v.elements
+                    clear_records!(g)
+                end
             elseif v isa String
                 continue
             elseif v isa Time

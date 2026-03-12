@@ -1,4 +1,21 @@
+"""
+    @symdict(x...)
 
+Create a `Dict{Symbol,Any}` from variable names.
+
+# Arguments
+- `x...`: Variable names to include in the dictionary
+
+# Returns
+- Dictionary mapping variable names (as symbols) to their values
+
+# Example
+```julia
+a = 1
+b = 2
+d = @symdict(a, b)  # Dict(:a => 1, :b => 2)
+```
+"""
 macro symdict(x...)
     ex = Expr(:block)
     push!(ex.args, :(d = Dict{Symbol,Any}()))
@@ -9,6 +26,18 @@ macro symdict(x...)
     return ex
 end
 
+"""
+    snn_kw_str_param(x)
+
+Parse struct type parameter expressions for the `@snn_kw` macro.
+
+# Arguments
+- `x::Symbol`: Simple type parameter
+- `x::Expr`: Type parameter expression with constraints or defaults
+
+# Returns
+- Tuple containing parsed parameter information
+"""
 snn_kw_str_param(x::Symbol) = (x,)
 function snn_kw_str_param(x::Expr)
     if x.head == :(<:)
@@ -22,6 +51,18 @@ function snn_kw_str_param(x::Expr)
     end
     error("Can't handle param Expr: $x")
 end
+"""
+    snn_kw_str_field(x)
+
+Parse struct field expressions for the `@snn_kw` macro.
+
+# Arguments
+- `x::Symbol`: Simple field name
+- `x::Expr`: Field expression with type annotation or default value
+
+# Returns
+- Tuple containing parsed field information
+"""
 snn_kw_str_field(x::Symbol) = (x,)
 function snn_kw_str_field(x::Expr)
     if x.head == :(::)
@@ -32,6 +73,17 @@ function snn_kw_str_field(x::Expr)
     error("Can't handle field Expr: $x")
 end
 
+"""
+    snn_kw_str_kws(x::Tuple)
+
+Convert parsed field tuple to keyword argument expression.
+
+# Arguments
+- `x::Tuple`: Parsed field information (name, type, default)
+
+# Returns
+- Expression for keyword argument in constructor
+"""
 function snn_kw_str_kws(x::Tuple)
     if 1 <= length(x) <= 2
         return x[1]
@@ -40,6 +92,17 @@ function snn_kw_str_kws(x::Tuple)
     end
 end
 
+"""
+    snn_kw_str_kws_types(x::Tuple)
+
+Convert parsed parameter tuple to typed keyword argument expression.
+
+# Arguments
+- `x::Tuple`: Parsed parameter information
+
+# Returns
+- Expression for typed keyword argument
+"""
 function snn_kw_str_kws_types(x::Tuple)
     if 1 <= length(x) <= 2
         return Expr(:(::), x[1], x[2])
@@ -48,7 +111,24 @@ function snn_kw_str_kws_types(x::Tuple)
     end
 end
 
+"""
+    KwStrSentinel
+
+Sentinel type used internally by `@snn_kw` to track unassigned type parameters.
+"""
 struct KwStrSentinel end
+
+"""
+    snn_kw_str_sentinels(x)
+
+Add sentinel default values to type parameters for tracking assignment.
+
+# Arguments
+- `x`: Parsed parameter tuple
+
+# Returns
+- Tuple with sentinel default value added
+"""
 function snn_kw_str_sentinels(x)
     if length(x) == 1
         return (x[1], Any, :(KwStrSentinel()))
@@ -58,12 +138,35 @@ function snn_kw_str_sentinels(x)
         return x
     end
 end
+"""
+    snn_kw_str_sentinel_check(x)
+
+Generate code to check if type parameter was assigned or use default.
+
+# Arguments
+- `x`: Parsed parameter information
+
+# Returns
+- Expression checking for sentinel value
+"""
 snn_kw_str_sentinel_check(x) = :(
     if $(x[1]) isa KwStrSentinel
         $(x[1]) = $(length(x) > 1 ? x[2] : Any)
     end
 )
 
+"""
+    snn_kw_str_sentinel_check_concrete(x; dict)
+
+Generate code to infer concrete type from field types if not explicitly provided.
+
+# Arguments
+- `x`: Parsed parameter information
+- `dict`: Dictionary mapping type parameters to inferred concrete types
+
+# Returns
+- Expression checking for sentinel and inferring concrete type
+"""
 function snn_kw_str_sentinel_check_concrete(x; dict)
     # @show dict
     # @show x[1]
@@ -78,6 +181,17 @@ function snn_kw_str_sentinel_check_concrete(x; dict)
     )
 end
 
+"""
+    snn_kw_get_concrete_types(x)
+
+Infer concrete types for type parameters from field definitions.
+
+# Arguments
+- `x`: Vector of parsed field information
+
+# Returns
+- Dictionary mapping type parameters to inferred concrete types
+"""
 function snn_kw_get_concrete_types(x)
     my_dict = Dict{Symbol,Any}()
     for field in x
@@ -97,7 +211,25 @@ end
 
 
 
-"A minimal implementation of `Base.@kwdef` with default type parameter support"
+"""
+    @snn_kw
+
+A minimal implementation of `Base.@kwdef` with default type parameter support.
+Generates keyword constructors for structs with automatic type parameter inference.
+
+# Usage
+```julia
+@snn_kw struct MyStruct{FT = Float32}
+    x::FT = 1.0
+    y::FT = 2.0
+end
+
+# Can now create with:
+MyStruct()              # Uses Float32 (default)
+MyStruct(FT=Float64)    # Uses Float64
+MyStruct(x=3.0)         # Uses Float32, x=3.0
+```
+"""
 macro snn_kw(str)
     str_abs = nothing
     if str.args[2] isa Expr && str.args[2].head == :(<:)
@@ -183,16 +315,29 @@ end
 
 export @symdict, @snn_kw
 
-"""" Macro to update fields in a named tuple configuration.
-    Usage:
-        @update base_config field1.field2 = value
-        @update base_config begin
-            field1.field2 = value1
-            field1.field3.field4 = value2
-        end
 """
+    @update
 
-# Simple update macro for handling multiple updates in a block
+Macro to update fields in a named tuple configuration immutably.
+
+# Usage
+```julia
+config = (a = 1, b = (c = 2, d = 3))
+new_config = @update config b.c = 5
+# or with multiple updates:
+new_config = @update config begin
+    b.c = 5
+    b.d = 6
+end
+```
+
+# Arguments
+- `base`: Base configuration (NamedTuple or struct)
+- `update_expr`: Field assignment(s) to apply
+
+# Returns
+- New configuration with updated fields
+"""
 macro update(base, update_expr)
     # Verify if the expr is a block or a line
     if update_expr.head == :block
@@ -260,7 +405,20 @@ macro update(base, update_expr)
     # end
 end
 
-# Deep merge function for named tuples
+"""
+    update_with_merge(base_config::NamedTuple, path::Vector{Symbol}, value, full_path=nothing)
+
+Recursively update a nested field in a NamedTuple.
+
+# Arguments
+- `base_config::NamedTuple`: The configuration to update
+- `path::Vector{Symbol}`: Field path to update (e.g., [:a, :b, :c] for a.b.c)
+- `value`: New value to assign
+- `full_path`: Full path for error messages (internal use)
+
+# Returns
+- Updated NamedTuple with the field modified
+"""
 function update_with_merge(
     base_config::NamedTuple,
     path::Vector{Symbol},

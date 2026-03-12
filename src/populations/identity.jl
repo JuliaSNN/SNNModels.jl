@@ -43,11 +43,10 @@ function Population(::IdentityParam; kwargs...)
     return Identity(; kwargs...)
 end
 
-function synaptic_target(targets::Dict, post::Identity, sym::Symbol, target::Nothing)
-    v = :spikecount
-    g = getfield(post, sym)
-    v_post = getfield(post, v)
-    push!(targets, :sym => sym)
+function synaptic_target(targets::Dict, post::Identity, sym::Symbol, target)
+    g = getfield(post, :g)
+    v_post = zeros(Float32, length(g))
+    push!(targets, :sym => :g)
     return g, v_post
 end
 
