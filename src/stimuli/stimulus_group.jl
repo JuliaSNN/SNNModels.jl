@@ -8,7 +8,7 @@
     records::Dict = Dict()
 end
 
-function StimulusGroup(param::P, 
+function MultiCompartmentStimulusGroup(param::P, 
                         post::T,  
                         sym::Symbol, 
                         comps::Vector{Symbol};
@@ -35,5 +35,5 @@ set_active!(stim::StimulusGroup, active::Bool) = map(s -> set_active!(s, active)
 
 neurons(stim::StimulusGroup) = vcat(map(s -> neurons(s), stim.elements))
 
-export  StimulusGroup, set_variable!, set_intervals!, stimulate!, set_active!, neurons
+export  StimulusGroup, set_variable!, set_intervals!, stimulate!, set_active!, neurons, MultiCompartmentStimulusGroup
 # end
