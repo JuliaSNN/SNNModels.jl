@@ -405,7 +405,7 @@ function remove_element(model, key)
         delete!(stim, key)
     else
         # throw(ArgumentError("Element not found"))
-        @warn "Element with key $(key) not found in model. No element removed."
+        @info "Element with key $(key) not found in model. No element removed."
     end
     compose(;model..., pop, syn, stim, silent = true)
 end

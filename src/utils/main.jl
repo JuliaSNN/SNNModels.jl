@@ -34,18 +34,19 @@ function train!(
     dts = 0.0f0:dt:(duration-dt)
     iter = pbar ? ProgressBar(dts, printing_delay=0.1) : dts
     firing_rates = Dict{String, Float32}(p.name => 0.f0 for p in P if haskey(p.records, :fire))
+    τ_rate = 100.0f0
     for t in iter
         if pbar
             map(P) do p
                 if haskey(p.records, :fire)
                     rate = mean(p.fire)
-                    firing_rates[p.name] += rate / p.N - firing_rates[p.name]/100ms
+                    firing_rates[p.name] += rate / p.N - firing_rates[p.name]/τ_rate
                 end
             end
             set_multiline_postfix(iter, join(vcat(
-                        ["$(name) rate =  $(round(mean(firing_rates[name])*1000 *100, digits=2))Hz\n" 
+                        ["$(name) rate =  $(round(mean(firing_rates[name])*s*dt *τ_rate, digits=2))Hz\n" 
                         for name in keys(firing_rates)],
-                        "Time = $(round(get_time(time), digits=2))ms")
+                        "Time = $(round(get_time(time)/s, digits=3))s")
                         ))
         end
         train!(P, C, S, dt, time)
@@ -178,6 +179,7 @@ function sim!(
     dts = 0.0f0:dt:(duration-dt)
     iter = pbar ? ProgressBar(dts, printing_delay=0.1) : dts
     firing_rates = Dict{String, Float32}(p.name => 0.f0 for p in P if haskey(p.records, :fire))
+    τ_rate = 100.0f0
     for t in iter
         if pbar
             map(P) do p
@@ -187,9 +189,9 @@ function sim!(
                 end
             end
             set_multiline_postfix(iter, join(vcat(
-                        ["$(name) rate =  $(round(mean(firing_rates[name])*1000 *100, digits=2))Hz\n" 
+                        ["$(name) rate =  $(round(mean(firing_rates[name])*s*dt *τ_rate, digits=2))Hz\n" 
                         for name in keys(firing_rates)],
-                        "Time = $(round(get_time(time), digits=2))ms")
+                        "Time = $(round(get_time(time)/s, digits=3))s")
                         ))
         end
         sim!(P, C, S, dt, time)
