@@ -59,7 +59,7 @@ include("multicompartment/ballandstick.jl")
 Population(; param, kwargs...) = Population(param; kwargs...)
 
 ## Heterogeneous populations
-function heterogeneous(
+function make_heterogeneous(
     param::T,
     N::Int;
     kwargs...,
@@ -85,4 +85,4 @@ export AbstractDendriteIF,
     Population,
     integrate!,
     plasticity!,
-    heterogeneous
+    make_heterogeneous
