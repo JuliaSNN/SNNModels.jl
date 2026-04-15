@@ -310,27 +310,37 @@ grid_size = (x=0.4, y=0.4)
 spatial_avg, x_range, y_range = spatial_activity(points, activity; N, L, grid_size)
 ```
 """
-function spatial_activity(points, activity; N, L, grid_size = (x = [0, 0.1], y = [0, 0.1]))
+function spatial_activity(points, activity; T, L=nothing, N=nothing, grid_size = (x = [0, 0.1], y = [0, 0.1]))
+    @assert isnothing(L) && !isnothing(N) || !isnothing(L) && isnothing(N) "Either L or N must be provided, but not both."
+
     xs, ys = points
     _, num_values = size(activity)
 
     time_indices = Vector{}()
-    if isa(N, Number)
-        for t = 1:(num_values÷N)
-            push!(time_indices, (1+(t-1)*N):(t*N-1))
+    if isa(T, Number)
+        for t = 1:(num_values÷T)
+            push!(time_indices, (1+(t-1)*T):(t*T-1))
         end
-    elseif isa(N, AbstractVector)
-        for t in eachindex(N)
-            push!(time_indices, N[t])
+    elseif isa(T, AbstractVector)
+        for t in eachindex(T)
+            push!(time_indices, T[t])
         end
     else
-        error("N must be a number or a vector of time_indices")
+        error("T is: $(typeof(T)). It must be a number or a vector of time_indices")
+    end
+
+    if isnothing(L)
+        Nx, Ny = isa(N, Number) ? (N, N) : (N.x, N.y)
+        Lx = (grid_size.x[2] - grid_size.x[1]) / Nx
+        Ly = (grid_size.y[2] - grid_size.y[1]) / Ny
+    else
+        Lx, Ly = isa(L, Number) ? (L, L) : (L.x, L.y)
     end
 
     # Define the grid size
     @unpack x, y = grid_size
-    x_range = ceil(Int, diff(collect(x))[1] / L)
-    y_range = ceil(Int, diff(collect(y))[1] / L)
+    x_range = ceil(Int, diff(collect(x))[1] / Lx)
+    y_range = ceil(Int, diff(collect(y))[1] / Ly)
 
     spatial_avg = Array{Any,3}(undef, x_range, y_range, length(time_indices))
     spatial_avg[:].=0
@@ -339,16 +349,16 @@ function spatial_activity(points, activity; N, L, grid_size = (x = [0, 0.1], y =
         for j = 1:x_range
             for k = 1:y_range
                 # Find points within the current grid cell
-                indices_x = findall(_x -> ((j-1)*L <= _x-x[1] < j*L), xs) |> Set
-                indices_y = findall(_y -> ((k-1)*L <= _y-y[1] < k*L), ys) |> Set
+                indices_x = findall(_x -> ((j-1)*Lx <= _x-x[1] < j*Lx), xs) |> Set
+                indices_y = findall(_y -> ((k-1)*Ly <= _y-y[1] < k*Ly), ys) |> Set
                 indices = intersect(indices_x, indices_y) |> collect
                 isempty(indices) && continue
                 spatial_avg[j, k, t] = mean(activity[indices, interval])
             end
         end
     end
-    x_range = range(x[1], stop = x[end], length = x_range)
-    y_range = range(y[1], stop = y[end], length = y_range)
+    x_range = range(x[1], stop = x[end], length = maximum([x_range, 2]))
+    y_range = range(y[1], stop = y[end], length = maximum([y_range, 2]))
     return spatial_avg, x_range, y_range
 end
 
