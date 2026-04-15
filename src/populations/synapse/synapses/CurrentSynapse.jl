@@ -52,7 +52,7 @@ end
     @unpack glu, gaba = receptors
     @unpack N, ge, gi = synvars
     @unpack τe, τi = param
-    @fastmath @inbounds @simd for i ∈ 1:N
+    @fastmath @inbounds @simd for i ∈ 1:input_N(p)
         ge[i] += glu[i]
         gi[i] += gaba[i]
         ge[i] += dt * (-ge[i] / τe)
@@ -69,8 +69,27 @@ end
 ) where {P<:AbstractGeneralizedIF,T<:AbstractCurrentParameter}
     @unpack N, v, syn_curr = p
     @unpack ge, gi = synvars
-    @inbounds @simd for i ∈ 1:N
+    @inbounds @simd for i ∈ 1:input_N(p)
         syn_curr[i] = -(ge[i] - gi[i])
+    end
+end
+
+@inline function synaptic_current!(
+    p::P,
+    synapse::T,
+    synvars::AbstractSynapseVariable,
+    v::VT1, # membrane potential
+    syncurr::VT2, # synaptic current
+) where {
+    P<:AbstractGeneralizedIF,
+    T<:AbstractCurrentParameter,
+    VT1<:AbstractVector,
+    VT2<:AbstractVector,
+}
+    @unpack ge, gi = synvars
+    @unpack N = p
+    @inbounds @simd for i ∈ 1:input_N(p)
+        syncurr[i] = -(ge[i] - gi[i])
     end
 end
 

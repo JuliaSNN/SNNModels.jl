@@ -42,6 +42,14 @@ end
 """
 SpikingSynapse
 
+function input_N(pre::AbstractPopulation)
+    return pre.N
+end
+
+function output_N(post::AbstractPopulation)
+    return post.N
+end
+
 function SpikingSynapse(
     pre::AbstractPopulation,
     post::AbstractPopulation,
@@ -56,7 +64,7 @@ function SpikingSynapse(
 )
 
     # set the synaptic weight matrix
-    w = sparse_matrix(pre.N, post.N, conn)
+    w = sparse_matrix(output_N(pre), input_N(post), conn)
     # remove autapses if pre == post
     (pre == post) && (w[diagind(w)] .= 0)
     # get the sparse representation of the synaptic weight matrix

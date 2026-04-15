@@ -47,6 +47,9 @@ include("generalized_if/if_extended.jl")
 # include("generalized_if/if_CANAHP.jl")
 # include("adex/adex_multitimescale.jl")
 
+## Heterogeneous recurrent
+include("hetrec.jl")
+
 ## Multicompartment
 abstract type AbstractDendriteIF <: AbstractGeneralizedIF end
 include("multicompartment/dendrite.jl")
