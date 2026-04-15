@@ -528,7 +528,7 @@ function record(
             v, r = interpolated_record(p, sym)
             if !isnothing(interval)
                 @assert interval[1] .>= r[1] "Interval start $(interval[1]) is out of bounds $(r_v[1])"
-                @assert interval[end] .<= r[end] "Interval end $(interval[end]) is out of bounds $(r_v[end])"
+                @assert interval[end] .<= r[end] "Interval end $(interval[end]) is out of bounds $(r[end])"
                 v_dt = v(axes(v, 1), interval)
                 r = interval
                 ax = map(i -> axes(v_dt, i), 1:(length(size(v))-1))
