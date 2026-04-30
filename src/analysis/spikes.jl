@@ -137,7 +137,7 @@ function alpha_function(t::Float32, τ::Float32)
     end
 end
 
-function get_alpha_kernel(τ, interval)
+function alpha_kernel(;τ=25ms, interval, kwargs...)
     kernel_length = τ * 10  # Length of the kernel in ms
     bin_width = step(interval) # kernel window in ms
     kernel_time = Float32.(0.0:bin_width:kernel_length)
@@ -146,7 +146,6 @@ function get_alpha_kernel(τ, interval)
     alpha_kernel ./= sum(alpha_kernel) * bin_width
     return alpha_kernel
 end
-
 """
     merge_spiketimes(spikes::Vector{Spiketimes}; start::Float32=0.0f0)
 
@@ -208,25 +207,27 @@ end
     firing_rate(
         spiketimes::Spiketimes,
         interval::AbstractVector = [],
-        sampling = 20,
-        τ = 25,
-        ttf = -1,
-        tt0 = -1,
-        cache = true,
-        pop::Union{Symbol,Vector{Int}}= :ALL,
+        interpolate = true,
+        pop_average = false,
+        time_average = false,
+        kernel = alpha_kernel,
+        neurons = :ALL,
+        kwargs...,
     )
 
 Calculate the firing rates for a population or an individual neuron.
 
 # Arguments
 - `spiketimes`: Spiketimes object.
+
+# Keyword Arguments
 - `interval`: Time interval vector (default is an empty vector).
-- `sampling`: Sampling rate (default is 20ms).
-- `τ`: Time constant for convolution (default is 25ms).
-- `ttf`: Final time point (default is -1, which means until the end of the simulation time).
-- `tt0`: Initial time point (default is -1, which means from the start of the simulation time based on the sampling rate).
-- `cache`: If true, uses cached data (default is true).
-- `pop`: Either :ALL for all populations or a Vector of Integers specifying specific neuron indices. Default is :ALL.
+- `interpolate`: Whether to interpolate the firing rates (default is true).
+- `pop_average`: Whether to average the firing rates across the population (default is false).
+- `time_average`: Whether to average the firing rates over time (default is false).
+- `kernel`: The kernel function to use for convolution (default is `alpha_kernel`).
+- `neurons`: The indices of the neurons to compute the firing rates for (default is `:ALL`).
+- `kwargs...`: Additional keyword arguments to pass to the kernel function.
 
 # Returns
 A tuple containing:
@@ -238,11 +239,11 @@ A tuple containing:
 function firing_rate(
     spiketimes::Spiketimes;
     interval::AbstractVector = [],
-    τ = 25ms,
     interpolate = true,
     pop_average = false,
     time_average = false,
     neurons = :ALL,
+    kernel = alpha_kernel,
     kwargs...,
 )
     # Check if the interval is empty and create an interval
@@ -260,10 +261,10 @@ function firing_rate(
         rates = zeros(Float32, length(spiketimes[neurons]), length(interval))
     else
         spiketimes = spiketimes[neurons]
-        alpha_kernel = get_alpha_kernel(τ, interval)
+        conv_kernel = kernel(;interval, kwargs...)
         rates = tmap(eachindex(spiketimes)) do n
             spike_train, _ = @views bin_spiketimes(spiketimes[n]; interval = interval, do_sparse = false)
-            conv(spike_train, alpha_kernel)[1:length(interval)] .* s # times
+            conv(spike_train, conv_kernel)[1:length(interval)] .* s 
         end
         my_rates = zeros(length(rates[1]), length(rates))
         for i in eachindex(rates)
@@ -336,21 +337,10 @@ end
 function average_firing_rate(
     spiketimes::Spiketimes;
     interval::AbstractVector = [],
-    sampling = 20ms,
-    τ = 25ms,
-    ttf = -1,
-    tt0 = -1,
-    cache = true,
 )
     rates, interval = firing_rate(
         spiketimes;
         interval = interval,
-        sampling = sampling,
-        τ = τ,
-        ttf = ttf,
-        tt0 = tt0,
-        cache = cache,
-        pop = pop,
         interpolate = false,
     )
     return mean.(rates)
@@ -622,10 +612,14 @@ function interval_standard_spikes!(spiketimes, interval::Vector{R}; margin = [0,
     return spiketimes
 end
 
-function gaussian_smooth(points, signal; σ, n)
-    gaussian_filter = gaussian(n, σ / (points[2] - points[1]) / 2) # Adjust σ based on bin size
+function gaussian_smooth(xs, signal; σ, n, padding=false)
+    Δx = step(xs)
+    gaussian_filter = gaussian(n, σ / Δx / 2) # Adjust σ based on bin size
     gaussian_filter ./= sum(gaussian_filter)
     @assert n % 2 == 1 "n must be odd for symmetric smoothing"
+    if padding
+        signal = vcat(fill(signal[1], n), signal, fill(signal[end], n))
+    end
     n_start = (n - 1) ÷ 2 +1
     n_end = n - n_start
     new_pps = (n_start):length(signal)-n_end
@@ -636,7 +630,7 @@ function gaussian_smooth(points, signal; σ, n)
         smoothed_signal[xx] = sum(signal[zz] .* gaussian_filter)
     end
 
-    xvals = points[n_start:length(points)-n_start+1]
+    xvals = xs[n_start:length(xs)-n_start+1]
     return smoothed_signal, xvals
 end
 
@@ -672,6 +666,20 @@ ISI_CV2(pop::T; interval = nothing) where {T<:AbstractPopulation} =
 
 export ISI_CV2
 
+
+##
+
+function ISI_CV(spiketime::Vector{Float32}; interval=nothing)
+    ISI = diff(spiketime)
+    cv = sqrt(var(ISI) / mean(ISI)^2)
+    return isnan(cv) ? 0.0 : cv
+end
+
+function ISI_CV(spiketimes::Spiketimes; interval=nothing)
+    return ISI_CV.(spiketimes; interval)    
+end
+
+export ISI_CV
 
 """
     FanoFactor(spiketimes::Vector{Float32}; window=100ms)
@@ -1014,6 +1022,8 @@ export spiketimes,
     merge_spiketimes,
     convolve,
     alpha_function,
+    alpha_kernel,
+    gcamp6_kernel,
     autocorrelogram,
     bin_spiketimes,
     compute_covariance_density,
@@ -1038,3 +1048,4 @@ export spiketimes,
     infer_spikes,
     resample_spikes,
     gaussian_smooth
+
