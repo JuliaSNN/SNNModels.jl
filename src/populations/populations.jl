@@ -24,6 +24,7 @@ include("spike/postspike.jl")
 
 ## Neurons
 include("poisson.jl")
+include("inhomogeneous_poisson.jl")
 include("iz.jl")
 include("hh.jl")
 include("morrislecar.jl")
