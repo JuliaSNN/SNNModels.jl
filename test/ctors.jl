@@ -4,11 +4,11 @@ coretype(T::UnionAll) = coretype(T.body)
 coretype(T::DataType) = T
 paramnames(T) = coretype(T).parameters
 function test_typeparams(Model; args = ())
-    Model = coretype(Model)
     n = Model(args...)
-    for idx = 1:length(fieldnames(Model))
-        fieldtypes(Model)[idx] isa TypeVar || continue
-        field, Tf = fieldnames(Model)[idx], fieldtypes(Model)[idx].name
+    T = coretype(Model)
+    for idx = 1:length(fieldnames(T))
+        fieldtypes(T)[idx] isa TypeVar || continue
+        field, Tf = fieldnames(T)[idx], fieldtypes(T)[idx].name
 
         # TODO: Test where vector is not <: DenseArray
         if Tf == :FT
