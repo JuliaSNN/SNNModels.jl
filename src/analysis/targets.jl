@@ -119,6 +119,41 @@ function is_unimodal(kernel, ratio)
 end
 
 
+# Non-mutating tile fraction; spiketrain must be pre-sorted.
+function _tile_fraction(spiketrain::Vector{Float32}, Δt::Float32, istart::Float32, iend::Float32)
+    isempty(spiketrain) && return 0f0
+    width = Δt
+    @inbounds for n in 2:length(spiketrain)
+        spiketrain[n] < istart && continue
+        spiketrain[n] > iend   && continue
+        gap = spiketrain[n] - spiketrain[n-1]
+        width += gap < 2f0 * Δt ? gap : 2f0 * Δt
+    end
+    width += Δt
+    return width / (iend - istart + 2f0 * Δt)
+end
+
+# Fraction of spikes in A with a coincident spike in B within Δt.
+# B must be pre-sorted; O(Nₐ log N_B) via binary search, zero allocations.
+function _coincident_fraction(A::Vector{Float32}, B::Vector{Float32}, Δt::Float32)
+    isempty(A) && return 0f0
+    nB    = length(B)
+    count = 0
+    @inbounds for t in A
+        lo = searchsortedfirst(B, t - Δt)
+        if lo <= nB && B[lo] <= t + Δt
+            count += 1
+        end
+    end
+    return Float32(count) / length(A)
+end
+
+function _sttc_pair(A::Vector{Float32}, B::Vector{Float32}, TA::Float32, TB::Float32, Δt::Float32)
+    PA = _coincident_fraction(A, B, Δt)
+    PB = _coincident_fraction(B, A, Δt)
+    return 0.5f0 * ((PA - TB) / (1f0 - PA * TB) + (PB - TA) / (1f0 - PB * TA))
+end
+
 """
     STTC(spiketrain1::Vector{Float32}, spiketrain2::Vector{Float32}, Δt::Float32)
 Calculate the Spike Time Tiling Coefficient (STTC) between two spike trains.
@@ -129,22 +164,20 @@ Calculate the Spike Time Tiling Coefficient (STTC) between two spike trains.
 # Returns
 - `sttc_value`: The calculated STTC value.
 """
-function STTC(spiketrainA, spiketrainB, Δt, interval)
-    # Implementation of the Spike Time Tiling Coefficient (STTC)
-    TA = tile_interval(spiketrainA, Δt, interval)
-    TB = tile_interval(spiketrainB, Δt, interval)
-    PA =
-        sum([any(abs.(spiketrainB .- t) .<= Δt) for t in spiketrainA]) / length(spiketrainA)
-    PB =
-        sum([any(abs.(spiketrainA .- t) .<= Δt) for t in spiketrainB]) / length(spiketrainB)
-    sttc_value = 0.5 * ((PA - TB) / (1 - PA*TB) + (PB - TA) / (1 - PB*TA))
-    return sttc_value
+function STTC(spiketrainA::Vector{Float32}, spiketrainB::Vector{Float32}, Δt::Float32, interval::AbstractVector)
+    istart = Float32(interval[1])
+    iend   = Float32(interval[end])
+    A = sort(spiketrainA)
+    B = sort(spiketrainB)
+    TA = _tile_fraction(A, Δt, istart, iend)
+    TB = _tile_fraction(B, Δt, istart, iend)
+    _sttc_pair(A, B, TA, TB, Δt)
 end
 
-function tile_interval(spiketrainA, Δt, interval)
+function tile_interval(spiketrainA::Vector{Float32}, Δt::Float32, interval::StepRangeLen{Float32})
     width = Δt
     sort!(spiketrainA)
-    for n in eachindex(spiketrainA)
+    @inbounds for n in eachindex(spiketrainA)
         n == 1 && continue
         spiketrainA[n] < interval[1] && continue
         spiketrainA[n] > interval[end] && continue
@@ -170,23 +203,32 @@ Calculate the Spike Time Tiling Coefficient (STTC) matrix for a set of spike tra
 - `sttc_matrix`: A matrix containing the STTC values between all pairs of spike trains.
 """
 function STTC(spiketrains::Vector{Vector{Float32}}, Δt, interval = nothing)
-    n = length(spiketrains)
-    sttc_matrix = zeros(Float32, n, n)
+    n  = length(spiketrains)
+    Δt = Float32(Δt)
     if isnothing(interval)
-        ss = vcat(spiketrains...)
-        interval = ((-Δt+minimum(ss)):(maximum(ss)+Δt))
+        ss     = reduce(vcat, spiketrains)
+        istart = minimum(ss) - Δt
+        iend   = maximum(ss) + Δt
+    else
+        istart = Float32(interval[1])
+        iend   = Float32(interval[end])
     end
-    for i in ProgressBar(1:n)
-        @inbounds @fastmath @simd for j = (i+1):n
-            if i==j
-                sttc_value = 1
-            elseif length(spiketrains[i]) == 0 || length(spiketrains[j]) == 0
-                sttc_value = 0
+
+    sorted = [sort(st) for st in spiketrains]
+    T = [_tile_fraction(st, Δt, istart, iend) for st in sorted]
+
+    sttc_matrix = zeros(Float32, n, n)
+    for i in 1:n; sttc_matrix[i, i] = 1f0; end
+
+    Threads.@threads for i in 1:n
+        @inbounds for j in (i+1):n
+            v = if length(sorted[i]) == 0 || length(sorted[j]) == 0
+                0f0
             else
-                sttc_value = STTC(spiketrains[i], spiketrains[j], Δt, interval)
+                _sttc_pair(sorted[i], sorted[j], T[i], T[j], Δt)
             end
-            sttc_matrix[i, j] = sttc_value
-            sttc_matrix[j, i] = sttc_value
+            sttc_matrix[i, j] = v
+            sttc_matrix[j, i] = v
         end
     end
     return sttc_matrix
