@@ -612,27 +612,72 @@ function interval_standard_spikes!(spiketimes, interval::Vector{R}; margin = [0,
     return spiketimes
 end
 
-function gaussian_smooth(xs, signal; σ, n, padding=false)
-    Δx = step(xs)
-    gaussian_filter = gaussian(n, σ / Δx / 2) # Adjust σ based on bin size
-    gaussian_filter ./= sum(gaussian_filter)
-    @assert n % 2 == 1 "n must be odd for symmetric smoothing"
-    if padding
-        signal = vcat(fill(signal[1], n), signal, fill(signal[end], n))
-    end
-    n_start = (n - 1) ÷ 2 +1
-    n_end = n - n_start
-    new_pps = (n_start):length(signal)-n_end
-    smoothed_signal  = zeros(length(new_pps))
-    for i in new_pps
-        zz = 1+i-n_start:i+n_end
-        xx = i - n_start + 1
-        smoothed_signal[xx] = sum(signal[zz] .* gaussian_filter)
-    end
+# function gaussian_smooth(xs, signal; σ, n, padding=false)
+#     Δx = step(xs)
+#     gaussian_filter = gaussian(n, σ / Δx / 2) # Adjust σ based on bin size
+#     gaussian_filter ./= sum(gaussian_filter)
+#     @assert n % 2 == 1 "n must be odd for symmetric smoothing"
+#     if padding
+#         signal = vcat(fill(signal[1], n), signal, fill(signal[end], n))
+#     end
+#     n_start = (n - 1) ÷ 2 +1
+#     n_end = n - n_start
+#     new_pps = (n_start):length(signal)-n_end
+#     smoothed_signal  = zeros(length(new_pps))
+#     for i in new_pps
+#         zz = 1+i-n_start:i+n_end
+#         xx = i - n_start + 1
+#         smoothed_signal[xx] = sum(signal[zz] .* gaussian_filter)
+#     end
 
-    xvals = xs[n_start:length(xs)-n_start+1]
-    return smoothed_signal, xvals
+#     xvals = xs[n_start:length(xs)-n_start+1]
+#     return smoothed_signal, xvals
+# end
+"""
+    gaussian_smooth(xs, x, sigma) -> Vector
+
+Apply a normalized Gaussian kernel to signal `x` sampled on grid `xs`.
+Kernel half-width is `3σ` (truncated); boundary bins are renormalized by
+accumulated kernel weight so edge values are not biased toward zero.
+
+# Arguments
+- `xs`: sample-position grid (used only for its step size `xs[2]-xs[1]`)
+- `x`: signal to smooth, length `n`
+- `sigma`: Gaussian standard deviation in the same units as `xs`
+
+# Returns
+- smoothed signal, same length as `x`
+
+See also [`calcium_postprocess`](@ref), [`deconvolve_df_f`](@ref).
+"""
+function gaussian_smooth(xs::RT, x::T, σ::R) where {T<:AbstractVector, R<:Real, RT<:AbstractVector}
+    step_x = xs[2] - xs[1]
+    half = ceil(Int, 3σ/step_x) ## 3σ cutoff for the kernel                                                          
+    xs = -half:half                                                                         
+    kernel = exp.(-xs.^2 ./ (2σ^2))                                                     
+    kernel ./= sum(kernel)                                                                  
+    n = length(x) ## length of the input signal
+    out = similar(x) 
+    s = 0.0
+    w = 0.0
+    @inbounds for i in 1:n
+        s = 0.0
+        w = 0.0                                                                             
+        @fastmath for (j, k) in enumerate(kernel)
+            idx = i + (j - half - 1)
+            idx < 1 && continue
+            idx > n && continue
+            s += k * x[idx]
+            w += k                                                                      
+        end                                                                                 
+        out[i] = s / w
+    end
+    @assert length(out) == length(x)
+    return out
 end
+
+
+
 
 """
     ISI_CV2(spiketimes::Vector{Float32})
