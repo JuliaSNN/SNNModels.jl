@@ -51,6 +51,9 @@ include("generalized_if/if_extended.jl")
 ## Heterogeneous recurrent
 include("hetrec.jl")
 
+## Rate / mean-field
+include("wilsoncowan.jl")
+
 ## Multicompartment
 abstract type AbstractDendriteIF <: AbstractGeneralizedIF end
 include("multicompartment/dendrite.jl")

@@ -18,22 +18,16 @@ using Test
     end
 
     @testset "EmptyParam" begin
-        ep = EmptyParam()
+        ep = SNNModels.EmptyParam()
         @test ep.type == :empty
-        
-        ep2 = EmptyParam(type=:custom)
+        ep2 = SNNModels.EmptyParam(type=:custom)
         @test ep2.type == :custom
     end
 
     @testset "Model validation" begin
-        # Create a valid simple model
-        E = IF(N=100, name=:E)
-        model = compose(E=E, name="test", silent=true)
-        
-        # Test isa_model
-        @test isa_model(model)
-        
-        # Test that model has required fields
+        E = IF(N=100)
+        model = compose(E=E, silent=true)
+        @test SNNModels.isa_model(model)
         @test hasproperty(model, :pop)
         @test hasproperty(model, :syn)
         @test hasproperty(model, :stim)
@@ -42,12 +36,8 @@ using Test
     end
 
     @testset "validate_population_model" begin
-        E = IF(N=100, name=:E)
-        
-        # Should not throw for valid population
-        @test validate_population_model(E) === nothing
-        
-        # Check required fields exist
+        E = IF(N=100)
+        @test SNNModels.validate_population_model(E) === nothing
         @test hasproperty(E, :N)
         @test hasproperty(E, :param)
         @test hasproperty(E, :id)

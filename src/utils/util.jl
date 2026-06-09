@@ -25,7 +25,7 @@ Fast approximation of exp(x) using 32 iterations. Clamps input to avoid underflo
 - Approximation of exp(x)
 """
 @inline function exp32(x::R) where {R<:Real}
-    x = ifelse(x < -10.0f0, -32.0f0, x)
+    x = ifelse(x < -10.0f0, -10.0f0, x)
     x = 1.0f0 + x / 32.0f0
     x *= x
     x *= x
