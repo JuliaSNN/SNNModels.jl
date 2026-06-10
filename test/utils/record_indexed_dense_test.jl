@@ -22,14 +22,13 @@ const ARTIFACT_DIR = abspath(joinpath(@__DIR__, "..", "artifacts", "record_preal
 
 function _model(; N = 50, seed = 42)
     Random.seed!(seed)
-    pop  = IF(N = N, param = IFParameter(El = -49mV))
-    stim = PoissonStimulus(pop, :ge; N = N, rate = 20Hz, μ = 1.5nS)
-    model = compose(pop = pop, stim = stim, silent = true)
+    pop   = IF(N = N, param = IFParameter(El = -49mV))
+    model = compose(pop = pop, silent = true)
     return model, pop
 end
 
 _nsteps(T, sr, dt = 0.125ms) =
-    floor(Int, floor(Int, T / dt) / max(1, floor(Int, 1.0 / sr / dt)))
+    floor(Int, floor(Int, T / dt) / max(1, floor(Int, 1.0 / sr / dt))) + 1  # +1 for record_zero! at t=0
 
 # ── 1. Indexed subset → dense mode ───────────────────────────────────────────
 
@@ -93,18 +92,18 @@ end
     sr  = 500Hz
 
     monitor!(pop, [:v]; sr = sr)
-    monitor!(pop, [(:ge, ind)]; sr = sr)
+    monitor!(pop, [(:w, ind)]; sr = sr)
     sim!(model, T)
 
-    v  = getvariable(pop, :v)
-    ge = getvariable(pop, :ge)
+    v = getvariable(pop, :v)
+    w = getvariable(pop, :w)
     nsteps = _nsteps(T, sr)
 
-    @test size(v,  1) == 40
-    @test size(ge, 1) == length(ind)
-    @test size(v,  2) == nsteps
-    @test size(ge, 2) == nsteps
-    @test ge isa SubArray
+    @test size(v, 1) == 40
+    @test size(w, 1) == length(ind)
+    @test size(v, 2) == nsteps
+    @test size(w, 2) == nsteps
+    @test w isa SubArray
 end
 
 # ── 5. Legacy getvariable: backward compat with pre-refactor artifacts ─────────
@@ -123,7 +122,7 @@ end
 
     # Re-build a synthetic population just for its records dict.
     _, pop = _model(N = N)
-    _init_records!(pop.records)
+    SNNModels._init_records!(pop.records)
     # Inject legacy-format data (as SNNload would produce from old JLD2 files).
     legacy_vec = [v_ref[:, t] for t in 1:nsteps]
     pop.records[:v_leg] = legacy_vec
