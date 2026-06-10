@@ -80,21 +80,19 @@ end
 
 
 
-function forward!(c::AggregateScaling, param::AggregateScalingParameter)
+function forward!(c::AggregateScaling, param::AggregateScalingParameter, dt::Float32, ::Time)
     @unpack y, fire, WT = c
     @unpack Y, τa, τe, Wmax = param
 
     @inbounds @simd for i in eachindex(fire)
-        y[i] -= y[i]/τa
+        y[i] -= dt * y[i] / τa
     end
     @inbounds @simd for i in eachindex(fire)
         fire[i] && (y[i] += 1)
     end
     @inbounds @simd for i in eachindex(fire)
-        WT[i] += (1-WT[i]/Wmax)*(1 - y[i]/Y[i])/τe
+        WT[i] += dt * (1 - WT[i] / Wmax) * (1 - y[i] / Y[i]) / τe
     end
-
-
 end
 
 """
