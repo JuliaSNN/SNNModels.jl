@@ -12,15 +12,12 @@ struct WCParameter <: AbstractPopulationParameter end
     records::Dict = Dict()
 end
 
-"""
-[Rate Neuron](https://neuronaldynamics.epfl.ch/online/Ch15.S3.html)
-"""
-Rate
-
-function integrate!(p::Rate, param::RateParameter, dt::Float32)
+function integrate!(p::WilsonCowan, param::WCParameter, dt::Float32)
     @unpack N, x, r, g, I = p
     @inbounds for i = 1:N
         x[i] += dt * (-x[i] + g[i] + I[i])
-        r[i] = tanh(x[i]) #max(0, x[i])
+        r[i] = tanh(x[i])
     end
 end
+
+export WilsonCowan

@@ -15,7 +15,7 @@ function AggregateScalingParameter(
     τe = 100ms,
     Wmin = 0.05,
 )
-    AggregateScalingParameter(τ, τa, τe, fill(rate, N), Wmin)
+    AggregateScalingParameter(; τ = τ, τa = τa, τe = τe, Y = fill(Float32(rate), N), Wmin = Float32(Wmin))
 end
 
 # AggregateScaling

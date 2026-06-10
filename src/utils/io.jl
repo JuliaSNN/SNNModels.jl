@@ -480,12 +480,14 @@ function write_config(path::String, info; config, name = "", kwargs...)
         write_value(file, key, value, "    ")
     end
     println(file, ")")
-    println(file, "config = (")
-    for (key, value) in pairs(config)
-        String(key) == "study" || String(key)=="models" && continue
-        write_value(file, key, value, "    ")
+    if !isnothing(config)
+        println(file, "config = (")
+        for (key, value) in pairs(config)
+            String(key) == "study" || String(key)=="models" && continue
+            write_value(file, key, value, "    ")
+        end
+        println(file, ")")
     end
-    println(file, ")")
     # for (info_name, info_value) in pairs(kwargs)
     #     String(info_name) == "sequence" && continue
     #     if isa(info_value, NamedTuple)

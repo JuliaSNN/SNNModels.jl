@@ -34,8 +34,9 @@ end
 
 @testset "Constructors" begin
     @testset "Type parameters" begin
+        @test SNNModels.Poisson() isa SNNModels.Poisson
         for Model in
-            (HH, IF, IZ, Rate, AdEx, Tripod, SNNModels.Poisson, BallAndStick, ExtendedIF)
+            (HH, IF, IZ, Rate, AdEx, Tripod, BallAndStick, ExtendedIF)
             test_typeparams(Model)
         end
         test_typeparams(RateSynapse; args = (Rate(), Rate()))
