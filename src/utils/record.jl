@@ -179,68 +179,40 @@ end
 end
 
 @inline function record_step(T, sr)
-    (get_step(T) % floor(Int, 1.0f0 / sr / get_dt(T))) == 0
+    period = max(1, floor(Int, 1.0f0 / sr / get_dt(T)))
+    (get_step(T) % period) == 0
 end
 
 """
     record!(obj, T::Time)
 
 Record the state of the object `obj` at the current time `T`.
-
-# Arguments
-- `obj`: The object to record the state from.
-- `T::Time`: The current time object.
-
-# Details
-This function records the state of the object by iterating through all keys in the object's records. For each key:
-- If the key is `:fire`, it records the firing activity using `record_fire!`.
-- For plasticity variables, it checks if the key starts with a variable name and records the corresponding field.
-- For other fields, it records the field if it exists in the object.
-- It updates the start and end times for each recorded variable.
-
-# Notes
-- The function skips special keys like `:indices`, `:sr`, and `:timestamp`.
-- The recording is performed only if the sampling rate condition is met.
 """
+@inline function get_model_field(obj, key::Symbol, var_map::Dict{Symbol,Tuple{Symbol,Symbol}})
+    if haskey(var_map, key)
+        parent, sub = var_map[key]
+        return getfield(getfield(obj, parent), sub)
+    else
+        return getfield(obj, key)
+    end
+end
+
 function record!(obj, T::Time)
     @unpack records = obj
+    !haskey(records, :data) && return
+    meta = records[:meta]
     time = get_time(T)
-    for key::Symbol in keys(records)
-        (key == :indices) && (continue)
-        (key == :sr) && (continue)
-        (key == :timestamp) && (continue)
-        (key == :plasticity) && (continue)
-        (key == :start_time) && (continue)
-        (key == :end_time) && (continue)
-        haskey(records[:start_time], key) || (records[:start_time][key] = time)
+    for key::Symbol in records[:data]
+        isnan(get(records[:start_time], key, NaN32)) && (records[:start_time][key] = time)
         records[:end_time][key] = time
-        ## If the key is :indices, :sr, :timestamp, skip
-        if key == :fire
-            record_fire!(obj.fire, obj.records[:fire], T, records[:indices])
-            continue
+        if key === :fire
+            record_fire!(obj.fire, records[:fire], T, records[:indices])
+        else
+            record_sym!(
+                get_model_field(obj, key, meta[:var_map]),
+                obj, key, T, records[:indices], records[:sr][key],
+            )
         end
-        ## Record plasticity variables
-        for v in records[:variables]
-            if startswith(string(key), string(v))
-                sym = string(key)[(length(string(v))+2):end] |> Symbol
-                record_sym!(
-                    getfield(getfield(obj, v), sym),
-                    obj,
-                    key,
-                    T,
-                    records[:indices],
-                    records[:sr][key],
-                )
-            end
-        end
-        hasfield(typeof(obj), key) && record_sym!(
-            getfield(obj, key),
-            obj,
-            key,
-            T,
-            records[:indices],
-            records[:sr][key],
-        )
     end
 end
 
@@ -267,6 +239,23 @@ For firing activity (:fire), it creates a dictionary to store spike times and ne
 - If a variable is already being monitored, a warning is issued.
 - The function handles both direct object fields and nested fields within variable groups.
 """
+# Keys created by _init_records!. _clear skips these (they are schema, not data).
+# Add here when adding a new metadata key to _init_records!.
+const _RECORD_META_KEYS = (:indices, :sr, :variables, :data, :meta)
+
+function _init_records!(records::Dict)
+    haskey(records, :indices)    || (records[:indices]    = Dict{Symbol,Vector{Int}}())
+    haskey(records, :sr)         || (records[:sr]         = Dict{Symbol,Float32}())
+    haskey(records, :variables)  || (records[:variables]  = Vector{Symbol}())
+    haskey(records, :start_time) || (records[:start_time] = Dict{Symbol,Float32}())
+    haskey(records, :end_time)   || (records[:end_time]   = Dict{Symbol,Float32}())
+    haskey(records, :data)       || (records[:data]       = Symbol[])
+    haskey(records, :meta)       || (records[:meta]       = Dict{Symbol,Any}(
+        :var_map => Dict{Symbol,Tuple{Symbol,Symbol}}(),
+    ))
+    return records
+end
+
 function monitor!(
     obj::Item,
     keys::Vector;
@@ -274,31 +263,23 @@ function monitor!(
     variables::Symbol = :none,
     verbose = false
 ) where {Item<:Union{AbstractPopulation,AbstractStimulus,AbstractConnection}}
-    if !haskey(obj.records, :indices)
-        obj.records[:indices] = Dict{Symbol,Vector{Int}}()
-    end
-    if !haskey(obj.records, :sr)
-        obj.records[:sr] = Dict{Symbol,Float32}()
-    end
-    if !haskey(obj.records, :variables)
-        obj.records[:variables] = Vector{Symbol}()
-    end
-    if !haskey(obj.records, :start_time)
-        obj.records[:start_time] = Dict{Symbol,Float32}()
-    end
-    if !haskey(obj.records, :end_time)
-        obj.records[:end_time] = Dict{Symbol,Float32}()
-    end
+    _init_records!(obj.records)
     ## If the key is a tuple, then the first element is the symbol and the second element is the list of neurons to record.
     for key in keys
         sym, ind = isa(key, Tuple) ? key : (key, [])
         if sym == :fire
-            ## If the then assign a Spiketimes object to the dictionary `records[:fire]`, add as many empty vectors as the number of neurons in the object as in [:indices][:fire]
+            if haskey(obj.records, :fire)
+                verbose && @warn "Field :fire already being monitored in $(obj.name)"
+                :fire ∉ obj.records[:data] && push!(obj.records[:data], :fire)
+                continue
+            end
             obj.records[:fire] = Dict{Symbol,AbstractVector}(
                 :time => Vector{Float32}(),
                 :neurons => Vector{Vector{Int}}(),
             )
+            obj.records[:start_time][:fire] = NaN32
             @debug "Monitoring :fire in $(obj.name)"
+            :fire ∉ obj.records[:data] && push!(obj.records[:data], :fire)
             continue
         end
         if variables == :none
@@ -336,6 +317,11 @@ function monitor!(
         !isempty(ind) && (obj.records[:indices][key] = ind)
         obj.records[:sr][key] = sr
         obj.records[key] = Vector{typ}()
+        push!(obj.records[:data], key)
+        obj.records[:start_time][key] = NaN32
+        if variables != :none
+            obj.records[:meta][:var_map][key] = (variables, sym)
+        end
     end
 end
 
@@ -387,12 +373,6 @@ function interpolated_record(p, sym, τ = 20ms)
     return y, r_v
 end
 
-function get_measure_interval(p::AbstractComponent, sym::Symbol)
-    _start = p.records[:start_time][sym]
-    _end = p.records[:end_time][sym]
-    return _start:_end
-end
-
 function get_measure_interval(p::AbstractComponent, sym::Symbol, steps::Int)
     _start = p.records[:start_time][sym]
     _end = p.records[:end_time][sym]
@@ -424,9 +404,8 @@ function add_endtime!(model::NamedTuple)
                 # @info "Adding end time for $(v.name)"
                 !haskey(v.records, :end_time) &&
                     (v.records[:end_time] = Dict{Symbol,Float32}())
-                for (key, val) in v.records
+                for key in get(v.records, :data, Symbol[])
                     if !haskey(v.records[:end_time], key)
-                        # @info "Adding end time for $key"
                         v.records[:end_time][key] = get_time(time)
                     end
                 end
@@ -447,9 +426,8 @@ function add_starttime!(model::NamedTuple)
                 # @info "Adding start time for $(v.name)"
                 !haskey(v.records, :start_time) &&
                     (v.records[:start_time] = Dict{Symbol,Float32}())
-                for (key, val) in v.records
+                for key in get(v.records, :data, Symbol[])
                     if !haskey(v.records[:start_time], key)
-                        # @info "Adding start time for $key"
                         v.records[:start_time][key] = 0
                     end
                 end
@@ -608,26 +586,8 @@ getrecord(p, sym)
 Returns the recorded values for a given object and symbol. If the symbol is not found in the object's records, it checks the records of the object's plasticity and returns the values for the matching symbol.
 """
 function getrecord(p, sym)
-    key = sym
-    if haskey(p.records, key)
-        return p.records[key]
-    elseif haskey(p.records, :plasticity)
-        values = []
-        names = []
-        for (name, keys) in p.records[:plasticity]
-            if sym in keys
-                push!(values, p.records[name][sym])
-                push!(names, name)
-            end
-        end
-        if length(values) == 1
-            return values[1]
-        else
-            Dict{Symbol,Vector{Any}}(zip(names, values))
-        end
-    else
-        throw(ArgumentError("The record $sym is not found"))
-    end
+    haskey(p.records, sym) && return p.records[sym]
+    throw(ArgumentError("The record $sym is not found"))
 end
 
 """
@@ -663,13 +623,11 @@ end
 
 function _clear(z)
     for (key, val) in z
-        (key == :indices) && (continue)
-        (key == :sr) && (continue)
-        (key == :timestamp) && (continue)
-        (key == :plasticity) && (continue)
-        (key == :start_time) && (continue)
-        (key == :end_time) && (continue)
-        (key == :variables) && (continue)
+        key ∈ _RECORD_META_KEYS && continue
+        if key == :start_time || key == :end_time
+            empty!(val)  # reset time bounds so next sim uses fresh start/end
+            continue
+        end
         if isa(val, Dict)
             _clear(val)
         else

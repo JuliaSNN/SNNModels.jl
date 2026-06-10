@@ -547,7 +547,7 @@ function spikes_in_interval(
     interval,
     margin = [0, 0];
     collapse::Bool = false,
-) where {Z <:AbstractVector}
+) 
     neurons = [Vector{Float32}() for x = 1:length(spiketimes)]
     @inbounds @fastmath for n in eachindex(neurons)
         ff = findfirst(x -> x > interval[1] + margin[1], spiketimes[n])
