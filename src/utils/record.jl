@@ -405,10 +405,10 @@ function record!(obj, T::Time)
                 record_fire!(obj.fire, records[:fire], T, records[:indices])
             end
         elseif get(mode, key, :legacy) === :dense
-            record_sym_dense!(
-                get_model_field(obj, key, meta[:var_map]),
-                records, meta, key, T,
-            )
+            snapshot = get_model_field(obj, key, meta[:var_map])
+            ind = get(records[:indices], key, Int[])
+            isempty(ind) || (snapshot = view(snapshot, ind))
+            record_sym_dense!(snapshot, records, meta, key, T)
         else
             record_sym!(
                 get_model_field(obj, key, meta[:var_map]),
@@ -480,20 +480,18 @@ end
 
 # Snapshot eligibility (manifesto §8). `sample` is a live value pulled from the
 # object field at monitor! time. Returns (:dense, snapshot_size) or (:legacy, ()).
-# Forced :legacy when: explicit :indices, Vector{Vector} (multipod, deferred per
-# scope decision Q2), or any non-Float32-array snapshot type.
-function _classify_record(sample, has_indices::Bool)
-    has_indices && return (:legacy, ())
+# When indices are provided the snapshot_size reflects len(ind), not the full field.
+function _classify_record(sample, has_indices::Bool, n_indices::Int = 0)
     if sample isa Float32
         return (:dense, ())
     elseif sample isa Vector{Float32}
-        return (:dense, (length(sample),))
+        snap = has_indices ? n_indices : length(sample)
+        return (:dense, (snap,))
     elseif sample isa Matrix{Float32}
-        return (:dense, size(sample))
+        return has_indices ? (:legacy, ()) : (:dense, size(sample))
     elseif sample isa Array{Float32,3}
-        return (:dense, size(sample))
+        return has_indices ? (:legacy, ()) : (:dense, size(sample))
     else
-        # Vector{Vector{Float32}} (ragged multipod) and everything else → legacy.
         return (:legacy, ())
     end
 end
@@ -579,7 +577,7 @@ function monitor!(
         end
 
         # Classify dense vs legacy (manifesto §8) and init meta.
-        mode, snap_size = _classify_record(sample, !isempty(ind))
+        mode, snap_size = _classify_record(sample, !isempty(ind), length(ind))
         meta[:mode][key] = mode
         meta[:period][key] = max(1, floor(Int, 1.0f0 / Float32(sr) / dt_hint))
         meta[:step_count][key] = 0
