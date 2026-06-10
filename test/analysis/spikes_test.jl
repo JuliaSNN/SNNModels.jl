@@ -114,5 +114,43 @@ const _SPIKE_MODEL, _SPIKE_POP = _spike_model()
         @test all(x -> x >= 0, cv2)
     end
 
+    # Synthetic spiketimes: evenly spaced spikes at known rate.
+    # firing_rate convolution should recover a value close to the true rate.
+    @testset "firing_rate — synthetic 10 Hz neuron (interpolated)" begin
+        rate_hz  = 10.0f0   # Hz = spikes/second
+        duration = 1000.0f0 # ms
+        # Evenly spaced spikes every 100ms
+        st = Spiketimes([collect(100.0f0:100.0f0:900.0f0)])
+        fr, r = firing_rate(st; interval = 0f0:1f0:duration, τ = 50ms)
+        # evaluate at the middle of the train where rate should be stable
+        mid_rate = fr(1, 500f0)
+        @test mid_rate > 0
+        @test isfinite(mid_rate)
+    end
+
+    @testset "firing_rate — all-silent spiketimes, shape check" begin
+        st = Spiketimes([Float32[], Float32[], Float32[]])
+        fr, r = firing_rate(st; interval = 0f0:1f0:200f0)
+        mat = fr(1:3, r)
+        @test size(mat) == (3, length(r))
+        @test all(mat .== 0)
+    end
+
+    @testset "firing_rate — population dispatch returns same shape" begin
+        st = spiketimes(_SPIKE_POP)
+        fr1, r1 = firing_rate(st; interval = 0:1ms:500ms)
+        fr2, r2 = firing_rate(_SPIKE_POP; interval = 0:1ms:500ms)
+        @test r1 ≈ r2
+        @test fr1(1:_SPIKE_POP.N, r1) ≈ fr2(1:_SPIKE_POP.N, r2)
+    end
+
+    @testset "firing_rate — non-interpolated returns Matrix" begin
+        st = spiketimes(_SPIKE_POP)
+        fr, r = firing_rate(st; interval = 0:1ms:500ms, interpolate = false)
+        @test fr isa Matrix
+        @test size(fr) == (_SPIKE_POP.N, length(r))
+        @test all(isfinite, fr)
+    end
+
 end
 true

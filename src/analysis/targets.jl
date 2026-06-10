@@ -207,6 +207,7 @@ function STTC(spiketrains::Vector{Vector{Float32}}, Δt, interval = nothing)
     Δt = Float32(Δt)
     if isnothing(interval)
         ss     = reduce(vcat, spiketrains)
+        isempty(ss) && return zeros(Float32, n, n)
         istart = minimum(ss) - Δt
         iend   = maximum(ss) + Δt
     else

@@ -4,26 +4,36 @@ using DSP
 
 
 """
-    spiketimes(population::AbstractComponent, interval = nothing, indices = nothing)
-    
+    spiketimes(p; interval=nothing) -> Spiketimes
 
-Compute the spike times of a population.
+Return spike times for every neuron in `p` as a `Spiketimes` (vector of Float32 vectors).
 
-Arguments:
-- `p`: The network parameters.
-- `interval`: The time interval within which to compute the spike times. If `nothing`, the interval is set to (0, firing_time[end]).
+Dispatches on the fire recording format stored in `p.records[:fire]`:
+- **COO** (`meta[:mode][:fire] == :dense`): reads the pre-allocated `times_buf` /
+  `neurons_buf` flat arrays. Zero allocation, O(spikes) scan.
+- **Legacy** (`push!`-based `:time` / `:neurons` dict): used when dense recording
+  was not activated (no `monitor!` with the current recording infrastructure).
 
-Returns:
-- `spiketimes`: A vector of vectors containing the spike times of each neuron.
+`interval`: optional `(t0, t1)` tuple or range to restrict which spikes are returned.
 """
 function spiketimes(
     p::T;
     interval = nothing,
     kwargs...,
 ) where {T<:Union{AbstractPopulation,AbstractStimulus}}
+    # COO fire format: flat parallel arrays (times_buf, neurons_buf), one entry per spike.
+    rec = p.records[:fire]
+    meta = get(p.records, :meta, nothing)
+    is_dense = meta !== nothing &&
+        get(get(meta, :mode, Dict()), :fire, :legacy) === :dense &&
+        haskey(rec, :times_buf)
+    if is_dense
+        return _spiketimes_coo(p, rec, meta, interval)
+    end
+
     _spiketimes = _init_spiketimes(p.N)
-    firing_time = p.records[:fire][:time]
-    neurons = p.records[:fire][:neurons]
+    firing_time = rec[:time]
+    neurons = rec[:neurons]
 
     # @warn "No spikes in population"
     if length(firing_time) < 2
@@ -41,6 +51,24 @@ function spiketimes(
         for n in neurons[tt]
             push!(_spiketimes[n], firing_time[tt])
         end
+    end
+    return _spiketimes
+end
+
+# Read COO fire buffers. `wp` = number of written spikes.
+function _spiketimes_coo(p, rec, meta, interval)
+    _spiketimes = _init_spiketimes(p.N)
+    times_buf = rec[:times_buf]
+    neurons_buf = rec[:neurons_buf]
+    wp = length(times_buf) - get(meta[:allocated], :fire, 0)
+    wp <= 0 && return _spiketimes
+    lo = isnothing(interval) ? -Inf32 : Float32(interval[1])
+    hi = isnothing(interval) ? Inf32 : Float32(interval[end])
+    @inbounds for i in 1:wp
+        t = times_buf[i]
+        (t > lo && t < hi) || continue
+        n = neurons_buf[i]
+        push!(_spiketimes[n], t)
     end
     return _spiketimes
 end
@@ -162,9 +190,9 @@ end
 """
 function merge_spiketimes(spikes::Vector{Spiketimes}; start::Float32=0.0f0)
     if start > 0.0f0
-        for s in eachindex(spikes)
-            for n in eachindex(spikes[s])
-                spikes[s][n] .+= start * (s - 1)
+        for sp in eachindex(spikes)
+            for n in eachindex(spikes[sp])
+                spikes[sp][n] .+= start * (sp - 1)
             end
         end
     end
@@ -791,33 +819,6 @@ end
 
 
 """
-    firing_rate_average(P; dt=0.1ms)
-
-Calculates and returns the average firing rates of neurons in a network.
-
-# Arguments:
-- `P`: A structure containing neural data, with a key `:fire` in its `records` field which stores spike information for each neuron.
-- `dt`: An optional parameter specifying the time interval (default is 0.1ms).
-
-# Returns:
-An array of floating point values representing the average firing rate for each neuron.
-
-# Usage:# Notes:
-Each row of `P.records[:fire]` represents a neuron, and each column represents a time point. The value in a cell indicates whether that neuron has fired at that time point (non-zero value means it has fired).
-The firing rate of a neuron is calculated as the total number of spikes divided by the total time span.
-"""
-function firing_rate_average(P; dt = 0.1ms)
-    @assert haskey(P.records, :fire)
-    spikes = hcat(P.records[:fire]...)
-    time_span = size(spikes, 2) / 1000 * dt
-    rates = Vector{Float32}()
-    for spike in eachrow(spikes)
-        push!(rates, sum(spike) / time_span)
-    end
-    return rates
-end
-
-"""
     firing_rate(P, τ; dt=0.1ms)
 
 Calculate the firing rate of neurons.
@@ -893,36 +894,6 @@ function trolling_mean(a, n::Int)
     end
 end
 
-
-"""
-    spiketimes_from_bool(P, τ; dt = 0.1ms)
-
-This function takes in the records of a neural population `P` and time constant `τ` to calculate spike times for each neuron.
-
-# Arguments
-- `P`: A data structure containing the recorded data of a neuronal population.
-- `τ`: A time constant parameter.
-
-# Keyword Arguments
-- `dt`: The time step used for the simulation, defaults to 0.1 milliseconds.
-
-# Returns
-- `spiketimes`: An object of type `Spiketimes` which contains the calculated spike times of each neuron.
-
-# Examples
-```
-julia
-spiketimes = spike_times(population_records, time_constant)
-```
-"""
-function spiketimes_from_bool(P; dt = 0.1ms)
-    spikes = hcat(P.records[:fire]...)
-    _spiketimes = Vector{Vector{Float32}}()
-    for (n, z) in enumerate(eachrow(spikes))
-        push!(_spiketimes, findall(z) * dt)
-    end
-    return Spiketimes(_spiketimes)
-end
 
 """
     sample_spikes(N, rate::Vector, interval::R; dt=0.125f0) where {R <: AbstractRange}
@@ -1063,7 +1034,6 @@ end
 
 
 export spiketimes,
-    spiketimes_from_bool,
     merge_spiketimes,
     convolve,
     alpha_function,
@@ -1076,9 +1046,6 @@ export spiketimes,
     ISI_CV2,
     firing_rate,
     average_firing_rate,
-    firing_rate_average,
-    firing_rate,
-    firing_rate_average,
     spikes_in_interval,
     spikes_in_intervals,
     find_interval_indices,

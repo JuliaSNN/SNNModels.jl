@@ -74,6 +74,15 @@ end
         @test all(isfinite, syn.W)
     end
 
+    # Regression: vSTDPVariables.x was sized Npost; @turbo silenced the OOB.
+    # x is indexed by pre-neuron j → must be length Npre.
+    @testset "vSTDPParameter (Npre > Npost, x size regression)" begin
+        model, syn = _driven_model(Npre = 20, Npost = 5, ltp = vSTDPParameter())
+        @test length(syn.LTPVars.x) == 20  # Npre, not Npost
+        train!(model, 200ms)
+        @test all(isfinite, syn.W)
+    end
+
 end
 
 @testset "train! with STP rules" begin
@@ -93,4 +102,25 @@ end
     end
 
 end
+
+@testset "change_plasticity!" begin
+    # Fix regression: param was undefined; LTP/STP kwargs must be forwarded.
+    @testset "swap LTPParam" begin
+        model, syn = _driven_model(ltp = STDPGerstner())
+        @test syn.LTPParam isa STDPGerstner
+        change_plasticity!(syn; LTP = STDPConfavreux2025())
+        @test syn.LTPParam isa STDPConfavreux2025
+        @test syn.LTPVars isa STDPVariables
+        @test length(syn.LTPVars.tpre) == length(syn.fireJ)  # Npre
+        @test length(syn.LTPVars.tpost) == length(syn.fireI) # Npost
+    end
+
+    @testset "swap STPParam" begin
+        model, syn = _driven_model(stp = MarkramSTPParameter())
+        @test syn.STPParam isa MarkramSTPParameter
+        change_plasticity!(syn; STP = MarkramSTPParameterTimestep())
+        @test syn.STPParam isa MarkramSTPParameterTimestep
+    end
+end
+
 true

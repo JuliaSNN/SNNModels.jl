@@ -83,9 +83,10 @@ end
     sr = 1000Hz
     monitor!(pop, [:v]; sr = sr)
     sim!(model, 200ms)
-    v_rec = pop.records[:v]
-    @test length(v_rec) > 0
-    @test all(x -> length(x) == pop.N, v_rec)  # each snapshot is N-length
+    # Dense buffer: getvariable returns an (N, T) view over written time-slots.
+    v = getvariable(pop, :v)
+    @test size(v, ndims(v)) > 0       # at least one recorded step
+    @test size(v, 1) == pop.N         # first dim is neurons
 end
 
 @testset "record! — sampling rate respected" begin
@@ -94,7 +95,8 @@ end
     sim!(model, 100ms)
     # at dt=0.125ms, period = floor(1/500Hz / 0.125ms) = floor(16) = 16 steps per sample
     # over 100ms = 800 steps → expect ~50 samples
-    n = length(pop.records[:v])
+    v = getvariable(pop, :v)
+    n = size(v, ndims(v))            # number of recorded time-slots
     @test 40 <= n <= 60  # loose bound (record_zero! adds one at t=0)
 end
 
@@ -102,17 +104,19 @@ end
     model, pop = _small_model(El = -49mV)  # spontaneous firing
     monitor!(pop, [:fire])
     sim!(model, 500ms)
-    @test length(pop.records[:fire][:time]) > 0
-    @test length(pop.records[:fire][:neurons]) > 0
+    # Dense flat CSR: spikes are read back through spiketimes.
+    st = spiketimes(pop)
+    @test sum(length, st) > 0          # some spikes recorded
+    @test any(!isempty, st)            # at least one neuron fired
 end
 
 @testset "record! — variables= prefix records from sub-field" begin
     model, pop = _small_model()
     monitor!(pop, [:glu]; variables = :receptors)
     sim!(model, 100ms)
-    rec = pop.records[:receptors_glu]
-    @test length(rec) > 0
-    @test all(x -> length(x) == pop.N, rec)
+    rec = getvariable(pop, :receptors_glu)
+    @test size(rec, ndims(rec)) > 0    # recorded steps
+    @test size(rec, 1) == pop.N        # first dim is neurons
 end
 
 @testset "record! — start_time and end_time populated" begin
@@ -203,7 +207,7 @@ end
     monitor!(pop, [:v]; sr = 1000Hz)
     sim!(model, 100ms)
     mat = getvariable(pop, :v)
-    @test mat isa Matrix
+    @test mat isa AbstractMatrix     # dense path returns a 2-D view
     @test size(mat, 1) == pop.N
     @test size(mat, 2) > 0
 end

@@ -22,8 +22,8 @@ const _ei_inhib  = IFParameter(El = -49mV)
 
         sim!(model, 500ms)
 
-        @test length(E.records[:fire][:time]) > 0
-        @test length(I.records[:fire][:time]) > 0
+        @test sum(length, spiketimes(E)) > 0
+        @test sum(length, spiketimes(I)) > 0
     end
 
     @testset "E/I network — time advances correctly" begin
@@ -41,7 +41,7 @@ const _ei_inhib  = IFParameter(El = -49mV)
         m1    = compose(E = E1, silent = true)
         monitor!(E1, [:fire])
         sim!(m1, 500ms)
-        n_noinhib = length(E1.records[:fire][:time])
+        n_noinhib = sum(length, spiketimes(E1))
 
         # Add inhibitory feedback
         E2 = IF(N = 30, param = _ei_active, name = "E2")
@@ -51,7 +51,7 @@ const _ei_inhib  = IFParameter(El = -49mV)
         m2  = compose(E = E2, I = I2, ei = ei2, ie = ie2, silent = true)
         monitor!(E2, [:fire])
         sim!(m2, 500ms)
-        n_inhib = length(E2.records[:fire][:time])
+        n_inhib = sum(length, spiketimes(E2))
 
         @test n_noinhib >= n_inhib
     end

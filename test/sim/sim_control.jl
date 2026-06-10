@@ -38,9 +38,9 @@ using Graphs: nv, ne
     @testset "clear_records! — empties fire record" begin
         model, E = _model()
         sim!(model, 300ms)
-        @test length(E.records[:fire][:time]) > 0
+        @test sum(length, spiketimes(E)) > 0
         clear_records!(E)
-        @test length(E.records[:fire][:time]) == 0
+        @test sum(length, spiketimes(E)) == 0
     end
 
     @testset "monitor! — sr keyword stored" begin
