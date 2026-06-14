@@ -662,7 +662,7 @@ end
 #     return smoothed_signal, xvals
 # end
 """
-    gaussian_smooth(xs, x, sigma) -> Vector
+    gaussian_smooth(xs, x, sigma; skewed=:none) -> Vector
 
 Apply a normalized Gaussian kernel to signal `x` sampled on grid `xs`.
 Kernel half-width is `3σ` (truncated); boundary bins are renormalized by
@@ -672,32 +672,41 @@ accumulated kernel weight so edge values are not biased toward zero.
 - `xs`: sample-position grid (used only for its step size `xs[2]-xs[1]`)
 - `x`: signal to smooth, length `n`
 - `sigma`: Gaussian standard deviation in the same units as `xs`
+- `skewed`: `:none` (symmetric), `:left` (causal — uses only past samples),
+  `:right` (anti-causal — uses only future samples)
 
 # Returns
 - smoothed signal, same length as `x`
 
-See also [`calcium_postprocess`](@ref), [`deconvolve_df_f`](@ref).
 """
-function gaussian_smooth(xs::RT, x::T, σ::R) where {T<:AbstractVector, R<:Real, RT<:AbstractVector}
+function gaussian_smooth(xs::RT, x::T, σ::R; skewed::Symbol=:none) where {T<:AbstractVector, R<:Real, RT<:AbstractVector}
+    iszero(σ) && return copy(x)
     step_x = xs[2] - xs[1]
-    half = ceil(Int, 3σ/step_x) ## 3σ cutoff for the kernel                                                          
-    xs = -half:half                                                                         
-    kernel = exp.(-xs.^2 ./ (2σ^2))                                                     
-    kernel ./= sum(kernel)                                                                  
-    n = length(x) ## length of the input signal
-    out = similar(x) 
+    half = ceil(Int, 3σ / step_x)
+    offsets = if skewed === :left
+        -half:0       # causal: only past samples
+    elseif skewed === :right
+        0:half        # anti-causal: only future samples
+    else
+        -half:half    # symmetric
+    end
+    kernel = exp.(.-Float64.(offsets).^2 ./ (2σ^2))
+    kernel ./= sum(kernel)
+    n = length(x)
+    out = similar(x)
+    lo = first(offsets)
     s = 0.0
     w = 0.0
     @inbounds for i in 1:n
         s = 0.0
-        w = 0.0                                                                             
+        w = 0.0
         @fastmath for (j, k) in enumerate(kernel)
-            idx = i + (j - half - 1)
+            idx = i + lo + (j - 1)
             idx < 1 && continue
             idx > n && continue
             s += k * x[idx]
-            w += k                                                                      
-        end                                                                                 
+            w += k
+        end
         out[i] = s / w
     end
     @assert length(out) == length(x)
