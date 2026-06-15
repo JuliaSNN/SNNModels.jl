@@ -92,11 +92,11 @@ function change_plasticity!(syn; LTP = nothing, STP = nothing)
     Npre, Npost = length(fireJ), length(fireI)
     if !isnothing(LTP)
         syn.LTPParam = LTP
-        syn.LTPVars = plasticityvariables(param, Npre, Npost)
+        syn.LTPVars = plasticityvariables(LTP, Npre, Npost)
     end
     if !isnothing(STP)
         syn.STPParam = STP
-        syn.STPVars = plasticityvariables(param, Npre, Npost)
+        syn.STPVars = plasticityvariables(STP, Npre, Npost)
     end
 end
 

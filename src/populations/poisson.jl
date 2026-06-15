@@ -19,7 +19,7 @@ end
 @snn_kw mutable struct Poisson{VFT = Vector{Float32}, IT = Int32, PP <: PoissonParameter} <: AbstractPopulation
     id::String = randstring(12)
     name::String = "Poisson"
-    param::PP = PoissonParameter()
+    param::PP = PoissonHomoParameter()
     N::IT = 100
     randcache::VFT = rand(N)
     fire::VBT = zeros(Bool, N)
