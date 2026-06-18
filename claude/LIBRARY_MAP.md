@@ -15,6 +15,8 @@ SNNModels.jl/src/
 │   ├── structs.jl      core abstract types, Time, Spiketimes, VBT/VIT aliases, validation
 │   ├── main.jl         sim! / train! outer loops + innermost dispatch
 │   ├── util.jl         compose, extract_items, print_model, remove_element
+│   ├── copying.jl      modelcopy (deep copy with empty record interception)
+│   ├── perturbation.jl perturbation_test, perturbation_record, clear_perturbation_records!, clear_perturbation_monitor!
 │   ├── graph.jl        graph(model) → MetaDiGraph, find_id_vertex, filter_edge_props
 │   ├── record.jl       monitor!, record, firing_rate (dispatch), getvariable, clear_records!
 │   ├── io.jl           SNNsave / SNNload / SNNfolder / SNNpath (DrWatson convention)
@@ -746,7 +748,77 @@ exc = Population(; base_config.network.exc...)
 
 ---
 
-## 10. Open problems and improvement targets
+## 10. Perturbation API (`utils/perturbation.jl`, `utils/copying.jl`)
+
+### `modelcopy` (copying.jl)
+
+Deep copy of a model that replicates Base.deepcopy internals and intercepts `records` dicts: when a dict has a `:data` key, data entries are replaced with empty buffers (monitoring schema preserved, no recorded data).
+
+```julia
+ck = modelcopy(model)   # deep copy: same state + aliasing, empty record buffers
+```
+
+### `perturbation_test`
+
+```julia
+perturbation_test(model, simtime, condition!;
+    from_state = nothing,   # pre-built independent model (skips modelcopy)
+    add_records = nothing,  # String/Symbol: flush results into model; nothing: return pert model
+    train = true,           # true → train!; false → sim!
+    kwargs...)
+```
+
+Creates `modelcopy(model)` (or uses `from_state`), applies `condition!`, runs sim/train, optionally flushes results into `model`'s perturbation store.
+
+Storage schema:
+```
+obj.records[:perturbation][variable::Symbol][condition::String][n::Int]
+    = Dict("interval" => Float32[tstart, tend],
+           "data"     => Matrix{Float32} | Spiketimes)
+```
+
+### `perturbation_record`
+
+```julia
+v, r = perturbation_record(obj, :v,    condition, interval)  # → Matrix{Float32}, range
+st, r = perturbation_record(obj, :fire, condition, interval)  # → Spiketimes, range
+```
+
+Returns baseline trace with perturbation windows spliced in. Uses `interpolated_record` for time alignment.
+
+### Clear functions
+
+```julia
+clear_perturbation_records!(obj)                          # all perturbation data
+clear_perturbation_records!(obj, condition)               # one condition
+clear_perturbation_records!(obj, condition; variable, n)  # one variable or n-th recording
+
+clear_perturbation_monitor!(obj, variable)                # by variable
+clear_perturbation_monitor!(obj, variable, condition; n)  # by variable + condition
+```
+
+### Workflow
+
+```julia
+monitor!(model.pop.exc, [:v, :fire]; sr = 1kHz)
+ck = modelcopy(model)                   # checkpoint at t=T
+
+# perturbations (both start from t=T)
+perturbation_test(ck, 500ms, m -> (m.pop.pv.I .= 200pA); add_records = "pv_drive")
+perturbation_test(ck, 500ms, m -> set_active!(m.stim.noise, false); add_records = "no_noise")
+
+# baseline
+sim!(ck, 500ms)
+
+t0 = ck.pop.exc.records[:start_time][:v]
+t1 = ck.pop.exc.records[:end_time][:v]
+v_base, r = perturbation_record(ck.pop.exc, :v, "nonexistent", t0:0.5f0:t1)
+v_pert, _ = perturbation_record(ck.pop.exc, :v, "pv_drive",   t0:0.5f0:t1)
+```
+
+---
+
+## 11. Open problems and improvement targets
 
 ### 10.1 sim! does not call update_traces!
 
@@ -826,7 +898,7 @@ For large networks normalizing every dt adds significant overhead.
 
 ---
 
-## 11. Quick-reference call signatures
+## 12. Quick-reference call signatures
 
 ```julia
 # Build
@@ -852,6 +924,14 @@ matrix(c, :W, time)   # → time-sliced SparseMatrix
 presynaptic(c, i)     # → pre indices for post i
 update_weights!(c, j, i, w)
 connect!(c, j, i, μ)
+
+# Perturbation
+modelcopy(model)
+perturbation_test(model, duration, condition!; from_state, add_records, train)
+perturbation_record(obj, :v, condition, interval)  # → (Matrix{Float32}, range)
+perturbation_record(obj, :fire, condition, interval)  # → (Spiketimes, range)
+clear_perturbation_records!(obj, [condition]; variable, n)
+clear_perturbation_monitor!(obj, variable, [condition]; n)
 
 # Analysis
 STTC(A, B, Δt, interval)
