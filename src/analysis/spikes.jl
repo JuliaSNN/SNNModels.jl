@@ -6,15 +6,29 @@ using DSP
 """
     spiketimes(p; interval=nothing) -> Spiketimes
 
-Return spike times for every neuron in `p` as a `Spiketimes` (vector of Float32 vectors).
+Return spike times for every neuron in `p` as a `Spiketimes`
+(`Vector{Vector{Float32}}`), one inner vector per neuron.
 
 Dispatches on the fire recording format stored in `p.records[:fire]`:
-- **COO** (`meta[:mode][:fire] == :dense`): reads the pre-allocated `times_buf` /
-  `neurons_buf` flat arrays. Zero allocation, O(spikes) scan.
-- **Legacy** (`push!`-based `:time` / `:neurons` dict): used when dense recording
-  was not activated (no `monitor!` with the current recording infrastructure).
+- **COO / dense** (`meta[:mode][:fire] == :dense`): reads the pre-allocated
+  `times_buf` / `neurons_buf` flat arrays written by the sim loop. If `interval`
+  is given, binary-search on the sorted buffer restricts the scan to
+  O(log(N_spikes) + N_spikes_in_interval) instead of a full linear pass.
+- **Legacy** (`push!`-based `:time` / `:neurons` dict): used when the population
+  was recorded without the dense infrastructure (no `monitor!` call before the sim).
 
-`interval`: optional `(t0, t1)` tuple or range to restrict which spikes are returned.
+# Arguments
+- `p`: an `AbstractPopulation` or `AbstractStimulus` with a `:fire` record.
+
+# Keyword arguments
+- `interval`: optional `(t0, t1)` tuple or any `AbstractRange`. Spikes satisfy
+  `t > t0` and `t < t1` (both bounds strict). Pass `nothing` (default) to return
+  all recorded spikes.
+
+# Notes
+- Neurons are indexed `1:p.N` in the output vector; empty inner vectors mean
+  the neuron never fired or fired outside the requested interval.
+- The returned `Spiketimes` is always freshly allocated (safe to mutate).
 """
 function spiketimes(
     p::T;
@@ -56,43 +70,53 @@ function spiketimes(
 end
 
 # Read COO fire buffers. `wp` = number of written spikes.
+# times_buf[1:wp] is chronologically sorted (sim writes in order), so
+# interval filtering uses binary search: O(log(wp)) + O(spikes_in_interval).
 function _spiketimes_coo(p, rec, meta, interval)
     _spiketimes = _init_spiketimes(p.N)
     times_buf = rec[:times_buf]
     neurons_buf = rec[:neurons_buf]
     wp = length(times_buf) - get(meta[:allocated], :fire, 0)
     wp <= 0 && return _spiketimes
-    lo = isnothing(interval) ? -Inf32 : Float32(interval[1])
-    hi = isnothing(interval) ? Inf32 : Float32(interval[end])
-    @inbounds for i in 1:wp
-        t = times_buf[i]
-        (t > lo && t < hi) || continue
-        n = neurons_buf[i]
-        push!(_spiketimes[n], t)
+    if isnothing(interval)
+        @inbounds for i in 1:wp
+            push!(_spiketimes[neurons_buf[i]], times_buf[i])
+        end
+    else
+        lo = Float32(interval[1])
+        hi = Float32(interval[end])
+        lo_idx = searchsortedlast(times_buf, lo, 1, wp, Base.Order.Forward) + 1
+        hi_idx = searchsortedfirst(times_buf, hi, 1, wp, Base.Order.Forward) - 1
+        @inbounds for i in lo_idx:hi_idx
+            push!(_spiketimes[neurons_buf[i]], times_buf[i])
+        end
     end
     return _spiketimes
 end
 
 function _init_spiketimes(N)
-    _s = Vector{Vector{Float32}}()
-    for i = 1:N
-        push!(_s, Vector{Float32}())
-    end
-    return Spiketimes(_s)
+    return Spiketimes([Vector{Float32}() for _ in 1:N])
 end
 
 
 
 """
-    spiketimes(P::NamedTuple; kwargs...)
+    spiketimes(Ps; kwargs...) -> Spiketimes
 
-    Return the spiketimes of each population in single vector of Spiketimes.
+Concatenate spike times from all populations in `Ps` into a single `Spiketimes`
+vector. Neurons from the first population occupy indices `1:Ps[1].N`, the second
+population `Ps[1].N+1 : Ps[1].N+Ps[2].N`, and so on.
+
+`Ps` can be a `NamedTuple` (as returned by `model.pop`) or a `Vector` of
+`AbstractPopulation`/`AbstractStimulus`. All `kwargs` are forwarded to the
+single-population `spiketimes` dispatch (e.g. `interval`).
+
+See also: `spiketimes_split` to keep each population's trains separate.
 """
 function spiketimes(Ps::NamedTuple; kwargs...)
-    st = Vector{Vector{Float32}}[]
+    st = Vector{Vector{Float32}}()
     for p in Ps
-        _st = spiketimes(p; kwargs...)
-        st = vcat(st, _st)
+        append!(st, spiketimes(p; kwargs...))
     end
     return Spiketimes(st)
 end
@@ -100,8 +124,7 @@ end
 function spiketimes(Ps::Vector{T}; kwargs...) where {T<:Union{AbstractPopulation,AbstractStimulus}}
     st = Vector{Vector{Float32}}()
     for p in Ps
-        _st = spiketimes(p; kwargs...)
-        st = vcat(st, _st)
+        append!(st, spiketimes(p; kwargs...))
     end
     return Spiketimes(st)
 end
@@ -115,6 +138,7 @@ function spiketimes_split(Ps; kwargs...)
     st_ps = Vector{Vector{Vector{Float32}}}()
     names = Vector{String}()
     for p in Ps
+        haskey(p.records, :fire) || continue
         _st = spiketimes(p; kwargs...)
         push!(st_ps, Spiketimes(_st))
         push!(names, p.name)
@@ -232,37 +256,53 @@ function merge_spiketimes(spikes::Spiketimes;)
 end
 
 """
-    firing_rate(
-        spiketimes::Spiketimes,
-        interval::AbstractVector = [],
-        interpolate = true,
-        pop_average = false,
-        time_average = false,
-        kernel = alpha_kernel,
-        neurons = :ALL,
-        kwargs...,
-    )
+    firing_rate(spiketimes::Spiketimes; interval, kwargs...) -> (rates, interval)
 
-Calculate the firing rates for a population or an individual neuron.
+Estimate per-neuron instantaneous firing rates from a `Spiketimes` object by
+convolving each spike train with a kernel. Returns `(rates, interval)`.
 
-# Arguments
-- `spiketimes`: Spiketimes object.
+`interval` must be an `AbstractRange` in milliseconds (e.g. `0:1ms:500ms`). It
+sets the time grid for binning and convolution. Omitting `interval` is only valid
+when `time_average=true`; in all other cases an error will be thrown.
 
-# Keyword Arguments
-- `interval`: Time interval vector (default is an empty vector).
-- `interpolate`: Whether to interpolate the firing rates (default is true).
-- `pop_average`: Whether to average the firing rates across the population (default is false).
-- `time_average`: Whether to average the firing rates over time (default is false).
-- `kernel`: The kernel function to use for convolution (default is `alpha_kernel`).
-- `neurons`: The indices of the neurons to compute the firing rates for (default is `:ALL`).
-- `kwargs...`: Additional keyword arguments to pass to the kernel function.
+# Keyword arguments
+- `interval`: time grid in ms, e.g. `0f0:1f0:1000f0`. Required unless
+  `time_average=true`.
+- `kernel`: kernel function called as `kernel(; interval, kwargs...)` returning a
+  `Vector` of weights. Default: `alpha_kernel` (causal alpha function, controlled
+  by the `τ` kwarg, default `τ=25ms`).
+- `neurons`: neuron subset. `:ALL` (default) processes every neuron; pass an
+  `Int` or `Vector{Int}` to select a subset. Indexing is into `spiketimes`.
+- `interpolate` (`true`): when `true`, wraps the `(N, T)` rate matrix in a
+  `ScaledInterpolation` so rates can be evaluated at arbitrary `(neuron, time)`
+  pairs via `rates(n, t)`. When `false`, returns a plain `Matrix{Float64}`
+  of shape `(N_neurons, length(interval))`.
+- `pop_average` (`false`): if `true`, averages over neurons (dim 1) and returns a
+  plain `Vector` of length `length(interval)` regardless of `interpolate`.
+- `time_average` (`false`): if `true`, skips convolution entirely and returns the
+  mean firing rate per neuron (in Hz) over `interval` as a `Vector{Float32}`.
+  Setting both `time_average` and `pop_average` collapses to a single scalar.
 
-# Returns
-A tuple containing:
-- `rates`: A vector of firing rates for each neuron in the chosen population.
-- `interval`: The time interval over which the firing rates were calculated.
+# Return types summary
 
-# Examples
+| `interpolate` | `pop_average` | `time_average` | return type of `rates` |
+|:---:|:---:|:---:|:---|
+| `true`  | `false` | `false` | `ScaledInterpolation` — call as `rates(n, t)` |
+| `false` | `false` | `false` | `Matrix{Float64}` shape `(N, T)` |
+| any     | `true`  | `false` | `Vector` of length `T` |
+| any     | `false` | `true`  | `Vector{Float32}` of length `N` (Hz) |
+| any     | `true`  | `true`  | scalar `Float32` (Hz) |
+
+# Example
+```julia
+st = spiketimes(model.pop.exc)
+fr, r = firing_rate(st; interval = 0:1ms:2s, τ = 50ms)
+# evaluate neuron 3 at t = 500ms:
+fr(3, 500f0)
+
+# population-averaged rate trace:
+fr_avg, r = firing_rate(st; interval = 0:1ms:2s, pop_average = true)
+```
 """
 function firing_rate(
     spiketimes::Spiketimes;
@@ -274,8 +314,7 @@ function firing_rate(
     kernel = alpha_kernel,
     kwargs...,
 )
-    # Check if the interval is empty and create an interval
-    interval = _retrieve_interval(interval; kwargs...)
+    interval = _retrieve_interval(interval, spiketimes; kwargs...)
     neurons =
         neurons == :ALL ? eachindex(spiketimes) : (isa(neurons, Int) ? [neurons] : neurons)
     rates = nothing
@@ -290,15 +329,15 @@ function firing_rate(
     else
         spiketimes = spiketimes[neurons]
         conv_kernel = kernel(;interval, kwargs...)
-        rates = tmap(eachindex(spiketimes)) do n
-            spike_train, _ = @views bin_spiketimes(spiketimes[n]; interval = interval, do_sparse = false)
-            conv(spike_train, conv_kernel)[1:length(interval)] .* s 
+        my_rates = zeros(length(spiketimes), length(interval))
+        Threads.@threads for n in eachindex(spiketimes)
+            spike_train, _ = bin_spiketimes(spiketimes[n]; interval = interval, do_sparse = false)
+            c = conv(spike_train, conv_kernel)
+            @inbounds for t in eachindex(interval)
+                my_rates[n, t] = c[t] * s
+            end
         end
-        my_rates = zeros(length(rates[1]), length(rates))
-        for i in eachindex(rates)
-            my_rates[:,i] = rates[i]
-        end
-        rates = copy(my_rates')
+        rates = my_rates
     end
 
     if interpolate
@@ -318,25 +357,35 @@ function firing_rate(
     return rates, interval
 end
 
-function _retrieve_interval(interval; sampling = 20ms, ttf = -1, tt0 = -1, kwargs...)
+# `st` is the Spiketimes being processed; used to infer the span when the caller
+# passes no interval. Previously this function mistakenly captured the exported
+# `spiketimes` function from module scope instead of the local spike data.
+function _retrieve_interval(interval, st; sampling = 20ms, ttf = -1, tt0 = -1, kwargs...)
     if isempty(interval)
         max_time =
-            all(isempty.(spiketimes)) ? 1.0f0 : maximum(Iterators.flatten(spiketimes))
-        tt0 = tt0 > 0 ? tt0 : 0.0f0
-        ttf = ttf > 0 ? ttf : max_time
+            all(isempty.(st)) ? 1.0f0 : maximum(Iterators.flatten(st))
+        tt0 = tt0 > 0 ? Float32(tt0) : 0.0f0
+        ttf = ttf > 0 ? Float32(ttf) : max_time
         interval = tt0:sampling:ttf
     end
     return interval
 end
 
 function time_average_fr(spiketimes, interval, pop_average)
-    _spiketimes = spikes_in_interval(spiketimes, interval)
-    rates = sum.(length.(_spiketimes)) ./ (interval[end] - interval[1]) ./ Hz
+    lo = Float32(interval[1])
+    hi = Float32(interval[end])
+    dur_s = (hi - lo) / 1000f0
+    rates = Vector{Float32}(undef, length(spiketimes))
+    @inbounds for n in eachindex(spiketimes)
+        count = 0
+        for t in spiketimes[n]
+            count += (t > lo) & (t <= hi)
+        end
+        rates[n] = dur_s > 0 ? Float32(count) / dur_s : 0f0
+    end
     if pop_average
-        rates = mean(rates)
-        isnan(rates) && (rates = 0.0f0)
-    else
-        rates
+        m = mean(rates)
+        return isnan(m) ? 0.0f0 : m
     end
     return rates
 end

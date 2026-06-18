@@ -152,5 +152,84 @@ const _SPIKE_MODEL, _SPIKE_POP = _spike_model()
         @test all(isfinite, fr)
     end
 
+    # ── Fix regression tests ──────────────────────────────────────────────────
+
+    @testset "Fix 3 — _spiketimes_coo binary search: interval boundaries exact" begin
+        # All spikes exactly on boundary must respect strict (lo, hi) semantics.
+        st_full = spiketimes(_SPIKE_POP)
+        # interval with strict bounds: t > lo and t < hi
+        lo, hi = 100f0, 400f0
+        st_win = spiketimes(_SPIKE_POP; interval = (lo, hi))
+        for n in eachindex(st_win)
+            @test all(t -> t > lo && t < hi, st_win[n])
+        end
+        # subset must not exceed full count
+        @test sum(length, st_win) <= sum(length, st_full)
+    end
+
+    @testset "Fix 4 — firing_rate matrix shape without intermediate vector" begin
+        st = spiketimes(_SPIKE_POP)
+        fr, r = firing_rate(st; interval = 0:1ms:500ms, interpolate = false)
+        @test fr isa Matrix
+        @test size(fr, 1) == _SPIKE_POP.N
+        @test size(fr, 2) == length(r)
+        @test all(isfinite, fr)
+        @test all(fr .>= -1e-10)  # conv can produce tiny fp negatives at boundaries
+    end
+
+    @testset "Fix 5 — time_average_fr direct count matches spikes_in_interval" begin
+        st = spiketimes(_SPIKE_POP)
+        interval = 0:1ms:500ms
+        fr_ta, _ = firing_rate(st; interval, time_average = true)
+        # manual reference: count spikes in (lo, hi] per neuron / duration_s
+        lo, hi = Float32(interval[1]), Float32(interval[end])
+        dur_s = (hi - lo) / 1000f0
+        ref = [count(t -> t > lo && t <= hi, st[n]) / dur_s for n in eachindex(st)]
+        @test fr_ta ≈ Float32.(ref)  atol=1f-4
+    end
+
+    @testset "Fix 7 — _init_spiketimes correct length and type" begin
+        st = spiketimes(_SPIKE_POP)
+        @test st isa Spiketimes
+        @test length(st) == _SPIKE_POP.N
+        @test all(s -> s isa Vector{Float32}, st)
+    end
+
+    @testset "Fix 8 — spiketimes(NamedTuple/Vector) no vcat O(N²): neuron count correct" begin
+        pop1 = IF(N = 5, param = IFParameter(El = -49mV))
+        pop2 = IF(N = 7, param = IFParameter(El = -49mV))
+        m = compose(pop1 = pop1, pop2 = pop2, silent = true)
+        monitor!(pop1, [:fire]); monitor!(pop2, [:fire])
+        sim!(m, 200ms)
+        # NamedTuple dispatch
+        st_nt = spiketimes(m.pop)
+        @test length(st_nt) == pop1.N + pop2.N
+        # Vector dispatch
+        st_v = spiketimes([pop1, pop2])
+        @test length(st_v) == pop1.N + pop2.N
+        @test all(s -> s isa Vector{Float32}, st_v)
+    end
+
+    # ── Bug verification tests ────────────────────────────────────────────────
+
+    @testset "Bug 1 — _retrieve_interval: firing_rate with no interval succeeds" begin
+        # _retrieve_interval auto-computes the interval from the spike times when none
+        # is provided: tt0=0, ttf=max(spike times), step=20ms.
+        st = Spiketimes([Float32[100f0, 200f0, 300f0], Float32[150f0, 250f0]])
+        fr, r = @test_nowarn firing_rate(st)
+        @test fr isa AbstractArray
+        @test last(r) ≈ 300f0
+    end
+
+    @testset "Bug 2 — pop_average+interpolate returns correct Vector" begin
+        # With interpolate=true (default), rates becomes a ScaledInterpolation.
+        # mean(rates, dims=1)[1,:] must still produce a finite Vector of length == length(r).
+        st = Spiketimes([Float32[100f0, 200f0, 300f0] for _ in 1:5])
+        fr, r = firing_rate(st; interval = 0f0:1f0:400f0, pop_average = true)
+        @test fr isa Vector
+        @test length(fr) == length(r)
+        @test all(isfinite, fr)
+    end
+
 end
 true
