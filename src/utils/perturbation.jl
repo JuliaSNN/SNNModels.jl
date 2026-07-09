@@ -55,8 +55,9 @@ v_patched, r = perturbation_record(ck.pop.exc, :v_s, "no_noise", 0:1ms:500ms)
 """
 function perturbation_test(
     model,
-    simtime,
-    condition!;
+    simtime;
+    trigger! = ((x) -> nothing),
+    perturbation! = nothing,
     from_state = nothing,
     add_records = nothing,
     train = true,
@@ -66,11 +67,11 @@ function perturbation_test(
     # at the desired starting state — use it directly without copying.
     # Otherwise fall back to modelcopy (deep copy with empty record buffers).
     pert_model = isnothing(from_state) ? modelcopy(model) : from_state
-    condition!(pert_model)
+    trigger!(pert_model)
     if train
-        train!(pert_model, simtime; kwargs...)
+        train!(pert_model, simtime; kwargs..., perturbation! )
     else
-        sim!(pert_model, simtime; kwargs...)
+        sim!(pert_model, simtime; kwargs..., perturbation!)
     end
     if isnothing(add_records)
         return pert_model

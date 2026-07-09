@@ -28,6 +28,7 @@ function train!(
     dt = 0.125ms,
     duration = 10ms,
     time = Time(),
+    perturbation! = nothing,
     pbar = false,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
     dt = Float32(dt)
@@ -49,6 +50,9 @@ function train!(
                         for name in keys(firing_rates)],
                         "Time = $(round(get_time(time)/s, digits=3))s")
                         ))
+        end
+        if !isnothing(perturbation!) 
+            perturbation!(;P, C, S, t, dt)
         end
         train!(P, C, S, dt, time)
     end
