@@ -407,7 +407,10 @@ function record!(obj, T::Time)
         elseif get(mode, key, :legacy) === :dense
             snapshot = get_model_field(obj, key, meta[:var_map])
             ind = get(records[:indices], key, Int[])
-            isempty(ind) || (snapshot = view(snapshot, ind))
+            if !isempty(ind)
+                snapshot isa AbstractArray || throw(ArgumentError("Indexed recording for $key requires an array-like field, got $(typeof(snapshot))"))
+                snapshot = view(snapshot, ind)
+            end
             record_sym_dense!(snapshot, records, meta, key, T)
         else
             record_sym!(
