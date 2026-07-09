@@ -24,6 +24,7 @@ include("spike/postspike.jl")
 
 ## Neurons
 include("poisson.jl")
+include("inhomogeneous_poisson.jl")
 include("iz.jl")
 include("hh.jl")
 include("morrislecar.jl")
@@ -47,6 +48,12 @@ include("generalized_if/if_extended.jl")
 # include("generalized_if/if_CANAHP.jl")
 # include("adex/adex_multitimescale.jl")
 
+## Heterogeneous recurrent
+include("hetrec.jl")
+
+## Rate / mean-field
+include("wilsoncowan.jl")
+
 ## Multicompartment
 abstract type AbstractDendriteIF <: AbstractGeneralizedIF end
 include("multicompartment/dendrite.jl")
@@ -59,7 +66,7 @@ include("multicompartment/ballandstick.jl")
 Population(; param, kwargs...) = Population(param; kwargs...)
 
 ## Heterogeneous populations
-function heterogeneous(
+function make_heterogeneous(
     param::T,
     N::Int;
     kwargs...,
@@ -85,4 +92,4 @@ export AbstractDendriteIF,
     Population,
     integrate!,
     plasticity!,
-    heterogeneous
+    make_heterogeneous

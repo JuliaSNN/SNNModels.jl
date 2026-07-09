@@ -36,7 +36,7 @@ end
     Npre::IT
     u::VFT = zeros(Npost) # presynaptic spiking time
     v::VFT = zeros(Npost) # postsynaptic spiking time
-    x::VFT = zeros(Npost) # postsynaptic spiking time
+    x::VFT = zeros(Npre) # presynaptic spike trace
     active::VBT = [true]
 end
 
@@ -83,7 +83,7 @@ function plasticity!(
 
     # update pre-synaptic spike trace
     @fastmath @inbounds begin
-        @turbo for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
+        for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
             x[j] += dt * (-x[j] + fireJ[j]) / τx
         end
 

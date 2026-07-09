@@ -28,9 +28,11 @@ function train!(
     dt = 0.125ms,
     duration = 10ms,
     time = Time(),
+    perturbation! = nothing,
     pbar = false,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
     dt = Float32(dt)
+    _allocate_records!(P, C, S, dt, Float32(duration))
     dts = 0.0f0:dt:(duration-dt)
     iter = pbar ? ProgressBar(dts, printing_delay=0.1) : dts
     firing_rates = Dict{String, Float32}(p.name => 0.f0 for p in P if haskey(p.records, :fire))
@@ -44,10 +46,13 @@ function train!(
                 end
             end
             set_multiline_postfix(iter, join(vcat(
-                        ["$(name) rate =  $(round(mean(firing_rates[name])*s*dt *τ_rate, digits=2))Hz\n" 
+                        ["$(name) rate =  $(round(mean(firing_rates[name])*s*dt *τ_rate, digits=2))Hz\n"
                         for name in keys(firing_rates)],
                         "Time = $(round(get_time(time)/s, digits=3))s")
                         ))
+        end
+        if !isnothing(perturbation!) 
+            perturbation!(;P, C, S, t, dt)
         end
         train!(P, C, S, dt, time)
     end
@@ -124,7 +129,7 @@ function train!(
         plasticity!(c, c.param, dt, T)
         record!(c, T)
     end
-    flush(stdout)
+    # flush(stdout)  # removed from hot path: flushed every dt, ~10k calls/s
 end
 
 function record_zero!(P, C, S, T)
@@ -176,6 +181,7 @@ function sim!(
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
     dt = Float32(dt)
     duration = Float32(duration)
+    _allocate_records!(P, C, S, dt, duration)
     dts = 0.0f0:dt:(duration-dt)
     iter = pbar ? ProgressBar(dts, printing_delay=0.1) : dts
     firing_rates = Dict{String, Float32}(p.name => 0.f0 for p in P if haskey(p.records, :fire))
