@@ -44,9 +44,8 @@ function integrate!(p::InhomogeneousPoisson, param::InhomogeneousPoissonParam, d
         Erate = R(r0 ./ 2 * R(noise[i] * β, 1.0f0) + r[i], 0.0f0)
         r[i] += (r0 - Erate) / rate_timescale * dt
         @assert Erate >= 0
-        if rand(Distributions.Poisson{Float32}(Erate * dt)) > 0
-            fire[i] = true
-        end
+        p_spike = 1f0 - exp(-Erate * dt)
+        fire[i] = rand(Float32) < p_spike
     end
 end
 
