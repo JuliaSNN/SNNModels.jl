@@ -31,7 +31,7 @@ end
 A constructor function that creates a `StimulusGroup` for delivering stimuli to multiple compartments of a population of neurons (e.g., a multi-compartment model).
 
 # Arguments
-- `param::AbstractStimulusParameter`: The parameter object for the stimuli to be created.
+- `param::PoissonStimulusParameter`: The parameter object for the stimuli to be created.
 - `post::AbstractPopulation`: The target population for the stimuli.
 - `sym::Symbol`: The symbol representing the synaptic variable to be targeted (e.g., `:ge` for excitatory conductance).
 - `comps::Vector{Symbol}`: A vector of symbols representing the names of the compartments to be stimulated.
