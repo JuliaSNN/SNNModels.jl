@@ -3,7 +3,7 @@
 
 using SNNModels
 using Test
-using Logging
+using SNNModels.Logging
 using Printf
 @load_units
 
