@@ -1,5 +1,6 @@
 using SNNModels
 using Test
+using LinearAlgebra
 @load_units
 
 @testset "Spatial utilities" begin
