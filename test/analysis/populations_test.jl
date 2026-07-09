@@ -1,6 +1,7 @@
 using SNNModels
 using Test
 using SparseArrays
+using Statistics
 @load_units
 
 @testset "Population analysis" begin
