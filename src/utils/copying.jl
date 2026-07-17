@@ -165,6 +165,12 @@ function modelcopy_internal(x::Union{Dict,IdDict}, stackdict::IdDict)
                 dest[k] = Dict{Symbol,Float32}()
                 continue
             end
+            # Perturbation accumulation lives on the original model only — pert_model
+            # never reads records[:perturbation], so skip the O(N) deep copy.
+            if k === :perturbation
+                dest[k] = Dict{Symbol,Any}()
+                continue
+            end
             if k in x[:data]
                 if k === :fire
                     dest[modelcopy_internal(k, stackdict)] = Dict{Symbol,AbstractVector}(

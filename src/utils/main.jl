@@ -35,6 +35,7 @@ function train!(
     _allocate_records!(P, C, S, dt, Float32(duration))
     dts = 0.0f0:dt:(duration-dt)
     iter = pbar ? ProgressBar(dts, printing_delay=0.1) : dts
+    start_time = get_time(time)
     firing_rates = Dict{String, Float32}(p.name => 0.f0 for p in P if haskey(p.records, :fire))
     τ_rate = 100.0f0
     for t in iter
@@ -52,7 +53,7 @@ function train!(
                         ))
         end
         if !isnothing(perturbation!) 
-            perturbation!(;P, C, S, t, dt)
+            perturbation!(;P, C, S, t=t, dt=dt, start_time = start_time)
         end
         train!(P, C, S, dt, time)
     end
@@ -178,12 +179,14 @@ function sim!(
     duration = 10.0f0,
     pbar = false,
     time = Time(),
+    perturbation! = nothing,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
     dt = Float32(dt)
     duration = Float32(duration)
     _allocate_records!(P, C, S, dt, duration)
     dts = 0.0f0:dt:(duration-dt)
     iter = pbar ? ProgressBar(dts, printing_delay=0.1) : dts
+    start_time = get_time(time)
     firing_rates = Dict{String, Float32}(p.name => 0.f0 for p in P if haskey(p.records, :fire))
     τ_rate = 100.0f0
     for t in iter
@@ -195,10 +198,13 @@ function sim!(
                 end
             end
             set_multiline_postfix(iter, join(vcat(
-                        ["$(name) rate =  $(round(mean(firing_rates[name])*s*dt *τ_rate, digits=2))Hz\n" 
+                        ["$(name) rate =  $(round(mean(firing_rates[name])*s*dt *τ_rate, digits=2))Hz\n"
                         for name in keys(firing_rates)],
                         "Time = $(round(get_time(time)/s, digits=3))s")
                         ))
+        end
+        if !isnothing(perturbation!)
+            perturbation!(; P, C, S, t=t, dt=dt, start_time=start_time)
         end
         sim!(P, C, S, dt, time)
     end

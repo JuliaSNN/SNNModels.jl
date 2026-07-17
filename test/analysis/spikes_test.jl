@@ -97,6 +97,26 @@ const _SPIKE_MODEL, _SPIKE_POP = _spike_model()
         @test all(isfinite, y)
     end
 
+    @testset "Bug 3 — gaussian_smooth kernel units: offsets must be converted to xs' physical units before use" begin
+        # step_x != 1 is required to catch this: with step_x == 1, sample-index
+        # offsets and physical-distance offsets are numerically identical, so
+        # the bug (comparing raw sample-index offsets directly against sigma,
+        # a value in xs' units) is invisible — exactly why the test above,
+        # written with step_x=1, never caught it.
+        xs   = collect(0.0:20.0:2000.0)   # step_x = 20, e.g. ms bins at 50 Hz
+        x    = zeros(length(xs))
+        x[51] = 1.0                        # isolated impulse
+        σ    = 30.0                        # 1.5 samples, physical units matching xs
+        y    = gaussian_smooth(xs, x, σ; skewed = :left)
+        # A properly-scaled causal Gaussian (sigma = 1.5 samples) puts most of
+        # its weight on the impulse itself and decays away within a few
+        # samples; the pre-fix bug produced a near-uniform (boxcar) kernel
+        # instead, which keeps neighbouring samples close to the peak's
+        # weight far longer than a real Gaussian would.
+        @test y[51] > 0.2                  # substantial weight on the impulse itself
+        @test y[46] < 0.05 * y[51]          # 5 samples back (~3.3σ): should have decayed away
+    end
+
     @testset "ISI_CV2 — Spiketimes input" begin
         st  = spiketimes(_SPIKE_POP)
         cv2 = ISI_CV2(st)

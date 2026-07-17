@@ -739,7 +739,7 @@ function gaussian_smooth(xs::RT, x::T, σ::R; skewed::Symbol=:none) where {T<:Ab
     else
         -half:half    # symmetric
     end
-    kernel = exp.(.-Float64.(offsets).^2 ./ (2σ^2))
+    kernel = exp.(.-(Float64.(offsets) .* step_x).^2 ./ (2σ^2))
     kernel ./= sum(kernel)
     n = length(x)
     out = similar(x)

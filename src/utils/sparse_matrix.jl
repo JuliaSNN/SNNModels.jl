@@ -14,13 +14,13 @@ function matrix(c::C, sym::Symbol) where {C<:AbstractConnection}
     return sparse(c.I, c.J, getfield(c, sym), length(c.rowptr) - 1, length(c.colptr) - 1)
 end
 
-function matrix(c::C, sym::Symbol, time::Number) where {C<:AbstractConnection}
+function matrix_record(c::C, sym::Symbol, time::Number) where {C<:AbstractConnection}
     W, r = record(c, sym, range = true)
     @assert time <= r[end] && time >= r[1] "Time $time not in recorded range $(r[1]):$(r[end])"
     return matrix(c, W, time)
 end
 
-function matrix(c::C, sym::Symbol, time::AbstractVector) where {C<:AbstractConnection}
+function matrix_record(c::C, sym::Symbol, time::AbstractVector) where {C<:AbstractConnection}
     W, r = record(c, sym, range = true)
     @assert all(time .<= r[end] .&& time .>= r[1]) "Time $time not in recorded range $(r[1]):$(r[end])"
     return [matrix(c, W, t) for t in time] |> x -> cat(x..., dims = 3)
@@ -298,6 +298,7 @@ end
 
 export dsparse,
     matrix,
+    matrix_record,
     extract_items,
     sparse_matrix,
     indices,
