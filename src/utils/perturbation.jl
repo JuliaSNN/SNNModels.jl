@@ -173,6 +173,7 @@ function perturbation_record(
 end
 
 function _perturbation_record_dense(obj, variable::Symbol, condition::String, interval::AbstractRange)
+    !haskey(obj.records, variable) && return (fill(0.0f0, (0, length(interval))), interval)
     # Retrieve baseline aligned to interval via interpolation.
     # record(..., interpolate=false) returns the raw buffer ignoring interval;
     # interpolated_record gives a ScaledInterpolation over [start_time, end_time]
