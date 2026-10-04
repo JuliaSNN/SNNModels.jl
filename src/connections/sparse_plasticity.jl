@@ -86,6 +86,8 @@ include("sparse_plasticity/iSTDP.jl")
 # include("sparse_plasticity/longshortSP.jl")
 include("sparse_plasticity/STDP_kernels.jl")
 include("sparse_plasticity/STDP_traces.jl")
+include("sparse_plasticity/STDP_weight_dependent.jl")
+include("sparse_plasticity/STDP_triplet.jl")
 include("sparse_plasticity/STDP_structured.jl")
 
 function change_plasticity!(syn; LTP = nothing, STP = nothing)

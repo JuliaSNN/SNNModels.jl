@@ -28,6 +28,7 @@ function _lockstep(param; Npre = 200, Npost = 150, steps = 4000, rate = 0.02,
         post.fire .= rand(Npost) .< rate
         update_time!(T, _DT)
         plasticity!(syn, syn.param, _DT, T)
+        ref || continue
         param isa STDPMexicanHat ? ref_plasticity!(r, param, st, _DT) :
                                    ref_plasticity!(r, param, st, get_time(T); kw...)
     end
@@ -140,5 +141,74 @@ end
             @test syn.W[1] + 1 ≈ expected rtol = 1e-4
         end
     end
+end
+
+@testset "triplet STDP (Pfister & Gerstner 2006)" begin
+    p = STDPTriplet(A3_minus = 2.0e-3, Wmax = 100.0f0, Wmin = -100.0f0)
+    e(n, τ) = exp(-n * _DT / τ)
+    (; A2_plus, A3_plus, A2_minus, A3_minus, τ_plus, τ_minus, τ_x, τ_y) = p
+    a, Δ, Tp = 100, 80, 120   # steps (10 ms, 15 ms)
+
+    # pre-post-post: pre at a, posts at a+Δ and a+Δ+Tp
+    expected = A2_plus * e(Δ, τ_plus) + e(Δ + Tp, τ_plus) * (A2_plus + A3_plus * e(Tp, τ_y))
+    @test _pair_dw(p, [a], [a + Δ, a + Δ + Tp]) ≈ expected rtol = 1e-4
+
+    # post-pre-post: post at a, pre at a+Δ, post at a+Δ+Tp
+    expected = -A2_minus * e(Δ, τ_minus) + e(Tp, τ_plus) * (A2_plus + A3_plus * e(Δ + Tp, τ_y))
+    @test _pair_dw(p, [a + Δ], [a, a + Δ + Tp]) ≈ expected rtol = 1e-4
+
+    # post-pre-pre (triplet LTD term): post at a, pres at a+Δ and a+Δ+Tp
+    expected = -A2_minus * e(Δ, τ_minus) - e(Δ + Tp, τ_minus) * (A2_minus + A3_minus * e(Tp, τ_x))
+    @test _pair_dw(p, [a + Δ, a + Δ + Tp], [a]) ≈ expected rtol = 1e-4
+
+    # single pairs reduce to pair STDP with A2 amplitudes
+    @test _pair_dw(p, [a], [a + Δ]) ≈ A2_plus * e(Δ, τ_plus) rtol = 1e-4
+    @test _pair_dw(p, [a + Δ], [a]) ≈ -A2_minus * e(Δ, τ_minus) rtol = 1e-4
+
+    # defaults: Table 4, all-to-all minimal model
+    d = STDPTriplet()
+    @test (d.A2_plus, d.A3_plus, d.A2_minus, d.A3_minus) == (5.3f-3, 8.0f-3, 3.5f-3, 0.0f0)
+    @test (d.τ_plus, d.τ_minus, d.τ_y) == (16.8f0ms, 33.7f0ms, 40.0f0ms)
+end
+
+@testset "weight-dependent STDP" begin
+    Δ = 80
+    for (μp, μm, α) in ((1.0, 1.0, 1.0), (0.5, 0.0, 1.2), (0.0, 0.0, 1.0))
+        p = STDPWeightDependent(η = 0.01, α = α, μ_plus = μp, μ_minus = μm,
+                                Wmax = 20.0f0, Wmin = 2.0f0)
+        W̃ = p.Wmax - p.Wmin
+        for w0 in (4.0f0, 11.0f0, 17.0f0)
+            ltp = p.η * W̃^(1 - p.μ_plus) * (p.Wmax - w0)^p.μ_plus * exp(-Δ * _DT / p.τpre)
+            ltd = -p.η * p.α * W̃^(1 - p.μ_minus) * (w0 - p.Wmin)^p.μ_minus * exp(-Δ * _DT / p.τpost)
+            @test _pair_dw(p, [100], [100 + Δ]; w0 = w0) ≈ ltp rtol = 1e-3
+            @test _pair_dw(p, [100 + Δ], [100]; w0 = w0) ≈ ltd rtol = 1e-3
+        end
+    end
+
+    # μ = 0 is additive STDP: identical to STDPGerstner(A_pre = ηW̃, A_post = -ηαW̃)
+    # here W̃ = Wmax - Wmin = 2000, η = 5e-6: A_pre = 0.01, A_post = -0.012
+    Random.seed!(3)
+    pre, post = Identity(N = 100), Identity(N = 80)
+    s1 = SpikingSynapse(pre, post, :g; conn = (p = 0.2f0, μ = 5.0f0, σ = 1.0f0),
+        LTPParam = STDPGerstner(A_pre = 0.01, A_post = -0.012, Wmax = 1.0f3, Wmin = -1.0f3))
+    s2 = SpikingSynapse(pre, post, :g; conn = matrix(s1),
+        LTPParam = STDPWeightDependent(η = 5.0e-6, α = 1.2, μ_plus = 0, μ_minus = 0,
+                                       Wmax = 1.0f3, Wmin = -1.0f3))
+    @test s1.W == s2.W
+    T = Time()
+    for _ = 1:3000
+        pre.fire .= rand(100) .< 0.02
+        post.fire .= rand(80) .< 0.02
+        update_time!(T, _DT)
+        plasticity!(s1, s1.param, _DT, T)
+        plasticity!(s2, s2.param, _DT, T)
+    end
+    @test isapprox(s1.W, s2.W; rtol = 1e-5)
+    @test maximum(abs.(s1.W .- 5.0f0)) > 0.1
+
+    # multiplicative bounds hold under strong driving
+    p = STDPWeightDependent(η = 0.5, Wmax = 6.0f0, Wmin = 4.0f0)
+    W, _ = _lockstep(p; steps = 2000, ref = false)
+    @test all(4.0f0 .<= W .<= 6.0f0)
 end
 true

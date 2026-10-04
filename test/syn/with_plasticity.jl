@@ -40,6 +40,20 @@ end
         @test all(isfinite, syn.W)
     end
 
+    @testset "STDPTriplet" begin
+        model, syn = _driven_model(ltp = STDPTriplet())
+        train!(model, 200ms)
+        @test all(isfinite, syn.W)
+        @test all(STDPTriplet().Wmin .<= syn.W .<= STDPTriplet().Wmax)
+    end
+
+    @testset "STDPWeightDependent" begin
+        model, syn = _driven_model(ltp = STDPWeightDependent())
+        train!(model, 200ms)
+        @test all(isfinite, syn.W)
+        @test all(STDPWeightDependent().Wmin .<= syn.W .<= STDPWeightDependent().Wmax)
+    end
+
     @testset "STDPMexicanHat" begin
         model, syn = _driven_model(ltp = STDPMexicanHat())
         train!(model, 200ms)

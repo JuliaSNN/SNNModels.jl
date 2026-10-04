@@ -41,5 +41,12 @@ using SNNModels.Distributions
         @test eltype(s.param.spike_time) == Vector{Float32}
         @test eltype(s.param.spike_w) == Vector{Float32}
     end
+
+    @testset "triplet and weight-dependent variables" begin
+        s = SpikingSynapse(E, E, :ge; conn = (p = 0.4, μ = 0.5), LTPParam = STDPTriplet())
+        @test all(eltype(getfield(s.LTPVars, f)) == Float32 for f in (:r1, :r2, :o1, :o2))
+        s = SpikingSynapse(E, E, :ge; conn = (p = 0.4, μ = 0.5), LTPParam = STDPWeightDependent())
+        @test eltype(s.LTPVars.tpre) == Float32
+    end
 end
 true
