@@ -57,7 +57,7 @@ multiplied by A again) is fixed; its default `A_post` is now negative.
 ## Inconsistency 3 — Weight update scope
 
 - Scheme A: resolved. Weights are updated only through the spike passes (colptr for pre spikes, rowptr/index for post spikes); no scan of untouched synapses.
-- Scheme B (`iSTDPRate`): weight updated only inside `if fireJ[j]` / `if fireI[i]` blocks, using colptr/rowptr to reach affected synapses. No scan of untouched synapses. Before SNNModels 1.8.2 the post-spike block used a `@turbo` loop with a reassigned loop variable (`st = index[st]`), so potentiation was applied to the synapses stored at CSC positions `rowptr[i]:rowptr[i+1]-1` instead of the incoming synapses of neuron `i`; see "iSTDP bug" below.
+- Scheme B (`iSTDPRate`): weight updated only inside `if fireJ[j]` / `if fireI[i]` blocks, using colptr/rowptr to reach affected synapses. No scan of untouched synapses.
 - Scheme B (`vSTDP`): update runs via `Threads.@threads` over `eachindex(fireJ)` chunks — same structure as Scheme A but uses col-pointer to reach synapses rather than iterating all of `W`.
 
 ---
@@ -71,24 +71,6 @@ multiplied by A again) is fixed; its default `A_post` is now negative.
 LTD (`u` trace) is read via `u[I[s]]` (post-neuron index), but `fireI` is never checked — LTD is applied on every pre-spike regardless of whether the post-neuron fired. This is consistent with the Clopath 2010 rule, where the LTP term requires post-spike gating but LTD only requires pre-spike and the slow `u` trace. **Not a bug**, but differs from Gerstner-style paired rules.
 
 ---
-
-## iSTDP bug (fixed in 1.8.2)
-
-`iSTDPRate` (and `iSTDPTime`, whose rule was removed in commit e4ce94f) contained
-
-```julia
-@turbo for st = rowptr[i]:(rowptr[i+1]-1)
-    st = index[st]
-    W[st] = clamp(W[st] + η * tpre[J[st]], Wmin, Wmax)
-end
-```
-
-LoopVectorization ignores the reassignment of the loop variable, so `W` was indexed by
-`rowptr[i]:rowptr[i+1]-1` (CSC positions) rather than by `index[...]`: potentiation went to
-synapses onto unrelated postsynaptic neurons. Depression (pre-spike loop) was correct and
-`iSTDPPotential` was not affected (no `@turbo` in its post loop). Affected: SNNModels 1.5.0 -
-1.8.1, SpikingNeuralNetworks.jl from 680a30c (2025-01-06, v1.0.0). Regression test:
-`test/syn/istdp_kernel.jl`. Simulations with these versions must be rerun.
 
 ## Conventions common to the rules
 

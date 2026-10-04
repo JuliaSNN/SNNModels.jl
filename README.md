@@ -106,10 +106,6 @@ over incoming synapses; traces read before the current step's spikes). They agre
 
 ## Release notes: 1.8.2
 
-- **Bug fix, iSTDP.** In `iSTDPRate` (and the former `iSTDPTime`) the potentiation at a
-  postsynaptic spike was applied to the wrong synapses (a `@turbo` loop with a reassigned loop
-  variable). Affected: SNNModels 1.5.0 - 1.8.1 and SpikingNeuralNetworks.jl 1.0.0 onwards.
-  Results obtained with these versions change; rerun simulations that used them.
 - **Behaviour change, `STDPGerstner`.** The amplitudes `A_pre`/`A_post` were applied twice
   (effective `A^2`, sign lost). They are now applied once, and the default `A_post` is `-1e-4`.
 - **New rules:** `STDPTriplet`, `STDPWeightDependent`.
