@@ -23,6 +23,17 @@ factors ``\\tilde W^{1-μ}`` make the update scale with the weight range):
 and LTP ``= η (W_{max} - w) x_{pre}``. With `Wmin = 0` this is
 exactly Auryn's `STDPwdConnection` (`learning_rate = η`, `param_alpha = α`,
 `param_mu_plus`, `param_mu_minus`).
+
+Fields: `η = 1e-3` (relative learning rate), `α = 1` (LTD/LTP asymmetry), `μ_plus = 1`,
+`μ_minus = 1` (weight-dependence exponents), `τpre = τpost = 20ms`, `Wmax = 30pF`,
+`Wmin = 0pF`. State: `STDPVariables`. Event-driven with the ordering of `STDP_kernels.jl`,
+serial, applied only under `train!`.
+
+# Example
+```julia
+rule = SNN.STDPWeightDependent(η = 1e-3, α = 1.05, μ_plus = 0.0, μ_minus = 1.0)  # Gütig 2003
+syn = SNN.SpikingSynapse(pre, post, :ge; conn = (p = 0.1, μ = 10.0), LTPParam = rule)
+```
 """
 STDPWeightDependent
 

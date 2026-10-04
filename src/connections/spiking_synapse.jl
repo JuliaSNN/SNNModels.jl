@@ -38,7 +38,39 @@ end
 end
 
 """
-    SpikingSynapse to connect neuronal populations
+    SpikingSynapse(pre, post, sym, comp = nothing; conn, delay_dist = nothing, dt = 0.125f0,
+                   LTPParam = NoLTP(), STPParam = NoSTP(), name = "SpikingSynapse")
+
+Sparse synapse that propagates the spikes of `pre` to the target variable `sym` (and
+compartment `comp`) of `post`.
+
+# Arguments
+- `pre`, `post`: populations (`AbstractPopulation`).
+- `sym::Symbol`: target conductance/current of `post` (e.g. `:ge`, `:gi`, `:h`); `comp`: compartment
+  for multicompartment models.
+- `conn`: either a `NamedTuple` of `sparse_matrix` options (`p` or `ρ`, `μ`, `σ`, `dist`, `rule`, ...)
+  or an explicit `Npost x Npre` matrix (dense or sparse, any element type).
+- `delay_dist`: optional `Distribution`; one delay (ms) per synapse is drawn from it.
+- `LTPParam`: long-term plasticity rule (`STDPGerstner`, `STDPTriplet`, `STDPWeightDependent`,
+  `iSTDPRate`, `vSTDPParameter`, ...). Applied only when the network is run with `train!`;
+  `sim!` propagates spikes but never updates the weights.
+- `STPParam`: short-term plasticity rule acting on the efficacy `ρ`.
+
+# Notes
+- All synaptic data (`W`, `ρ`, delays, delay queues) are `Float32` whatever the element
+  type of `conn` or of `delay_dist`; conversion happens in the constructor.
+- If `pre == post`, autapses are removed structurally (no stored zero-weight self synapses
+  that plasticity could grow).
+- `conn` as a `NamedTuple` is built by `sparse_matrix`, which since SNNModels 1.9 uses a
+  different random stream than before: seeded networks do not reproduce earlier realisations
+  (same statistics).
+
+# Example
+```julia
+E = SNN.IF(N = 400); I = SNN.IF(N = 100)
+EI = SNN.SpikingSynapse(E, I, :ge; conn = (p = 0.2, μ = 3.0))
+IE = SNN.SpikingSynapse(I, E, :gi; conn = (p = 0.2, μ = 5.0), LTPParam = SNN.iSTDPRate(r = 5Hz))
+```
 """
 SpikingSynapse
 

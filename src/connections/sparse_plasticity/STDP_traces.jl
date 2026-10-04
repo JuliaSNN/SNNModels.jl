@@ -22,9 +22,35 @@ potentiation for pre-before-post, `A_post < 0` gives depression for
 post-before-pre (classical Hebbian STDP, the default). Any sign combination is
 allowed (e.g. anti-Hebbian with `A_pre < 0 < A_post`).
 
-Note: before the event-driven rewrite the traces were incremented by `A_pre`/`A_post`
-and multiplied by them again, i.e. the effective amplitude was ``A^2`` with the sign
-lost. Parameter sets tuned against that version must be rescaled.
+Fields (all `Float32`; time in ms, weights in the units of `W`, e.g. pF):
+- `A_post = -1e-4`: weight change per unit `x_post` at a presynaptic spike (post-before-pre); `< 0` is LTD.
+- `A_pre = 1e-4`: weight change per unit `x_pre` at a postsynaptic spike (pre-before-post); `> 0` is LTP.
+- `τpre = 20ms`, `τpost = 20ms`: trace time constants.
+- `Wmax = 30pF`, `Wmin = 0pF`: weight bounds (use `Inf`/`-Inf` to disable).
+
+Algorithm: event-driven, Auryn ordering (see `STDP_kernels.jl`). Per step: (1) pre spikes walk
+their outgoing synapses, (2) post spikes walk their incoming synapses, (3) the traces of the
+neurons that fired are incremented by 1, (4) all traces are multiplied by `exp(-dt/τ)`.
+Same-step pre and post spikes do not interact; earlier history does. Only touched weights
+are clamped (all weights once at the first step). Serial, no threading. Matches Brian2
+(relative weight difference 2e-6) and Auryn (2e-7) and the analytic kernel above.
+
+Plasticity runs only under `train!`; `sim!` leaves the weights untouched.
+
+!!! warning "Behaviour change in SNNModels 1.9"
+    Up to SNNModels 1.8 the traces were incremented by `A_pre`/`A_post` and multiplied by
+    them again, so the effective amplitudes were ``A^2`` and the sign was lost (a negative
+    `A_post` potentiated). Now the amplitude is applied once and the default `A_post` is
+    `-1e-4` (LTD). Parameter sets tuned against the old version must be rescaled: an old
+    `A = 5e-2` corresponds to a new amplitude of `2.5e-3`.
+
+# Example
+```julia
+rule = SNN.STDPGerstner(A_pre = 1e-2, A_post = -1.05e-2, τpre = 16.8ms, τpost = 33.7ms,
+                        Wmin = 0, Wmax = 50)
+syn = SNN.SpikingSynapse(pre, post, :ge; conn = (p = 0.1, μ = 10.0), LTPParam = rule)
+SNN.train!(model = SNN.compose(; pre, post, syn), duration = 10s)   # not sim!
+```
 """
 STDPGerstner
 
@@ -47,6 +73,12 @@ Pair-based STDP with rate terms, event-driven (same traces and ordering as
 - postsynaptic spike: ``w \\mathrel{+}= η (γ\\, x_{pre} + β)``
 
 then clamping to `[Wmin, Wmax]`.
+
+Fields: `η = 0.01` (learning rate), `α = 0`, `β = 0` (rate terms applied at every
+presynaptic / postsynaptic spike respectively), `κ = 1`, `γ = 1` (weights of the
+pre-post and post-pre trace terms), `τpre = τpost = 20ms`, `Wmin = 0pF`, `Wmax = 30pF`.
+Unlike `STDPGerstner` the sign of the trace terms is carried by `κ`, `γ`, `α`, `β`, not by a
+separate amplitude, and `η` multiplies both. Applied only under `train!`.
 """
 STDPConfavreux2025
 
@@ -64,12 +96,17 @@ end
 
 @doc """
     STDPMexicanHat{FT = Float32}
-    
-    The STDP is defined such that integral of the kernel is zero. The STDP kernel is defined as:
 
-    `` A x * exp(-x/sqrt(2)) ``
+STDP with a Mexican-hat kernel whose integral is zero:
+``Δw = A\\, (1 - x)\\, e^{-x/\\sqrt{2}}`` with ``x = \\log(x_{pre}/x_{post})^2``, where
+`x_pre` and `x_post` are the pre- and postsynaptic traces (time constant `τ`).
 
-    where   ``A`` is the learning rate for post and pre-synaptic spikes, respectively, and ``x`` is the difference between the post and pre-synaptic traces.
+Fields: `A = 1e-1` (amplitude), `τ = 20ms`, `Wmax = 30pF`, `Wmin = 0pF`.
+
+Pre spikes walk their outgoing synapses and post spikes their incoming ones (event-driven);
+only touched weights are clamped. The traces keep their Euler integration, with the spike
+added before the weight update, and the rule is otherwise unchanged by the event-driven
+rewrite. Applied only under `train!`.
 """
 STDPMexicanHat
 

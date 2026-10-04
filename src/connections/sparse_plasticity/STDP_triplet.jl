@@ -25,6 +25,17 @@ A3_minus = 0, τ_y = 40 ms; τ_plus = 16.8 ms and τ_minus = 33.7 ms from Bi & P
 These equal Auryn's `MinimalTripletConnection` with `eta = 1`. With `A3_minus = 0`,
 `τ_x` is unused; its default (946 ms) is the all-to-all full-model value of Table 4.
 Weights are in the same units as `W`; rescale the amplitudes to the weight scale.
+
+Fields: `A2_plus`, `A3_plus`, `A2_minus`, `A3_minus` (amplitudes, all used with the signs
+shown above), `τ_plus`, `τ_minus`, `τ_x`, `τ_y` (trace time constants, ms), `Wmax = 30pF`,
+`Wmin = 0pF`. Event-driven with the ordering of `STDP_kernels.jl` (same-step pre/post spikes
+do not interact), serial, applied only under `train!`.
+
+# Example
+```julia
+rule = SNN.STDPTriplet(A2_plus = 5.3e-3 * 10, A3_plus = 8e-3 * 10, A2_minus = 3.5e-3 * 10)
+syn = SNN.SpikingSynapse(pre, post, :ge; conn = (p = 0.1, μ = 10.0), LTPParam = rule)
+```
 """
 STDPTriplet
 
