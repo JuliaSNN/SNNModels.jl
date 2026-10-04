@@ -4,24 +4,23 @@ Two incompatible trace-update schemes coexist in the codebase. This memo documen
 
 ---
 
-## Scheme A — Event-driven (exact exponential decay)
+## Scheme A — Event-driven, Auryn style (exact multiplicative decay)
 
-Used by: `STDPGerstner`, `STDPConfavreux2025`
+Used by: `STDPGerstner`, `STDPConfavreux2025`, `STDPWeightDependent`, `STDPTriplet`
+(shared loops in `sparse_plasticity/STDP_kernels.jl`).
 
-Traces are **not** updated every dt. Instead, on each spike event the trace is decayed exactly from the last spike time:
+Per step: (1) for each presynaptic spike, walk its outgoing synapses (`colptr`) and apply
+the pre-spike update; (2) for each postsynaptic spike, walk its incoming synapses
+(`rowptr`/`index`) and apply the post-spike update; clamp only touched weights; (3) add 1
+to the traces of the neurons that fired; (4) multiply every trace by the precomputed
+`exp(-dt/τ)`. Traces are therefore read before this step's spikes are added (Auryn and
+Brian2 convention). Cost O(N) multiplies plus O(spikes x fan-out), no exp per neuron, no
+O(|W|) scan. Serial (no threading).
 
-```julia
-if fireJ[j]
-    tpre[j] = tpre[j] * exp(-(t - last_pre[j]) / τpre) + A_pre
-    last_pre[j] = t
-end
-Δpre[j] = t > last_pre[j] ? tpre[j] * exp(-(t - last_pre[j]) / τpre) : 0f0
-```
-
-- Mathematically exact: no Euler integration error.
-- Requires storing `last_pre` / `last_post` vectors (extra memory).
-- `Δpre` / `Δpost` are ephemeral "current value" buffers recomputed each step; they are not persistent state.
-- Weight update runs in a threaded loop over all synapses (`Threads.@threads`), checking `fireI[i]` / `fireJ[j]`.
+- Mathematically exact decay (up to Float32 rounding of the factor).
+- `last_pre` / `last_post` store spike times (informational).
+- The ephemeral `Δpre` / `Δpost` buffers were removed.
+- All weights are clamped once on the first step (`initialized` flag), then only touched ones.
 
 ---
 
@@ -46,24 +45,19 @@ end
 
 ---
 
-## Inconsistency 1 — Mixed weight-update triggers
+## Inconsistency 1 and 2 — resolved (event-stdp)
 
-`STDPGerstner` / `STDPConfavreux2025` update weights for **every synapse** at every dt (threaded loop over `eachindex(W)`), even when no spike occurred (they check `fireI[i]` / `fireJ[j]` inside the loop). This is safe but wasteful when spike rates are low.
-
-Scheme B rules scan only the spiking neurons via row/col pointer, which is O(Npre·p) on a spike, O(0) otherwise. This is the standard efficient approach.
-
----
-
-## Inconsistency 2 — Δ buffers in Scheme A
-
-`STDPGerstner` / `STDPConfavreux2025` maintain `Δpre` / `Δpost` vectors in `STDPVariables` as ephemeral per-step values. These are not traces — they are recalculated every dt and should not be read outside of `plasticity!`. Scheme B rules have no such ephemeral state. The naming is misleading (`Δpre` sounds like a weight change, not a trace value).
+`STDPGerstner` / `STDPConfavreux2025` no longer scan all synapses each dt and no longer keep
+`Δpre`/`Δpost` buffers. `STDPMexicanHat` and `STDPSymmetric`/`STDPAntiSymmetric` no longer
+clamp all of `W` each step. STDPGerstner's former A^2 amplitude (trace incremented by A and
+multiplied by A again) is fixed; its default `A_post` is now negative.
 
 ---
 
 ## Inconsistency 3 — Weight update scope
 
-- Scheme A: all synapses scanned each dt, weight updated only when `fireI` or `fireJ`.
-- Scheme B (`iSTDPRate`): weight updated only inside `if fireJ[j]` / `if fireI[i]` blocks, using colptr/rowptr to reach affected synapses. No scan of untouched synapses.
+- Scheme A: resolved. Weights are updated only through the spike passes (colptr for pre spikes, rowptr/index for post spikes); no scan of untouched synapses.
+- Scheme B (`iSTDPRate`): weight updated only inside `if fireJ[j]` / `if fireI[i]` blocks, using colptr/rowptr to reach affected synapses. No scan of untouched synapses. Before SNNModels 1.8.2 the post-spike block used a `@turbo` loop with a reassigned loop variable (`st = index[st]`), so potentiation was applied to the synapses stored at CSC positions `rowptr[i]:rowptr[i+1]-1` instead of the incoming synapses of neuron `i`; see "iSTDP bug" below.
 - Scheme B (`vSTDP`): update runs via `Threads.@threads` over `eachindex(fireJ)` chunks — same structure as Scheme A but uses col-pointer to reach synapses rather than iterating all of `W`.
 
 ---
@@ -78,15 +72,45 @@ LTD (`u` trace) is read via `u[I[s]]` (post-neuron index), but `fireI` is never 
 
 ---
 
+## iSTDP bug (fixed in 1.8.2)
+
+`iSTDPRate` (and `iSTDPTime`, whose rule was removed in commit e4ce94f) contained
+
+```julia
+@turbo for st = rowptr[i]:(rowptr[i+1]-1)
+    st = index[st]
+    W[st] = clamp(W[st] + η * tpre[J[st]], Wmin, Wmax)
+end
+```
+
+LoopVectorization ignores the reassignment of the loop variable, so `W` was indexed by
+`rowptr[i]:rowptr[i+1]-1` (CSC positions) rather than by `index[...]`: potentiation went to
+synapses onto unrelated postsynaptic neurons. Depression (pre-spike loop) was correct and
+`iSTDPPotential` was not affected (no `@turbo` in its post loop). Affected: SNNModels 1.5.0 -
+1.8.1, SpikingNeuralNetworks.jl from 680a30c (2025-01-06, v1.0.0). Regression test:
+`test/syn/istdp_kernel.jl`. Simulations with these versions must be rerun.
+
+## Conventions common to the rules
+
+- Plasticity runs only under `train!`; `sim!` never calls `update_traces!`/`plasticity!`.
+- `STDPGerstner` sign convention: signed amplitudes used once, `A_pre > 0` LTP and `A_post < 0`
+  LTD by default (before 1.8.2 the effective amplitude was `A^2`).
+- Same-step spikes: Scheme A rules read traces before this step's increments, so a pre and a
+  post spike in the same step do not interact. Scheme B rules increment their traces during the pass (STDPMexicanHat before both passes; iSTDP between the pre and post pass), so same-step spikes may interact.
+
+---
+
 ## Summary table
 
 | Rule | Trace update | Weight scan | Extra state |
 |---|---|---|---|
-| STDPGerstner | event-driven exact | all W each dt | last_pre, last_post, Δpre, Δpost |
-| STDPConfavreux2025 | event-driven exact | all W each dt | last_pre, last_post, Δpre, Δpost |
-| STDPMexicanHat | Euler per-dt | on pre-spike (colptr+rowptr) | — |
-| STDPAntiSymmetric | Euler per-dt | on spike (colptr+rowptr) | — |
-| STDPSymmetric | Euler per-dt | on spike (colptr+rowptr) | — |
+| STDPGerstner | exact decay per step (Scheme A) | on spike (colptr+rowptr) | last_pre, last_post, initialized |
+| STDPConfavreux2025 | exact decay per step (Scheme A) | on spike (colptr+rowptr) | last_pre, last_post, initialized |
+| STDPWeightDependent | exact decay per step (Scheme A) | on spike (colptr+rowptr) | last_pre, last_post, initialized |
+| STDPTriplet | exact decay per step, 4 traces | on spike (colptr+rowptr) | r1, r2, o1, o2, last_pre, last_post |
+| STDPMexicanHat | Euler per-dt | on spike (colptr+rowptr), touched clamp | initialized |
+| STDPAntiSymmetric | Euler per-dt | on spike (colptr+rowptr), touched clamp | initialized |
+| STDPSymmetric | Euler per-dt | on spike (colptr+rowptr), touched clamp | initialized |
 | iSTDPRate | Euler per-dt | on spike (colptr+rowptr) | — |
 | iSTDPPotential | Euler per-dt | on spike (colptr+rowptr) | — |
 | vSTDPParameter | Euler per-dt | on pre-spike (colptr) | — |
@@ -95,6 +119,8 @@ LTD (`u` trace) is read via `u[I[s]]` (post-neuron index), but `fireI` is never 
 
 ## Recommendations
 
-1. **Low priority:** Refactor `STDPGerstner` / `STDPConfavreux2025` to use colptr/rowptr weight update (avoids O(|W|) scan each dt). Only matters at low firing rates with large, dense weight matrices.
-2. **Rename `Δpre`/`Δpost`** to `tpre_now`/`tpost_now` to clarify these are current trace values, not weight deltas.
-3. **No functional change needed** for Scheme B rules — Euler error is negligible at `dt=0.1ms`.
+1. Done: event-driven weight updates for the trace rules; `Δpre`/`Δpost` removed.
+2. Scheme B rules could use the same exact multiplicative decay (`_decay!`) instead of Euler;
+   not done to keep their definitions unchanged.
+3. Validation against analytic results, Brian2 and Auryn:
+   `papers/JuliaSNN_publication/validation/stdp/` in the umbrella repo.

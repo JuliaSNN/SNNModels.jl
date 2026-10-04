@@ -174,7 +174,7 @@ This constructor creates a 1-to-1 connection between presynaptic and postsynapti
 
 # Notes
 - The number of presynaptic neurons (N) is set to the size of the postsynaptic population (post.N)
-- The synaptic weight matrix is set to an identity matrix (LinearAlgebra.I(post.N))
+- The synaptic weight matrix is set to a sparse identity matrix
 - This is useful for creating direct connections between corresponding neurons in presynaptic and postsynaptic populations
 """
 function SpikeTimeStimulusIdentity(
@@ -184,7 +184,7 @@ function SpikeTimeStimulusIdentity(
     param::SpikeTimeStimulusParameter,
     kwargs...,
 ) where {T<:AbstractPopulation}
-    conn = LinearAlgebra.I(post.N) |> Matrix
+    conn = sparse(1.0f0 * LinearAlgebra.I, post.N, post.N)  # sparse identity, no N x N dense
     return SpikeTimeStimulus(post, sym, comp; conn, N = post.N, param = param, kwargs...)
 end
 

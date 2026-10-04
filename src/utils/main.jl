@@ -9,6 +9,12 @@
 
 Trains the spiking neural network for a specified duration by repeatedly calling `train!` function.
 
+`train!` is the only entry point that applies plasticity. Per step it runs the same
+stimulus / `integrate!` / `forward!` sequence as `sim!`, and in addition calls
+`update_traces!` before and `plasticity!` after `forward!` of every connection (long-term
+STDP/iSTDP/vSTDP rules and short-term plasticity). `sim!` never calls them: weights and STP
+variables stay frozen even if the synapse carries an `LTPParam` or `STPParam`.
+
 **Arguments**
 - `P::Vector{TN}`: Vector of neurons in the network.
 - `C::Vector{TS}`: Vector of synapses in the network.
@@ -157,6 +163,9 @@ end
     ) where {TN <: AbstractPopulation, TS<:AbstractConnection }
 
 Simulates the spiking neural network for a specified duration by repeatedly calling `sim!` function.
+
+No plasticity is applied: `sim!` never calls `plasticity!`/`update_traces!`, so synaptic
+weights stay constant. Use `train!` to run plastic networks.
 
 **Arguments**
 - `P::Vector{TN}`: Vector of neurons in the network.

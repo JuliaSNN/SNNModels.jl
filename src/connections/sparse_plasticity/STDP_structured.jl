@@ -47,6 +47,7 @@ end
     to_y::VFT = zeros(Npost)        # Pre-synaptic spike trace
     tr_x::VFT = zeros(Npre)         # Post-synaptic spike trace
     tr_y::VFT = zeros(Npre)         # Post-synaptic spike trace
+    initialized::VBT = [false]      # one-off clamp of all weights done
     active::VBT = [true]
 end
 
@@ -107,10 +108,9 @@ function plasticity!(
         end
 
     end
-    # Clamp weights to the specified bounds
-    @turbo for i in eachindex(W)
-        @inbounds W[i] = clamp(W[i], Wmin, Wmax)
-    end
+    # Clamp the weights touched in this step (all weights once, on the first step)
+    _initial_clamp!(W, plasticity.initialized, Wmin, Wmax)
+    _clamp_touched!(W, colptr, rowptr, index, fireJ, fireI, Wmin, Wmax)
 end
 
 function plasticity!(
@@ -168,10 +168,9 @@ function plasticity!(
         end
 
     end
-    # Clamp weights to the specified bounds
-    @turbo for i in eachindex(W)
-        @inbounds W[i] = clamp(W[i], Wmin, Wmax)
-    end
+    # Clamp the weights touched in this step (all weights once, on the first step)
+    _initial_clamp!(W, plasticity.initialized, Wmin, Wmax)
+    _clamp_touched!(W, colptr, rowptr, index, fireJ, fireI, Wmin, Wmax)
 end
 # Function to implement STDP update rule
 

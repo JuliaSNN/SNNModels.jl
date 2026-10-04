@@ -41,6 +41,7 @@ _suite_t0 = time()
     _ts("util",           "utils/util_test.jl")
     _ts("io",             "utils/io_test.jl")
     _ts("sparse_matrix",  "utils/sparse_matrix_test.jl")
+    _ts("sparse_gen",     "utils/sparse_matrix_gen_test.jl")
     _ts("spatial",        "utils/spatial_test.jl")
 end
 
@@ -75,6 +76,9 @@ end
     _ts("spiking_synapse",   "syn/spiking_synapse.jl")
     _ts("plasticity_params", "syn/plasticity_params.jl")
     _ts("with_plasticity",   "syn/with_plasticity.jl")
+    _ts("float32",           "syn/float32.jl")
+    _ts("stdp_event",        "syn/stdp_event.jl")
+    _ts("istdp_kernel",      "syn/istdp_kernel.jl")
     _ts("metaplasticity",    "syn/metaplasticity.jl")
 end
 

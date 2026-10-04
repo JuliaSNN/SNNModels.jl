@@ -54,7 +54,10 @@ SNNModels.jl/src/
 │   ├── sparse_plasticity.jl LTP/STP dispatch, NoLTP/NoSTP, set_LTP!/set_STP!
 │   ├── sparse_plasticity/
 │   │   ├── STP.jl           MarkramSTPParameter (Event/Timestep/Het)
-│   │   ├── STDP_traces.jl   STDPGerstner, STDPConfavreux2025, STDPMexicanHat
+│   │   ├── STDP_kernels.jl  shared event-driven loops (pre/post passes, decay, clamp)
+│   │   ├── STDP_traces.jl   STDPGerstner, STDPConfavreux2025, STDPMexicanHat, STDPVariables
+│   │   ├── STDP_weight_dependent.jl  STDPWeightDependent (Guetig / Auryn STDPwd)
+│   │   ├── STDP_triplet.jl  STDPTriplet, STDPTripletVariables (Pfister-Gerstner 2006)
 │   │   ├── iSTDP.jl         iSTDPRate, iSTDPTime, iSTDPPotential
 │   │   ├── vSTDP.jl         vSTDPParameter
 │   │   ├── CaRule.jl        CaPlasticityParameter (legacy; uses c.plasticity)
@@ -386,9 +389,11 @@ set_plasticity!(syn, param, state)
 | Type | Trace update | Weight update | Threading | Key params |
 |---|---|---|---|---|
 | `NoLTP` | — | — | — | — |
-| `STDPGerstner` | **event-driven** `exp(-(t-last)/τ)` | post-pre + pre-post | `Threads.@threads` chunks | `A_pre, A_post, τpre, τpost, Wmax, Wmin` |
-| `STDPConfavreux2025` | **event-driven** same | post-pre + pre-post × (η, α, β, κ, γ) | `Threads.@threads` chunks | `η, α, β, κ, γ, τpre, τpost, Wmax, Wmin` |
-| `STDPMexicanHat` | **continuous** dt decay `@turbo` | row+col scan on spike | none | `A, τ, Wmax, Wmin` |
+| `STDPGerstner` | **exact** `x *= exp(-dt/τ)` per step, +1 at spike | event-driven col (pre) / row (post) passes, touched clamp | none | `A_pre (>0 LTP), A_post (<0 LTD), τpre, τpost, Wmax, Wmin` |
+| `STDPConfavreux2025` | **exact** same | event-driven, × (η, α, β, κ, γ) | none | `η, α, β, κ, γ, τpre, τpost, Wmax, Wmin` |
+| `STDPWeightDependent` | **exact** same | event-driven, soft bounds (μ±, α) | none | `η, α, μ_plus, μ_minus, τpre, τpost, Wmax, Wmin` |
+| `STDPTriplet` | **exact**, r1 r2 (pre) o1 o2 (post) | event-driven triplet | none | `A2_plus, A3_plus, A2_minus, A3_minus, τ_plus, τ_minus, τ_x, τ_y, Wmax, Wmin` |
+| `STDPMexicanHat` | **continuous** dt decay | event-driven col/row on spike, touched clamp | none | `A, τ, Wmax, Wmin` |
 | `vSTDPParameter` | **continuous** u(post), v(post), x(pre) `@turbo` | `Threads.@threads` over pre chunks | yes | `A_LTD, A_LTP, θ_LTD, θ_LTP, τu, τv, τx, Wmax, Wmin` |
 | `iSTDPRate` | **continuous** dt decay `@turbo` | clamp on spike `@turbo` col/row | none | `η, r, τy, Wmax, Wmin` |
 | `iSTDPPotential` | **continuous** tpost tracks v_post | on spike, no `@turbo` | none | `η, v0, τy, Wmax, Wmin` |
@@ -398,7 +403,8 @@ set_plasticity!(syn, param, state)
 | `STDPAntiSymmetric` | same | same | none | same |
 
 Variables structs:
-- `STDPVariables(Npre, Npost)`: `tpre, tpost, last_pre, last_post, Δpre, Δpost`
+- `STDPVariables(Npre, Npost)`: `tpre, tpost` (current trace values), `last_pre, last_post`, `initialized`
+- `STDPTripletVariables(Npre, Npost)`: `r1, r2` (Npre), `o1, o2` (Npost), `last_pre, last_post`, `initialized`
 - `iSTDPVariables(Npre, Npost)`: `tpre, tpost, last_spike`
 - `vSTDPVariables(Npre, Npost)`: `u, v, x` (all Npost-sized ← **x should be Npre**; see §10.3)
 - `STDPStructuredVariables(Npre, Npost)`: `to_x, to_y` (Npost), `tr_x, tr_y` (Npre)
@@ -860,7 +866,7 @@ Should be `VariableInputParameter`. The stimulus is therefore unreachable via th
 
 ### 10.7 Trace update scheme inconsistent across STDP rules
 
-`STDPGerstner`/`STDPConfavreux2025`: event-driven `exp(-(t-last)/τ)` — traces only updated at spike times.
+`STDPGerstner`/`STDPConfavreux2025`/`STDPWeightDependent`/`STDPTriplet`: exact multiplicative decay per step (Auryn style, event-driven weight updates).
 `STDPMexicanHat`/`iSTDP`/`vSTDP`/`CaRule`/`STDPStructured`: continuous per-dt decay.
 Mixed schemes in same codebase → different numerical precision and behaviour under the same model.
 

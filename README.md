@@ -60,7 +60,7 @@ function sim!(p::Vector{AbstractPopulation}, c::Vector{AbstractConnection}, dura
 function train!(p::Vector{AbstractConnection}, c:Vector{AbstractConnection}, duration<:Real) end
 ```
 
-The functions support simulation with and without neural plasticity; the model is defined within the arguments passed to the functions. 
+The functions support simulation with and without neural plasticity: `sim!` propagates spikes with frozen weights, `train!` additionally calls `update_traces!` and `plasticity!` (STDP, iSTDP, vSTDP, STP). A synapse with an `LTPParam` does not learn under `sim!`. The model is defined within the arguments passed to the functions. 
 Models are composed of 'AbstractPopulation' and 'AbstractConnection' arrays. 
 
 Any elements of `AbstractPopulation` must implement the methods: 
@@ -83,3 +83,38 @@ function plasticity!(c, c.param, dt) end
 ```julia
 function stimulate!(p, p.param) end
 ```
+
+## Plasticity rules
+
+Long-term plasticity rules are passed to `SpikingSynapse` with the `LTPParam` keyword and run under `train!`.
+
+| Rule | Description |
+|---|---|
+| `STDPGerstner` | additive pair STDP, all-to-all, signed amplitudes `A_pre`, `A_post` (default `A_post < 0`) |
+| `STDPTriplet` | minimal triplet rule of Pfister & Gerstner (2006), all-to-all (Auryn `MinimalTriplet`) |
+| `STDPWeightDependent` | soft-bound pair STDP of Gütig et al. (2003) (Auryn `STDPwd`) |
+| `STDPConfavreux2025` | pair STDP with rate terms |
+| `STDPMexicanHat`, `STDPSymmetric`, `STDPAntiSymmetric` | kernels with zero integral / structured inhibition (Euler traces) |
+| `iSTDPRate`, `iSTDPPotential` | inhibitory STDP of Vogels et al. (2011) |
+| `vSTDPParameter` | voltage-based STDP of Clopath et al. (2010) |
+
+The trace-based pair and triplet rules are event-driven with Auryn's ordering (pre spike: LTD
+from the postsynaptic trace over outgoing synapses; post spike: LTP from the presynaptic trace
+over incoming synapses; traces read before the current step's spikes). They agree with Brian2
+(2e-6) and Auryn (2e-7). Details: `src/connections/sparse_plasticity/STDP_kernels.jl` and
+`docs/stdp_rules_memo.md`.
+
+## Release notes: 1.8.2
+
+- **Bug fix, iSTDP.** In `iSTDPRate` (and the former `iSTDPTime`) the potentiation at a
+  postsynaptic spike was applied to the wrong synapses (a `@turbo` loop with a reassigned loop
+  variable). Affected: SNNModels 1.5.0 - 1.8.1 and SpikingNeuralNetworks.jl 1.0.0 onwards.
+  Results obtained with these versions change; rerun simulations that used them.
+- **Behaviour change, `STDPGerstner`.** The amplitudes `A_pre`/`A_post` were applied twice
+  (effective `A^2`, sign lost). They are now applied once, and the default `A_post` is `-1e-4`.
+- **New rules:** `STDPTriplet`, `STDPWeightDependent`.
+- **Behaviour change, `sparse_matrix`.** Built directly in CSC form (no dense `Npost x Npre`
+  matrix); seeded networks no longer reproduce earlier realisations (identical statistics);
+  autapses are removed structurally. The old generator is `SNNModels.sparse_matrix_dense_legacy`.
+- **Float32** synaptic data (weights, delays, STP `ρ`) at all constructor boundaries.
+- Event-driven STDP is 18-83x faster than the clock-driven implementation (see `claude/performance.md`).

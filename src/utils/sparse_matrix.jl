@@ -154,7 +154,207 @@ using SpecialFunctions, Roots
 #     end
 # end
 
+"""
+    sparse_matrix(Npre, Npost; p | ρ, μ = 1, σ = 0, dist = :Normal, rule = :Fixed, γ, kmin)
+
+Random connectivity matrix of size `Npost x Npre` (rows: postsynaptic, columns:
+presynaptic) as a `SparseMatrixCSC{Float32,Int}`, built directly in CSC form in
+O(nnz + Npre + Npost) time and memory: no dense `Npost x Npre` array is ever allocated.
+
+# Connectivity rules (`rule`)
+- `:Fixed` / `:FixedIn`: every postsynaptic neuron receives exactly
+  `K = Npre - round(Int, (1 - ρ) * Npre)` inputs, sampled without replacement.
+- `:FixedOut`: every presynaptic neuron projects to exactly
+  `K = Npost - round(Int, (1 - ρ) * Npost)` targets, sampled without replacement.
+- `:Bernoulli`: every pair is connected independently with probability `ρ`. Sampled by
+  geometric skipping over the column-major index space (O(nnz) random draws).
+- `:PowerLaw`: the out-degree of each presynaptic neuron is
+  `min(round(Int, rand(Pareto(γ, kmin))), Npost - 1)`; targets sampled without replacement.
+
+# Weights
+One draw per connection from `dist(|μ|, σ)` (a `Distributions` type name, Float32
+parameters). Draws `<= 0` are not synapses and are removed; a negative `μ` flips the sign
+of all weights afterwards (with a warning). This is the same treatment as the previous
+dense generator.
+
+# Reproducibility
+The random stream differs from the dense generator used up to SNNModels 1.8, so seeded
+networks do not reproduce the old realisations; the statistics (degree distributions,
+weight moments, sparsity) are the same. The old generator is still available as the
+non-exported `SNNModels.sparse_matrix_dense_legacy`.
+"""
 function sparse_matrix(
+    Npre,
+    Npost;
+    w = nothing,
+    dist = :Normal,
+    μ = 1,
+    σ = 0,
+    ρ = nothing,
+    p = nothing,
+    rule = :Fixed,
+    γ = -1,
+    kmin = -1,
+    kwargs...,
+)
+    @assert (isnothing(p) || isnothing(ρ)) && !(isnothing(p) && isnothing(ρ)) "Specify either p or ρ"
+    ρ = isnothing(ρ) ? p : ρ
+    @assert ρ >= 0 && ρ <= 1 "ρ must be in [0, 1]"
+    @debug "Constructing sparse matrix with $rule rule, $dist distribution, μ=$μ, σ=$σ, ρ=$ρ"
+    syn_sign = μ ≈ 0 ? 1 : sign(μ)
+    if syn_sign == -1
+        @warn "You are using negative synaptic weights "
+        μ = abs(μ)
+    end
+    Npre, Npost = Int(Npre), Int(Npost)
+
+    # 1. Sparsity pattern (column pointers and sorted row indices).
+    if rule == :FixedOut
+        K = Npost - round(Int, (1 - ρ) * Npost)
+        colptr, rowval = _fixed_out_pattern(Npost, Npre, j -> K)
+    elseif rule == :FixedIn || rule == :Fixed
+        K = Npre - round(Int, (1 - ρ) * Npre)
+        colptr, rowval = _fixed_in_pattern(Npost, Npre, K)
+    elseif rule == :Bernoulli
+        colptr, rowval = _bernoulli_pattern(Npost, Npre, Float64(ρ))
+    elseif rule == :PowerLaw
+        if Npre > 0
+            @assert γ > 0 "For PowerLaw connection rule, γ must be defined and positive"
+            @assert kmin > 0 "For PowerLaw connection rule, kmin must be defined and positive"
+        end
+        degrees = [min(round(Int, rand(Distributions.Pareto(γ, kmin))), Npost - 1) for _ = 1:Npre]
+        colptr, rowval = _fixed_out_pattern(Npost, Npre, j -> degrees[j])
+    else
+        throw(ArgumentError("Unknown connection mode: $rule; use :Fixed or :Bernoulli"))
+    end
+
+    # 2. One Float32 weight per connection; non-positive draws are not synapses.
+    my_dist = getfield(Distributions, dist)
+    nzval = Vector{Float32}(undef, length(rowval))
+    rand!(my_dist(Float32(μ), Float32(σ)), nzval)
+    w = SparseMatrixCSC{Float32,Int}(Npost, Npre, colptr, rowval, nzval)
+    _filter_csc!(w, (i, j, v) -> v > 0)
+    syn_sign == -1 && (nonzeros(w) .*= -1)
+    return w
+end
+
+# Bernoulli(p) pattern by geometric skipping. Entries are visited in column-major order of
+# the flattened index space 1:Npost*Npre; the gap to the next connected entry is the
+# number of failures before a success, Geometric(p) = floor(log(U) / log(1 - p)) with
+# U ~ Uniform(0, 1]. Cost O(nnz), rows come out sorted within each column.
+function _bernoulli_pattern(Npost::Int, Npre::Int, p::Float64)
+    L = Npost * Npre
+    colptr = zeros(Int, Npre + 1)
+    rowval = Int[]
+    (p <= 0 || L == 0) && (colptr .= 1; return colptr, rowval)
+    sizehint!(rowval, ceil(Int, L * p + 5 * sqrt(L * p) + 16))
+    logq = log1p(-p)                   # -Inf for p == 1: every gap is 0
+    pos = 0                            # last connected linear index (0 = none yet)
+    @inbounds while true
+        gap = floor(log(1.0 - rand()) / logq)
+        gap >= L - pos && break        # compared in Float64: no Int overflow on huge gaps
+        pos += Int(gap) + 1
+        col = (pos - 1) ÷ Npost + 1
+        push!(rowval, pos - (col - 1) * Npost)
+        colptr[col+1] += 1             # column counts, turned into pointers below
+    end
+    colptr[1] = 1
+    cumsum!(colptr, colptr)
+    return colptr, rowval
+end
+
+# Fixed in-degree K: each postsynaptic row i draws K distinct presynaptic columns. The
+# (row, column) pairs are scattered into CSC by a counting sort on the column; rows are
+# visited in increasing order, so they come out sorted within each column.
+function _fixed_in_pattern(Npost::Int, Npre::Int, K::Int)
+    K = clamp(K, 0, Npre)
+    cols = Vector{Int}(undef, Npost * K)
+    perm = collect(1:Npre)
+    for i = 1:Npost
+        _sample_distinct!(view(cols, ((i-1)*K+1):(i*K)), perm)
+    end
+    colptr = zeros(Int, Npre + 1)
+    @inbounds for j in cols
+        colptr[j+1] += 1
+    end
+    colptr[1] = 1
+    cumsum!(colptr, colptr)
+    next = colptr[1:Npre]              # write cursor per column
+    rowval = Vector{Int}(undef, length(cols))
+    @inbounds for i = 1:Npost, s = ((i-1)*K+1):(i*K)
+        j = cols[s]
+        rowval[next[j]] = i
+        next[j] += 1
+    end
+    return colptr, rowval
+end
+
+# Fixed out-degree degree(j) per presynaptic column j: distinct rows sampled without
+# replacement, sorted, written column by column.
+function _fixed_out_pattern(Npost::Int, Npre::Int, degree::F) where {F}
+    colptr = Vector{Int}(undef, Npre + 1)
+    colptr[1] = 1
+    for j = 1:Npre
+        colptr[j+1] = colptr[j] + clamp(degree(j), 0, Npost)
+    end
+    rowval = Vector{Int}(undef, colptr[end] - 1)
+    perm = collect(1:Npost)
+    for j = 1:Npre
+        r = view(rowval, colptr[j]:(colptr[j+1]-1))
+        _sample_distinct!(r, perm)
+        sort!(r)
+    end
+    return colptr, rowval
+end
+
+# Fill `out` with length(out) distinct elements of `perm`, uniformly at random, by a
+# partial Fisher-Yates shuffle: O(length(out)) work, no allocation. `perm` is any
+# permutation of the population and stays one, so it is reused across calls.
+function _sample_distinct!(out::AbstractVector{Int}, perm::Vector{Int})
+    n = length(perm)
+    @inbounds for t in eachindex(out)
+        k = t - first(eachindex(out)) + 1
+        r = rand(k:n)
+        perm[k], perm[r] = perm[r], perm[k]
+        out[t] = perm[k]
+    end
+    return out
+end
+
+# Keep only the stored entries (i, j, v) of a CSC matrix for which keep(i, j, v) is true,
+# compacting in place (structural removal: no explicit zeros are left, nothing densified).
+function _filter_csc!(A::SparseMatrixCSC, keep::F) where {F}
+    colptr, rowval, nzval = A.colptr, A.rowval, A.nzval
+    k = 1
+    @inbounds for j = 1:size(A, 2)
+        start, stop = colptr[j], colptr[j+1] - 1   # read before colptr[j] is overwritten
+        colptr[j] = k
+        for s = start:stop
+            if keep(rowval[s], j, nzval[s])
+                rowval[k] = rowval[s]
+                nzval[k] = nzval[s]
+                k += 1
+            end
+        end
+    end
+    colptr[end] = k
+    resize!(rowval, k - 1)
+    resize!(nzval, k - 1)
+    return A
+end
+
+"""
+    remove_autapses!(w::SparseMatrixCSC)
+
+Structurally remove the diagonal (self-connections) of a square connectivity matrix,
+without densifying it.
+"""
+remove_autapses!(w::SparseMatrixCSC) = _filter_csc!(w, (i, j, v) -> i != j)
+
+# Previous generator: draws a dense Npost x Npre Float64 matrix and zeroes entries.
+# O(Npre * Npost) memory and time (80 GB at 1e5 neurons). Not exported; kept only so
+# that the tests can compare the statistics of `sparse_matrix` against it.
+function sparse_matrix_dense_legacy(
     Npre,
     Npost;
     w = nothing,
@@ -211,8 +411,15 @@ function sparse_matrix(
     w[w .<= 0] .= 0 # no negative weights
     w = sparse(w)
     @assert size(w) == (Npost, Npre) "The size of the synaptic weight is not correct: $(size(w)) != ($Npost, $Npre)"
-    return w .* syn_sign
+    # Synaptic data are always Float32. The random draw above is left in the
+    # element type implied by (μ, σ) so that seeded networks are bit-identical to
+    # earlier versions; the conversion happens here, at the constructor boundary.
+    return _float32_sparse(w .* syn_sign)
 end
+
+# Convert any sparse/dense connectivity matrix to SparseMatrixCSC{Float32}.
+_float32_sparse(w::SparseMatrixCSC) = SparseMatrixCSC{Float32,Int}(w)
+_float32_sparse(w::AbstractMatrix) = SparseMatrixCSC{Float32,Int}(sparse(Float32.(w)))
 
 
 sparse_matrix(Npre, Npost, conn::NamedTuple) = sparse_matrix(Npre, Npost; conn...)
@@ -220,7 +427,7 @@ sparse_matrix(Npre, Npost, conn::NamedTuple) = sparse_matrix(Npre, Npost; conn..
 function sparse_matrix(Npre, Npost, conn::AbstractMatrix)
     w = conn
     @assert size(w) == (Npost, Npre) "The size of the synaptic weight is not correct: $(size(w)) != ($Npost, $Npre)"
-    return sparse(w)
+    return _float32_sparse(w)
 end
 
 
