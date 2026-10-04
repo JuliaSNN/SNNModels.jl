@@ -37,7 +37,7 @@ are clamped (all weights once at the first step). Serial, no threading. Matches 
 
 Plasticity runs only under `train!`; `sim!` leaves the weights untouched.
 
-!!! warning "Behaviour change in SNNModels 1.9"
+!!! warning "Behaviour change in SNNModels 1.8.2"
     Up to SNNModels 1.8 the traces were incremented by `A_pre`/`A_post` and multiplied by
     them again, so the effective amplitudes were ``A^2`` and the sign was lost (a negative
     `A_post` potentiated). Now the amplitude is applied once and the default `A_post` is

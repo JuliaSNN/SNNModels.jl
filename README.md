@@ -104,7 +104,7 @@ over incoming synapses; traces read before the current step's spikes). They agre
 (2e-6) and Auryn (2e-7). Details: `src/connections/sparse_plasticity/STDP_kernels.jl` and
 `docs/stdp_rules_memo.md`.
 
-## Release notes: 1.9
+## Release notes: 1.8.2
 
 - **Bug fix, iSTDP.** In `iSTDPRate` (and the former `iSTDPTime`) the potentiation at a
   postsynaptic spike was applied to the wrong synapses (a `@turbo` loop with a reassigned loop

@@ -57,7 +57,7 @@ multiplied by A again) is fixed; its default `A_post` is now negative.
 ## Inconsistency 3 — Weight update scope
 
 - Scheme A: resolved. Weights are updated only through the spike passes (colptr for pre spikes, rowptr/index for post spikes); no scan of untouched synapses.
-- Scheme B (`iSTDPRate`): weight updated only inside `if fireJ[j]` / `if fireI[i]` blocks, using colptr/rowptr to reach affected synapses. No scan of untouched synapses. Before SNNModels 1.9 the post-spike block used a `@turbo` loop with a reassigned loop variable (`st = index[st]`), so potentiation was applied to the synapses stored at CSC positions `rowptr[i]:rowptr[i+1]-1` instead of the incoming synapses of neuron `i`; see "iSTDP bug" below.
+- Scheme B (`iSTDPRate`): weight updated only inside `if fireJ[j]` / `if fireI[i]` blocks, using colptr/rowptr to reach affected synapses. No scan of untouched synapses. Before SNNModels 1.8.2 the post-spike block used a `@turbo` loop with a reassigned loop variable (`st = index[st]`), so potentiation was applied to the synapses stored at CSC positions `rowptr[i]:rowptr[i+1]-1` instead of the incoming synapses of neuron `i`; see "iSTDP bug" below.
 - Scheme B (`vSTDP`): update runs via `Threads.@threads` over `eachindex(fireJ)` chunks — same structure as Scheme A but uses col-pointer to reach synapses rather than iterating all of `W`.
 
 ---
@@ -72,7 +72,7 @@ LTD (`u` trace) is read via `u[I[s]]` (post-neuron index), but `fireI` is never 
 
 ---
 
-## iSTDP bug (fixed in 1.9)
+## iSTDP bug (fixed in 1.8.2)
 
 `iSTDPRate` (and `iSTDPTime`, whose rule was removed in commit e4ce94f) contained
 
@@ -94,7 +94,7 @@ synapses onto unrelated postsynaptic neurons. Depression (pre-spike loop) was co
 
 - Plasticity runs only under `train!`; `sim!` never calls `update_traces!`/`plasticity!`.
 - `STDPGerstner` sign convention: signed amplitudes used once, `A_pre > 0` LTP and `A_post < 0`
-  LTD by default (before 1.9 the effective amplitude was `A^2`).
+  LTD by default (before 1.8.2 the effective amplitude was `A^2`).
 - Same-step spikes: Scheme A rules read traces before this step's increments, so a pre and a
   post spike in the same step do not interact. Scheme B rules increment their traces during the pass (STDPMexicanHat before both passes; iSTDP between the pre and post pass), so same-step spikes may interact.
 

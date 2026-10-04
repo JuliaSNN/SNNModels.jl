@@ -61,7 +61,7 @@ compartment `comp`) of `post`.
   type of `conn` or of `delay_dist`; conversion happens in the constructor.
 - If `pre == post`, autapses are removed structurally (no stored zero-weight self synapses
   that plasticity could grow).
-- `conn` as a `NamedTuple` is built by `sparse_matrix`, which since SNNModels 1.9 uses a
+- `conn` as a `NamedTuple` is built by `sparse_matrix`, which since SNNModels 1.8.2 uses a
   different random stream than before: seeded networks do not reproduce earlier realisations
   (same statistics).
 

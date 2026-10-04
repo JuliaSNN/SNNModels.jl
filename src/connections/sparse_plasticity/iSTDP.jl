@@ -35,7 +35,7 @@ a pre and a post spike in the same step do interact.
 
 Plasticity is applied only when the network is run with `train!`; `sim!` never calls it.
 
-!!! warning "Bug fixed in SNNModels 1.9"
+!!! warning "Bug fixed in SNNModels 1.8.2"
     In SNNModels 1.5.0 - 1.8.1 (and SpikingNeuralNetworks.jl from v1.0.0, commit 680a30c) the
     potentiation applied at a postsynaptic spike used a `@turbo` loop that reassigned its loop
     variable. LoopVectorization ignored the reassignment, so the update hit the synapses stored
@@ -95,7 +95,7 @@ trace of `v_post`):
 - every weight touched is clamped to `[Wmin, Wmax]`.
 
 Plasticity is applied only under `train!`. This rule was not affected by the `iSTDPRate` bug
-fixed in SNNModels 1.9 (its postsynaptic loop never used `@turbo`); it now uses the same plain
+fixed in SNNModels 1.8.2 (its postsynaptic loop never used `@turbo`); it now uses the same plain
 `@simd` loops.
 """
 iSTDPPotential
