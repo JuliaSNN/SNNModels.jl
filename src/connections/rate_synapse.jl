@@ -23,7 +23,7 @@ end
 RateSynapse
 
 function RateSynapse(pre, post; μ = 0.0, p = 0.0, kwargs...)
-    w = μ / √(p * pre.N) * sprandn(post.N, pre.N, p)
+    w = SparseMatrixCSC{Float32,Int}(μ / √(p * pre.N) * sprandn(post.N, pre.N, p))
     rowptr, colptr, I, J, index, W = dsparse(w)
     rI, rJ = post.r, pre.r
     targets = Dict{Symbol,Any}(

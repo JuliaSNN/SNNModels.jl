@@ -86,17 +86,17 @@ function SpikingSynapse(
     STPVars = plasticityvariables(STPParam, pre.N, post.N)
 
     # short term plasticity
-    ρ = copy(W)
-    ρ .= 1.0
+    ρ = ones(Float32, length(W))
 
     # Network targets
 
     if isnothing(delay_dist)
         param = SpikingSynapseParameter()
     else
-        delaytime = rand(delay_dist, length(W))
-        spike_time = [[] for _ in 1:length(fireI)]
-        spike_w = [[] for _ in 1:length(fireI)]
+        # delays are Float32 whatever the element type of `delay_dist`
+        delaytime = Float32.(rand(delay_dist, length(W)))
+        spike_time = [Float32[] for _ in 1:length(fireI)]
+        spike_w = [Float32[] for _ in 1:length(fireI)]
         param = SpikingSynapseDelayParameter(;
             delaytime,
             spike_time,

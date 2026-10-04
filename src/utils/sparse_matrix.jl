@@ -211,8 +211,15 @@ function sparse_matrix(
     w[w .<= 0] .= 0 # no negative weights
     w = sparse(w)
     @assert size(w) == (Npost, Npre) "The size of the synaptic weight is not correct: $(size(w)) != ($Npost, $Npre)"
-    return w .* syn_sign
+    # Synaptic data are always Float32. The random draw above is left in the
+    # element type implied by (μ, σ) so that seeded networks are bit-identical to
+    # earlier versions; the conversion happens here, at the constructor boundary.
+    return _float32_sparse(w .* syn_sign)
 end
+
+# Convert any sparse/dense connectivity matrix to SparseMatrixCSC{Float32}.
+_float32_sparse(w::SparseMatrixCSC) = SparseMatrixCSC{Float32,Int}(w)
+_float32_sparse(w::AbstractMatrix) = SparseMatrixCSC{Float32,Int}(sparse(Float32.(w)))
 
 
 sparse_matrix(Npre, Npost, conn::NamedTuple) = sparse_matrix(Npre, Npost; conn...)
@@ -220,7 +227,7 @@ sparse_matrix(Npre, Npost, conn::NamedTuple) = sparse_matrix(Npre, Npost; conn..
 function sparse_matrix(Npre, Npost, conn::AbstractMatrix)
     w = conn
     @assert size(w) == (Npost, Npre) "The size of the synaptic weight is not correct: $(size(w)) != ($Npost, $Npre)"
-    return sparse(w)
+    return _float32_sparse(w)
 end
 
 
