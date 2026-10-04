@@ -84,6 +84,7 @@ NoSTDP = NoLTP()
 include("sparse_plasticity/vSTDP.jl")
 include("sparse_plasticity/iSTDP.jl")
 # include("sparse_plasticity/longshortSP.jl")
+include("sparse_plasticity/STDP_kernels.jl")
 include("sparse_plasticity/STDP_traces.jl")
 include("sparse_plasticity/STDP_structured.jl")
 
