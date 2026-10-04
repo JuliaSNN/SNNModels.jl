@@ -75,9 +75,8 @@ Correctness:
   sorted `Vector`s with `findlast(.<(spike), times)` (allocating broadcast) and
   `insert!`/`popfirst!` for every delayed spike. A ring buffer of `Npost x max_delay_steps`
   would make this O(1) per spike and allocation-free.
-- `sparse_matrix` still builds a dense `Npost x Npre` matrix (in the element type of μ/σ,
-  Float64 by default; only converted to Float32 at the end) and then sparsifies it.
-  Memory is O(Npre·Npost), about 128 MB for 4000x4000 in Float64.
+- ~~`sparse_matrix` builds a dense `Npost x Npre` matrix~~: fixed on core-clock-sparse,
+  see below.
 - Plasticity runs only under `train!`; `sim!` never calls `update_traces!`/`plasticity!`.
 - Lazy-trace `exp` per neuron per step: removed from the four Scheme-A rules. Euler traces
   remain in iSTDP, vSTDP, STDPMexicanHat and the structured rules (O(N) per step, cheap).
@@ -86,6 +85,41 @@ Correctness:
   the pre pass, or atomic-free colouring. This is the next step.
 - The time accumulator `T.t[1] += dt` is Float32 and drifts. At dt = 0.1 ms it is off by
   more than half a step after about 0.8 s, and by much more over long runs. Time-based
-  stimuli (`SpikeTimeStimulus`) then land on the wrong step. Using the integer step
-  `T.tt` and computing `t = tt * dt` would fix it. The event-driven STDP traces are
-  step-based and unaffected.
+  stimuli (`SpikeTimeStimulus`) then land on the wrong step. Work in progress on the
+  local branch `wip-clock` (integer clock).
+
+## Dense-free `sparse_matrix` (branch core-clock-sparse, 2026-10-04)
+
+### What was done
+
+- `sparse_matrix(Npre, Npost; ...)` builds `SparseMatrixCSC{Float32,Int}` directly:
+  - `:Bernoulli`: geometric skip sampling over the column-major flattened index space,
+    gap = floor(log(U) / log1p(-p)). O(nnz) draws, rows sorted by construction.
+  - `:Fixed`/`:FixedIn`: K presynaptic indices per postsynaptic row, then a counting sort
+    on the column to scatter into CSC.
+  - `:FixedOut`/`:PowerLaw`: per-column distinct targets, then sorted.
+  - Distinct sampling is a partial Fisher-Yates on a reused permutation buffer: O(K) per
+    row/column and no per-call allocation (StatsBase `sample!(...; replace=false)` allocated
+    a length-n index vector per call: 3.7 GB at 2e4 x 2e4, p = 0.1).
+  - Weights: one Float32 draw per stored entry from `dist(|μ|, σ)`; draws <= 0 removed by
+    in-place CSC compaction (`_filter_csc!`), sign applied afterwards. Same treatment as
+    the dense path.
+- Autapses: `remove_autapses!` removes the diagonal structurally. The old
+  `w[diagind(w)] .= 0` left stored zeros, i.e. zero-weight synapses that plasticity could
+  grow.
+- `SpikeTimeStimulusIdentity` used `Matrix(I(N))` (dense N x N Bool); now a sparse identity.
+- PoissonStimulusLayer had no dense matrix of its own; it only went through `sparse_matrix`.
+- The old generator is kept as `SNNModels.sparse_matrix_dense_legacy` (not exported) for
+  the statistical comparison tests (`test/utils/sparse_matrix_gen_test.jl`).
+
+### Measured (seroquel, Julia 1.12.6, single thread, first call after warm-up)
+
+| Npre = Npost | rule, p, (μ, σ) = (1, 0.2) | nnz   | old time | old alloc | new time | new alloc | result size |
+|--------------|----------------------------|-------|----------|-----------|----------|-----------|-------------|
+| 2e4          | Bernoulli, 1e-3            | 4.0e5 | 13.5 s   | 19.9 GiB  | 0.01 s   | 5 MiB     | 4.8 MiB     |
+| 2e4          | Fixed, 0.1                 | 4.0e7 | 11.4 s   | 13.0 GiB  | 0.80 s   | 0.75 GiB  | 458 MiB     |
+| 1e5          | Bernoulli, 1e-3            | 1.0e7 | not run (dense 80 GB) | > 80 GB | 0.22 s | 0.11 GiB | 115 MiB |
+| 1e5          | Fixed, 1e-3                | 1.0e7 | not run (dense 80 GB) | > 80 GB | 0.26 s | 0.19 GiB | 115 MiB |
+
+The new allocation is the result itself plus, for the fixed in-degree rule, one transient
+column-index vector of length nnz.

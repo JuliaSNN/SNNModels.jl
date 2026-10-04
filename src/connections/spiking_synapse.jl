@@ -65,8 +65,8 @@ function SpikingSynapse(
 
     # set the synaptic weight matrix
     w = sparse_matrix(output_N(pre), input_N(post), conn)
-    # remove autapses if pre == post
-    (pre == post) && (w[diagind(w)] .= 0)
+    # remove autapses if pre == post (structural removal, the matrix stays sparse)
+    (pre == post) && remove_autapses!(w)
     # get the sparse representation of the synaptic weight matrix
     rowptr, colptr, I, J, index, W = dsparse(w)
     # get the presynaptic and postsynaptic firing

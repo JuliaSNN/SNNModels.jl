@@ -41,6 +41,7 @@ _suite_t0 = time()
     _ts("util",           "utils/util_test.jl")
     _ts("io",             "utils/io_test.jl")
     _ts("sparse_matrix",  "utils/sparse_matrix_test.jl")
+    _ts("sparse_gen",     "utils/sparse_matrix_gen_test.jl")
     _ts("spatial",        "utils/spatial_test.jl")
 end
 
