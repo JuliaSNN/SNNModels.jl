@@ -78,6 +78,7 @@ end
     _ts("with_plasticity",   "syn/with_plasticity.jl")
     _ts("float32",           "syn/float32.jl")
     _ts("stdp_event",        "syn/stdp_event.jl")
+    _ts("istdp_kernel",      "syn/istdp_kernel.jl")
     _ts("metaplasticity",    "syn/metaplasticity.jl")
 end
 
