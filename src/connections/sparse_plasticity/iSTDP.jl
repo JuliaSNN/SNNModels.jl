@@ -74,8 +74,8 @@ function plasticity!(
             tpre[j] += dt * (-tpre[j]) / τy
             if fireJ[j] # presynaptic neuron
                 tpre[j] += 1
-                @turbo for st = colptr[j]:(colptr[j+1]-1)
-                    W[st] = clamp(W[st] + η * (tpost[I[st]] - 2 * r * τy), Wmin, Wmax)
+                @simd for s = colptr[j]:(colptr[j+1]-1)
+                    W[s] = clamp(W[s] + η * (tpost[I[s]] - 2 * r * τy), Wmin, Wmax)
                 end
             end
         end
@@ -85,9 +85,12 @@ function plasticity!(
             tpost[i] += dt * (-tpost[i]) / τy
             if fireI[i] # postsynaptic neuron
                 tpost[i] += 1
-                @turbo for st = rowptr[i]:(rowptr[i+1]-1) ## 
-                    st = index[st]
-                    W[st] = clamp(W[st] + η * tpre[J[st]], Wmin, Wmax)
+                # k walks the row-ordered view; s = index[k] is the CSC position.
+                # (Plain loop: the former @turbo reassigned its loop variable, which
+                # LoopVectorization does not support.)
+                @simd for k = rowptr[i]:(rowptr[i+1]-1)
+                    s = index[k]
+                    W[s] = clamp(W[s] + η * tpre[J[s]], Wmin, Wmax)
                 end
             end
         end
@@ -128,8 +131,8 @@ function plasticity!(
         tpre[j] += dt * (-tpre[j]) / τy
         if fireJ[j] # presynaptic neuron
             tpre[j] += 1
-            for st = colptr[j]:(colptr[j+1]-1)
-                W[st] = clamp(W[st] + η * (tpost[I[st]] - v0), Wmin, Wmax)
+            @simd for s = colptr[j]:(colptr[j+1]-1)
+                W[s] = clamp(W[s] + η * (tpost[I[s]] - v0), Wmin, Wmax)
             end
         end
     end
@@ -139,9 +142,9 @@ function plasticity!(
         # trace of the membrane potential
         tpost[i] += dt * -(tpost[i] - v_post[i]) / τy
         if fireI[i] # postsynaptic neuron
-            for st = rowptr[i]:(rowptr[i+1]-1) ## 
-                st = index[st]
-                W[st] = clamp(W[st] + η * tpre[J[st]], Wmin, Wmax)
+            @simd for k = rowptr[i]:(rowptr[i+1]-1)
+                s = index[k]
+                W[s] = clamp(W[s] + η * tpre[J[s]], Wmin, Wmax)
             end
         end
     end

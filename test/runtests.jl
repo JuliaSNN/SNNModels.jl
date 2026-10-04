@@ -75,6 +75,7 @@ end
     _ts("spiking_synapse",   "syn/spiking_synapse.jl")
     _ts("plasticity_params", "syn/plasticity_params.jl")
     _ts("with_plasticity",   "syn/with_plasticity.jl")
+    _ts("istdp_kernel",      "syn/istdp_kernel.jl")
     _ts("metaplasticity",    "syn/metaplasticity.jl")
 end
 
