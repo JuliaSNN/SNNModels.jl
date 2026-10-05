@@ -87,7 +87,8 @@ w_\infty(v) = \tfrac12 \left(1 + \tanh\frac{v - V_3}{V_4}\right), \quad
 Forward Euler, sequential per neuron: ``v`` is advanced with the intrinsic and external
 currents (old ``w``), then ``w`` with the new ``v``, then the synaptic term
 `dt / Cm * (ge * (Ee - v) + gi * (Ei - v))` is added, then `ge`, `gi` decay.
-`fire[i] = v[i] > 20mV` is a level test (true for every step above 20 mV); there is no reset.
+A spike is flagged in the step in which ``v`` crosses 20 mV upwards (one flag per action
+potential); there is no reset. (Up to SNNModels 1.8.4 `fire` was the level test `v > 20mV`.)
 
 # Fields
 - `name::String = "MorrisLecar"`, `id::String = randstring(12)`,
@@ -118,6 +119,7 @@ function integrate!(p::MorrisLecar, param::MorrisLecarParameter, dt::Float32)
     @unpack Cm, El, EK, ECa, gl, gK, gCa, τe, τi, V1, V2, V3, V4, ϕ = param
     @unpack Ee, Ei = param
     @inbounds for i = 1:N
+        v_old = v[i]
         m_ss = 0.5*(1+tanh((v[i]-V1)/V2))
         n_ss = 0.5*(1+tanh((v[i]-V3)/V4))
         τ = 1 / (ϕ * cosh((v[i]-V3)/(2V4)))
@@ -137,10 +139,8 @@ function integrate!(p::MorrisLecar, param::MorrisLecarParameter, dt::Float32)
         v[i] += dt/Cm * (ge[i] * (Ee - v[i]) + gi[i] * (Ei - v[i]))
         ge[i] += dt * -ge[i] / τe
         gi[i] += dt * -gi[i] / τi
-    end
-    @inbounds for i = 1:N
-        fire[i] = v[i] > 20.0f0
-
+        # spike = upward crossing of 20 mV (one flag per action potential)
+        fire[i] = (v_old <= 20.0f0) & (v[i] > 20.0f0)
     end
 end
 
@@ -151,7 +151,6 @@ function MorrisLecar_dv(v::Float32, w::Float32, I::Float32, param::MorrisLecarPa
     @unpack Cm, El, EK, ECa, gl, gK, gCa, τe, τi, V1, V2, V3, V4, ϕ = param
     m_ss = 0.5*(1+tanh((v-V1)/V2))
     return I + gl * (El - v) + gCa * (ECa - v) * m_ss + gK * (EK - v) * w
-    return dv
 end
 
 
@@ -164,11 +163,11 @@ function MorrisLecar_dw(v::Float32, w::Float32, param::MorrisLecarParameter)
 end
 
 
-# w-nullcline helper. Note: returns `-w_inf(v)`, while the w-nullcline is `w = w_inf(v)`.
+# w-nullcline helper: the w-nullcline is `w = w_inf(v)` (returned `-w_inf(v)` up to 1.8.4).
 function MorrisLecar_w_nullcline(v::Float32, param::MorrisLecarParameter)
     @unpack Cm, El, EK, ECa, gl, gK, gCa, τe, τi, V1, V2, V3, V4, ϕ = param
     n_ss = 0.5*(1+tanh((v-V3)/V4))
-    return -n_ss
+    return n_ss
 end
 
 
@@ -177,7 +176,6 @@ function MorrisLecar_v_nullcline(v::Float32, I::Float32, param::MorrisLecarParam
     @unpack Cm, El, EK, ECa, gl, gK, gCa, τe, τi, V1, V2, V3, V4, ϕ = param
     m_ss = 0.5*(1+tanh((v-V1)/V2))
     return -(I + gl * (El - v) + gCa * (ECa - v) * m_ss)/(gK * (EK - v))
-    return dv
 end
 
 function plasticity!(p::MorrisLecar, param::MorrisLecarParameter, dt::Float32, T::Time) end

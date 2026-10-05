@@ -57,3 +57,34 @@ end
     @test RW.g === W.g
     @test sim!([R, W], [RW]; duration = 5ms) isa SNNModels.Time
 end
+
+@testset "HH and MorrisLecar: one spike flag per action potential" begin
+    function flags_and_peaks(P, I, dt, T)
+        P.I .= I
+        nflag = 0; npeak = 0; vprev = P.v[1]; up = false
+        for _ = 1:round(Int, T / dt)
+            SNNModels.integrate!(P, P.param, Float32(dt))
+            nflag += P.fire[1]
+            # count action potentials as local maxima above the detection threshold
+            if P.v[1] < vprev && up && vprev > (P isa HH ? -20.0f0 : 20.0f0)
+                npeak += 1
+            end
+            up = P.v[1] > vprev
+            vprev = P.v[1]
+        end
+        nflag, npeak
+    end
+    H = HH(N = 1); H.ge .= 0; H.gi .= 0
+    nf, np = flags_and_peaks(H, 500.0f0, 0.01f0, 200.0f0)
+    @test np > 2 && nf == np
+    # Default MorrisLecar fires once and then stays depolarised under a constant current:
+    # use three current pulses separated by pauses.
+    M = MorrisLecar(N = 1)
+    nf = 0; np = 0
+    for _ = 1:3
+        a, b = flags_and_peaks(M, 100.0f0, 0.05f0, 50.0f0); nf += a; np += b
+        a, b = flags_and_peaks(M, 0.0f0, 0.05f0, 300.0f0); nf += a; np += b
+    end
+    @test nf == 3 # one action potential per pulse (peak > 50 mV)
+    @test SNNModels.MorrisLecar_w_nullcline(0.0f0, M.param) ≈ 0.5f0
+end

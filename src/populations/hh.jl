@@ -94,10 +94,10 @@ with ``u = v - V_t`` (mV) and rates in 1/ms:
 
 # Integration
 Forward Euler, sequential: `m`, `n`, `h` are updated first, then ``v`` with the new gating
-variables, then `ge`, `gi` decay. `fire[i] = v[i] > -20mV` is evaluated after the update; it is a
-level test, so `fire` stays `true` for every step the membrane is above -20 mV (one action
-potential usually produces several consecutive `true` steps). There is no reset and no
-refractory period. A small `dt` (e.g. 0.01-0.05 ms) is needed for stability.
+variables, then `ge`, `gi` decay. A spike is flagged (`fire[i] = true`) in the step in which
+``v`` crosses -20 mV upwards (`v_old <= -20mV < v`), so each action potential gives exactly one
+flag. There is no reset and no refractory period. (Up to SNNModels 1.8.4 `fire` was the level
+test `v > -20mV`, true for every step above -20 mV, i.e. several flags per action potential.) A small `dt` (e.g. 0.01-0.05 ms) is needed for stability.
 
 # Fields
 - `name::String = "HH"`, `id::String = randstring(12)`, `param::HHParameter = HHParameter()`.
@@ -133,7 +133,7 @@ function integrate!(p::HH, param::HHParameter, dt::Float32)
     @unpack N, v, m, n, h, ge, gi, fire, I = p
     @unpack Cm, gl, El, Ek, En, gn, gk, Vt, τe, τi, Ee, Ei = param
     @inbounds for i = 1:N
-        fire[i] = false
+        v_old = v[i]
         m[i] +=
             dt * (
                 0.32f0 * (13.0f0 - v[i] + Vt) /
@@ -163,9 +163,8 @@ function integrate!(p::HH, param::HHParameter, dt::Float32)
             )
         ge[i] += dt * -ge[i] / τe
         gi[i] += dt * -gi[i] / τi
-    end
-    @inbounds for i = 1:N
-        fire[i] = v[i] > -20.0f0
+        # spike = upward crossing of -20 mV (one flag per action potential)
+        fire[i] = (v_old <= -20.0f0) & (v[i] > -20.0f0)
     end
 end
 
