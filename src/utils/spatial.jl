@@ -279,8 +279,7 @@ end
 
 Weight matrix of a ring network: `N` neurons at angles ``\theta_i = 2\pi i / N`` with
 ```math
-W_{ij} = w_0 + (w_{max} - w_0)\,\exp\!\left(-\frac{d(\theta_i, \theta_j)^2}{2\sigma_w^2}
-ight),
+W_{ij} = w_0 + (w_{max} - w_0)\,\exp\!\left(-\frac{d(\theta_i, \theta_j)^2}{2\sigma_w^2}\right),
 \qquad d = \min(|\theta_i - \theta_j|,\ 2\pi - |\theta_i - \theta_j|),
 ```
 where the baseline

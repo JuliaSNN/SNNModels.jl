@@ -32,12 +32,13 @@ end
 
 """
     MultiCompartmentStimulusGroup(param::AbstractStimulusParameter, post::AbstractPopulation,
-                                  sym::Symbol, comps::Vector{Symbol}; name = "StimulusGroup", kwargs...)
+                                  sym::Symbol, comps::AbstractVector; name = "StimulusGroup", kwargs...)
 
 Build a [`StimulusGroup`](@ref) with one stimulus per compartment in `comps`, each created
 with `Stimulus(param, post, sym, comp; name, kwargs...)`. All elements share the same
 parameter object, so changing it (for instance with `set_variable!`) affects all
-compartments. It works with every stimulus parameter whose `Stimulus` method takes the
+compartments. `comps` may contain `nothing` for a point neuron (`[nothing]` gives a group with one
+element). It works with every stimulus parameter whose `Stimulus` method takes the
 compartment (Poisson, Poisson layer, spike-time stimuli; pass `conn` for the last two).
 (Up to SNNModels 1.8.4 the compartment was passed as a keyword and only Poisson parameters
 worked.)
@@ -55,7 +56,7 @@ SNN.sim!(; model, duration = 10ms)
 function MultiCompartmentStimulusGroup(param::P, 
                         post::T,  
                         sym::Symbol, 
-                        comps::Vector{Symbol};
+                        comps::AbstractVector;
                         name = "StimulusGroup",
                         kwargs...
                         ) where {T<: AbstractPopulation, P<:AbstractStimulusParameter}

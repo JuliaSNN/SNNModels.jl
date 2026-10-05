@@ -396,3 +396,9 @@ end
     @test get_time(T) ≈ 0.3f0 && get_step(T) == 3
     @test get_step(SNNModels.Time(100.0)) == 800
 end
+
+@testset "MultiCompartmentStimulusGroup on a point neuron" begin
+    E = IF(N = 10)
+    G = MultiCompartmentStimulusGroup(PoissonFixed(rate = 10Hz), E, :ge, [nothing])
+    @test length(G.elements) == 1
+end
