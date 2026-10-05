@@ -1,6 +1,6 @@
 # @eval SNNModels begin
 """
-    StimulusGroup(; id = randstring(12), name = "StimulusGroup", param::PoissonStimulusParameter,
+    StimulusGroup(; id = randstring(12), name = "StimulusGroup", param::AbstractStimulusParameter,
                   elements::Vector{AbstractStimulus}, targets = Dict(), records = Dict())
 
 A container of stimuli handled as one model component. It is a subtype of
@@ -9,13 +9,13 @@ A container of stimuli handled as one model component. It is a subtype of
 `set_variable!`, `set_intervals!`, `set_active!`, `record` and `stimulate!` broadcast to all
 elements.
 
-`param` must be a `PoissonStimulusParameter` (the field type is restricted), which limits
-groups to Poisson stimuli. The usual way to build a group is
+`param` is any `AbstractStimulusParameter` (up to SNNModels 1.8.4 it was restricted to
+`PoissonStimulusParameter`). The usual way to build a group is
 [`MultiCompartmentStimulusGroup`](@ref).
 
 # Fields
 - `id::String`, `name::String = "StimulusGroup"`
-- `param::PoissonStimulusParameter`: parameter shared by the elements.
+- `param::AbstractStimulusParameter`: parameter shared by the elements.
 - `elements::Vector{AbstractStimulus}`: the grouped stimuli.
 - `targets::Dict`, `records::Dict`
 """
@@ -24,7 +24,7 @@ StimulusGroup
 @snn_kw struct StimulusGroup{ST=Vector{AbstractStimulus}, } <: AbstractStimulusGroup
     id::String = randstring(12)
     name::String = "StimulusGroup"
-    param::PoissonStimulusParameter
+    param::AbstractStimulusParameter
     elements::ST
     targets::Dict = Dict()
     records::Dict = Dict()
@@ -35,13 +35,12 @@ end
                                   sym::Symbol, comps::Vector{Symbol}; name = "StimulusGroup", kwargs...)
 
 Build a [`StimulusGroup`](@ref) with one stimulus per compartment in `comps`, each created
-with `Stimulus(param, post, sym; comp, name, kwargs...)`. All elements share the same
+with `Stimulus(param, post, sym, comp; name, kwargs...)`. All elements share the same
 parameter object, so changing it (for instance with `set_variable!`) affects all
-compartments.
-
-Because the compartment is passed as the keyword `comp` and the group field `param` is a
-`PoissonStimulusParameter`, this works with `PoissonFixed`, `PoissonInterval` and
-`PoissonVariable` parameters.
+compartments. It works with every stimulus parameter whose `Stimulus` method takes the
+compartment (Poisson, Poisson layer, spike-time stimuli; pass `conn` for the last two).
+(Up to SNNModels 1.8.4 the compartment was passed as a keyword and only Poisson parameters
+worked.)
 
 # Example
 ```julia
@@ -62,7 +61,7 @@ function MultiCompartmentStimulusGroup(param::P,
                         ) where {T<: AbstractPopulation, P<:AbstractStimulusParameter}
     elements = Vector{AbstractStimulus}()
     for comp in comps
-        push!(elements, Stimulus(param, post, sym; comp=comp, name, kwargs...))
+        push!(elements, Stimulus(param, post, sym, comp; name, kwargs...))
     end
     targets = Dict(:pre => :StimulusGroup, :post => post.id, :sym => comps)
     StimulusGroup(;name, param, elements, targets)
@@ -106,11 +105,12 @@ set_active!(stim::StimulusGroup, active::Bool) = map(s -> set_active!(s, active)
 """
     neurons(stim::StimulusGroup)
 
-Return the neuron indices targeted by the stimuli of the group. In SNNModels 1.8.4 the result
-is a vector with one index vector per element (`vcat` is applied to a single vector of
-vectors, so the lists are not concatenated).
+Return the neuron indices targeted by the stimuli of the group, concatenated over the
+elements (elements without a `neurons` field contribute nothing). (Up to SNNModels 1.8.4 the
+result was a vector of index vectors.)
 """
-neurons(stim::StimulusGroup) = vcat(map(s -> neurons(s), stim.elements))
+neurons(stim::StimulusGroup) =
+    reduce(vcat, [n for n in map(s -> neurons(s), stim.elements) if !isnothing(n)]; init = Int[])
 
 export  StimulusGroup, set_variable!, set_intervals!, stimulate!, set_active!, neurons, MultiCompartmentStimulusGroup
 # end

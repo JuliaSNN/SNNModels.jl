@@ -261,15 +261,13 @@ end
 """
     next_neuron(p::SpikeTimeStimulus)
 
-Return the input neuron of the next pending spike, `param.neurons[next_index]`, if
-`next_index < length(param.spiketimes)`; otherwise return `[]`.
-
-Known limitations (SNNModels 1.8.4): when only the last spike is pending it returns `[]`,
-and after all spikes have been delivered (`next_index == -1`) it throws a `BoundsError`.
+Return the input neuron of the next pending spike, `param.neurons[next_index]`; return `[]`
+once all spikes have been delivered (`next_index == -1`). (Up to SNNModels 1.8.4 it returned
+`[]` while the last spike was still pending and threw a `BoundsError` after the last spike.)
 """
 function next_neuron(p::SpikeTimeStimulus)
     @unpack next_spike, next_index, param = p
-    if next_index[1] < length(param.spiketimes)
+    if 1 <= next_index[1] <= length(param.spiketimes)
         return param.neurons[next_index[1]]
     else
         return []
@@ -300,8 +298,8 @@ end
 
 Add `delay` (ms) to all spike times of `stimulus.param` and rewind the stimulus to the first
 spike (`next_index = 1`, `next_spike = spiketimes[1]`). Spikes shifted to times earlier than
-the current simulation time are all delivered at the next step. Requires a non-empty spike
-list.
+the current simulation time are all delivered at the next step. With an empty spike list the
+stimulus is marked as exhausted.
 
 # Example
 ```julia
@@ -315,8 +313,19 @@ stim.param.spiketimes  # Float32[105, 110]
 """
 function shift_spikes!(stimulus::SpikeTimeStimulus, delay::Number)
     shift_spikes!(stimulus.param.spiketimes, delay)
-    stimulus.next_index[1] = 1
-    stimulus.next_spike[1] = stimulus.param.spiketimes[1]
+    _rewind!(stimulus)
+end
+
+# Point the stimulus at its first spike (or mark it as exhausted if there is none).
+function _rewind!(stim)
+    if isempty(stim.param.spiketimes)
+        stim.next_index[1] = -1
+        stim.next_spike[1] = Inf
+    else
+        stim.next_index[1] = 1
+        stim.next_spike[1] = stim.param.spiketimes[1]
+    end
+    return stim
 end
 
 """
@@ -325,9 +334,10 @@ end
 Replace the spike list of a [`SpikeTimeStimulus`](@ref) with `spikes` and rewind it.
 
 `spikes` must have fields `spiketimes` and `neurons` (e.g. a `SpikeTimeStimulusParameter`).
-The new times are `spikes.spiketimes .+ start_time`; they are not sorted, so `spikes` must be
-sorted by time. `stim.next_index` is set to 1 and `stim.next_spike` to the first new spike
-time (requires at least one spike). The input-neuron count `stim.N` and the weight matrix are
+The new times are `spikes.spiketimes .+ start_time`, sorted by time (with their neurons).
+`stim.next_index` is set to 1 and `stim.next_spike` to the first new spike time (an empty list
+marks the stimulus as exhausted). (Up to SNNModels 1.8.4 the spikes were not sorted and an
+empty list raised a `BoundsError`.) The input-neuron count `stim.N` and the weight matrix are
 not changed, so the new neuron indices must be `<= stim.N`. Returns `stim`.
 
 # Example
@@ -342,10 +352,10 @@ SNN.update_spikes!(stim, SNN.SpikeTimeParameter([1ms, 2ms], [4, 5]), 1000ms)
 function update_spikes!(stim, spikes, start_time = 0.0f0)
     empty!(stim.param.spiketimes)
     empty!(stim.param.neurons)
-    append!(stim.param.spiketimes, spikes.spiketimes .+ start_time)
-    append!(stim.param.neurons, spikes.neurons)
-    stim.next_index[1] = 1
-    stim.next_spike[1] = stim.param.spiketimes[1]
+    order = sortperm(spikes.spiketimes)
+    append!(stim.param.spiketimes, spikes.spiketimes[order] .+ start_time)
+    append!(stim.param.neurons, spikes.neurons[order])
+    _rewind!(stim)
     return stim
 end
 

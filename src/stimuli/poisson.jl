@@ -64,7 +64,7 @@ stim = SNN.Stimulus(SNN.PoissonFixed(rate = 100Hz, μ = 0.5), E, :ge)
 """
 PoissonFixed
 
-@snn_kw struct PoissonFixed{R = Float32} <: PoissonStimulusParameter
+@snn_kw mutable struct PoissonFixed{R = Float32} <: PoissonStimulusParameter
     rate::R = 0
     μ::R = 1.0f0
     active::VBT = [true]
@@ -96,7 +96,7 @@ stim = SNN.Stimulus(param, E, :ge)
 """
 PoissonInterval
 
-@snn_kw struct PoissonInterval{R = Float32,VVFT = Vector{Vector{Float32}}} <: PoissonStimulusParameter
+@snn_kw mutable struct PoissonInterval{R = Float32,VVFT = Vector{Vector{Float32}}} <: PoissonStimulusParameter
     rate::R
     intervals::VVFT= Vector{Vector{Float32}}([])
     μ::R = 1.0f0
@@ -205,9 +205,11 @@ end
 
 """
     Stimulus(param::PoissonStimulusParameter, post::AbstractPopulation, sym::Symbol; kwargs...)
+    Stimulus(param::PoissonStimulusParameter, post::AbstractPopulation, sym::Symbol, comp; kwargs...)
 
 Build a [`PoissonStimulus`](@ref) on `post`; equivalent to
-`PoissonStimulus(post, sym; param, kwargs...)`.
+`PoissonStimulus(post, sym; param, kwargs...)` (with `comp` the compartment, as for the other
+stimulus types).
 """
 function Stimulus(
     param::PoissonStimulusParameter,
@@ -217,6 +219,9 @@ function Stimulus(
 ) where {T<:AbstractPopulation}
     return PoissonStimulus(post, sym; param, kwargs...)
 end
+
+Stimulus(param::PoissonStimulusParameter, post::T, sym::Symbol, comp; kwargs...) where {T<:AbstractPopulation} =
+    PoissonStimulus(post, sym; param, comp, kwargs...)
 
 
 """

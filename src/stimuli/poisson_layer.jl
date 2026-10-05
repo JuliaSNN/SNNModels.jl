@@ -21,10 +21,10 @@ of rate `rate`, i.e. a total input rate of ``K`` times `rate` with increments ``
 # Fields
 - `rate::Float32` (required): firing rate of each layer neuron (use `Hz`).
 - `N::Int32 = 1`: number of neurons in the layer.
-- `active::Vector{Bool} = [true]`: present for API uniformity but NOT read by
-  `stimulate!` in SNNModels 1.8.4 (the layer always fires).
+- `active::Vector{Bool} = [true]`: when `false` (`set_active!`), the layer does not fire.
 
-The positional form `PoissonLayer(rate; N)` requires the keyword `N`.
+The positional form is `PoissonLayer(rate; N = 1)`. (Up to SNNModels 1.8.4 `active` was not
+read and the positional form required `N`.)
 
 # Example
 ```julia
@@ -36,7 +36,7 @@ stim = SNN.Stimulus(SNN.PoissonLayer(rate = 10Hz, N = 200), E, :ge; conn = (p = 
 """
 PoissonLayer
 
-@snn_kw struct PoissonLayer{FT = Float32} <: PoissonLayerParameter
+@snn_kw mutable struct PoissonLayer{FT = Float32} <: PoissonLayerParameter
     rate::FT  # Default rate in Hz
     N::Int32 = 1
     active::VBT = [true]
@@ -53,7 +53,7 @@ process with its own rate `rates[j]`.
 - `N::Int32 = 1`: number of neurons in the layer.
 - `rates::Vector{Float32}` (required): rate of each layer neuron (length `N`, use `Hz`).
   It is a vector, so it can be changed at runtime with `set_variable!(stim, :rates, r)`.
-- `active::Vector{Bool} = [true]`: NOT read by `stimulate!` in SNNModels 1.8.4.
+- `active::Vector{Bool} = [true]`: when `false`, the layer does not fire.
 
 `PoissonLayerHet(rate; N)` builds `rates = fill(rate, N)`.
 
@@ -74,14 +74,12 @@ PoissonLayerHet
     active::VBT = [true]
 end
 
-function PoissonLayer(rate::R; kwargs...) where {R<:Real}
-    N = kwargs[:N]
-    return PoissonLayer(; N = N, rate = rate)
+function PoissonLayer(rate::R; N = 1, kwargs...) where {R<:Real}
+    return PoissonLayer(; N = N, rate = rate, kwargs...)
 end
 
-function PoissonLayerHet(rate::R; kwargs...) where {R<:Real}
-    N = kwargs[:N]
-    return PoissonLayerHet(; N = N, rates = fill(rate, N))
+function PoissonLayerHet(rate::R; N = 1, kwargs...) where {R<:Real}
+    return PoissonLayerHet(; N = N, rates = fill(Float32(rate), N), kwargs...)
 end
 
 @doc raw"""
@@ -116,8 +114,7 @@ g_i \leftarrow g_i + W_{ij}
 - `randcache::Vector{Float32}`: buffer of uniform random numbers.
 - `records::Dict`, `targets::Dict`
 
-Do not rely on the struct default `param = PoissonLayer(-1)`: it calls the positional
-constructor without `N` and errors; always pass `param`.
+`param` is required (the keyword struct constructor has no default for it).
 
 # Example
 ```julia
@@ -136,7 +133,7 @@ PoissonStimulusLayer
     N::Int
     id::String = randstring(12)
     name::String = "Poisson"
-    param::PT = PoissonLayer(-1)
+    param::PT
     ##
     g::VFT # target conductance for soma
     colptr::VIT
@@ -171,6 +168,7 @@ function PoissonStimulusLayer(
     # Construct the SpikingSynapse instance
     return PoissonStimulusLayer(;
         param = param,
+        PT = typeof(param),
         N = param.N,
         targets = targets,
         g = g,
@@ -196,6 +194,7 @@ function Stimulus(
     # Construct the SpikingSynapse instance
     return PoissonStimulusLayer(;
         param = param,
+        PT = typeof(param),
         N = param.N,
         targets = targets,
         g = g,
@@ -211,11 +210,15 @@ end
 One step of a Poisson layer: each layer neuron `j` fires if a uniform draw is smaller than
 `rate * dt` (`rates[j] * dt` for `PoissonLayerHet`); for each firing neuron the weights of its
 outgoing connections are added to `p.g`. `p.fire` holds the layer spikes of this step. The
-`active` flag is not checked.
+layer does not fire while `param.active[1]` is `false`.
 """
 function stimulate!(p::PoissonStimulusLayer, param::PoissonLayer, time::Time, dt::Float32)
     @unpack N, randcache, fire, colptr, W, I, g = p
     @unpack rate = param
+    if !param.active[1]
+        fill!(fire, false)
+        return
+    end
     rand!(randcache)
     @inbounds @simd for j = 1:N
         if randcache[j] < rate * dt
@@ -237,6 +240,10 @@ function stimulate!(
 )
     @unpack N, randcache, fire, colptr, W, I, g = p
     @unpack rates = param
+    if !param.active[1]
+        fill!(fire, false)
+        return
+    end
     rand!(randcache)
     @inbounds @simd for j = 1:N
         if randcache[j] < rates[j] * dt

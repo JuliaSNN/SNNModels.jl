@@ -245,3 +245,45 @@ end
     @test !has_plasticity(P)
     @test !has_plasticity(EE)
 end
+
+@testset "Stimuli: PoissonLayer active flag, timed helpers, groups, set_variable!" begin
+    E = IF(N = 20)
+    L = Stimulus(PoissonLayer(rate = 500Hz, N = 50), E, :ge; conn = (p = 0.5, μ = 1.0))
+    set_active!(L, false)
+    T = SNNModels.Time()
+    n = 0
+    for _ = 1:100
+        SNNModels.stimulate!(L, L.param, T, 0.125f0); n += sum(L.fire)
+    end
+    @test n == 0
+    @test PoissonLayer(10Hz).N == 1
+    # next_neuron
+    S = SpikeTimeStimulusIdentity(E, :ge; param = SpikeTimeParameter([1ms, 2ms], [3, 7]))
+    @test next_neuron(S) == 3
+    T = SNNModels.Time()
+    for _ = 1:12
+        update_time!(T, 0.125f0); SNNModels.stimulate!(S, S.param, T, 0.125f0)
+    end
+    @test next_neuron(S) == 7           # last spike still pending
+    for _ = 1:12
+        update_time!(T, 0.125f0); SNNModels.stimulate!(S, S.param, T, 0.125f0)
+    end
+    @test next_neuron(S) == []          # exhausted, no BoundsError
+    # update_spikes! sorts; empty lists are allowed
+    update_spikes!(S, SpikeTimeParameter([5ms, 1ms], [2, 4]))
+    @test S.param.spiketimes == Float32[1, 5] && S.param.neurons == [4, 2]
+    update_spikes!(S, SpikeTimeParameter(Float32[], Int[]))
+    @test S.next_index[1] == -1
+    @test shift_spikes!(S, 1ms) isa Any
+    # groups: Poisson and layer parameters, concatenated neurons
+    Tp = Tripod(N = 4)
+    G = MultiCompartmentStimulusGroup(PoissonFixed(rate = 10Hz), Tp, :glu, [:d1, :d2])
+    @test neurons(G) isa Vector{<:Integer} && length(neurons(G)) == 8
+    GL = MultiCompartmentStimulusGroup(PoissonLayer(rate = 10Hz, N = 5), Tp, :glu, [:d1, :d2];
+                                       conn = (p = 1.0, μ = 1.0))
+    @test length(GL.elements) == 2
+    # set_variable! on a scalar parameter field
+    P = Stimulus(PoissonFixed(rate = 10Hz), E, :ge)
+    set_variable!(P, :rate, 20Hz)
+    @test P.param.rate ≈ 20Hz
+end

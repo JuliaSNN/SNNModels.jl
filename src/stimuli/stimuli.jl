@@ -55,10 +55,12 @@ Change a parameter of a stimulus at runtime.
 
 - If `stim.param` has a `variables` dictionary (e.g. `PoissonVariable`), sets
   `stim.param.variables[var] = value`.
-- Otherwise, if `stim.param` has a field `var`, broadcasts `value` into it in place
-  (`getfield(stim.param, var) .= value`); the field must therefore be mutable (an array,
-  e.g. `active`, `I_base`, `rates`). Scalar fields of immutable parameter structs, such as
-  `PoissonFixed.rate`, cannot be changed this way (the broadcast throws an error).
+- Otherwise, if `stim.param` has a field `var`: an array field (e.g. `active`, `I_base`,
+  `rates`) is updated in place (`getfield(stim.param, var) .= value`); a scalar field of a
+  mutable parameter (`PoissonFixed.rate`, `PoissonInterval.rate`, `PoissonLayer.rate`) is
+  replaced (`setproperty!`); a scalar field of an immutable parameter raises an
+  `ArgumentError`. (Up to SNNModels 1.8.4 the scalar case threw a broadcast error; the
+  Poisson parameter types were immutable.)
 - Otherwise a warning is emitted and nothing changes.
 
 # Example
@@ -77,7 +79,14 @@ function set_variable!(stim::G, var::Symbol, value) where {G<:AbstractStimulus}
         stim.param.variables[var] = value
     elseif  hasfield(typeof(stim), :param) && hasfield(typeof(stim.param), var)
         @info "Setting variable $var to $value for stimulus $(stim.name)"
-        getfield(stim.param, var) .= value
+        field = getfield(stim.param, var)
+        if field isa AbstractArray
+            field .= value
+        elseif ismutable(stim.param)
+            setproperty!(stim.param, var, value)
+        else
+            throw(ArgumentError("the field $var of $(typeof(stim.param)) is a scalar of an immutable parameter and cannot be changed in place"))
+        end
     else
         @warn "Stimulus: $(stim.name) (type: $(typeof(stim)) does not have a param with variables $var. Cannot set variable."
     end
