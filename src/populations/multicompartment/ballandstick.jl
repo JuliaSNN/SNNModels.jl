@@ -21,7 +21,7 @@ C_{d,k} \frac{dV_{d,k}}{dt} &= g_{m,k} (E_L - V_{d,k}) - I_{syn,d,k}
 \end{aligned}
 ```
 ``I_{syn,s}`` and ``I_{syn,d,k}`` are computed by `synaptic_current!` of `soma_syn` and
-`dend_syn` with the compartment potentials at the beginning of the step, and are clamped to
+`dend_syn` with the compartment potentials of the Heun stage being evaluated, and are clamped to
 ``\pm 1500`` pA (`Tripod`) or ``\pm 1000`` pA (`BallAndStick`). ``C_{d,k}``, ``g_{m,k}``,
 ``g_{ax,k}`` come from the `Dendrite` structs (see `create_dendrite`). The dendritic leak
 reversal is the somatic ``E_L`` (`adex.El`). Note that, as implemented, the exponential term is
@@ -36,12 +36,19 @@ dendrites only relax towards the soma through the axial term (forward Euler) and
 integrated. ``\theta`` relaxes to `adex.Vt` at every step (forward Euler).
 
 # Integration
-Heun (explicit trapezoidal) method on ``(V_s, V_{d,k}, w_s)``: the derivatives are evaluated
-at the current state (`Δv_temp`) and at the Euler-predicted state (`Δv`), and the state is
-advanced by ``\frac{dt}{2}(\Delta v_{temp} + \Delta v)``. In the predicted adaptation
-derivative the code uses `v_s + Δv` and `w_s + Δv` (without the factor `dt`) where the
-voltage equations use `v + Δv dt`. Synaptic conductances are advanced first, once per step, by
-`update_synapses!`.
+Heun (explicit trapezoidal) method on ``x = (V_s, V_{d,k}, w_s)``. Synaptic conductances are
+advanced first, once per step, by `update_synapses!`. Then ``k_1 = f(x_n)`` is evaluated at the
+current state (stored in `Δv_temp`) and ``k_2 = f(x_n + dt\,k_1)`` at the Euler-predicted state
+(stored in `Δv`); every term of ``f``, including the synaptic currents, the axial currents and
+the adaptation current in the somatic equation, is evaluated at the same stage state. The state
+is advanced by ``x_{n+1} = x_n + \frac{dt}{2}(k_1 + k_2)``. The scheme is second-order accurate
+between spikes.
+
+!!! note "Changed after SNNModels 1.8.4"
+    Up to SNNModels 1.8.4 the predicted adaptation state was `w_s + Δv` and `v_s + Δv`
+    (without the factor `dt`), the first-stage adaptation derivative read the already updated
+    somatic derivative, and the synaptic currents and `w_s` in the somatic equation were not
+    evaluated at the predicted state. Results therefore depended on `dt`.
 
 The fields `Is` and `Id` (external currents) exist but are not used by the equations in the
 current implementation.
@@ -68,7 +75,7 @@ current implementation.
 
 ## Work arrays
 - `Δv`, `Δv_temp::MFT` (`N x 3`): derivatives of `(v_s, v_d, w_s)`; `is::MFT` (`N x 2`);
-  `ic::VFT` (length 1).
+  `ic::VFT` (length 1); `v_pred::MFT` (`N x 2`): stage potentials of soma and dendrite.
 
 # Example
 ```julia
@@ -134,6 +141,7 @@ BallAndStick
     Δv_temp::MFT = zeros(N, 3)
     is::MFT = zeros(N, 2)
     ic::VFT = zeros(1)
+    v_pred::MFT = zeros(N, 2)
 end
 
 """
@@ -196,34 +204,39 @@ end
     Δv::Matrix{Float32},
     dt::Float32,
 )
-    @unpack v_d, v_s, w_s, θ, tabs, fire = p
+    @unpack v_d, v_s, w_s, θ = p
     @unpack d = p
-    @unpack is, ic = p
-    @unpack adex, spike, soma_syn, dend_syn = p
-    @unpack AP_membrane, up, τabs, At, τA = spike
-    @unpack C, gl, El, ΔT, Vt, Vr, a, b, τw = adex
+    @unpack is, ic, v_pred = p
+    @unpack adex, soma_syn, dend_syn = p
+    @unpack C, gl, El, ΔT, a, τw = adex
     @unpack synvars_s, synvars_d = p
 
+    # Heun stage: evaluate the derivatives at the predicted state x + dt * Δv
+    # (Δv = 0 at the first stage, i.e. at the current state).
+    @inbounds for i ∈ 1:p.N
+        v_pred[i, 1] = v_s[i] + Δv[i, 1] * dt
+        v_pred[i, 2] = v_d[i] + Δv[i, 2] * dt
+    end
 
-    @views synaptic_current!(p, soma_syn, synvars_s, v_s[:], is[:, 1])
-    @views synaptic_current!(p, dend_syn, synvars_d, v_d[:], is[:, 2])
+    @views synaptic_current!(p, soma_syn, synvars_s, v_pred[:, 1], is[:, 1])
+    @views synaptic_current!(p, dend_syn, synvars_d, v_pred[:, 2], is[:, 2])
     clamp!(is, -1000, 1000)
 
     @fastmath @inbounds for i ∈ 1:p.N
-        ic[1] = -((v_d[i] + Δv[i, 2] * dt) - (v_s[i] + Δv[i, 1] * dt)) * d.gax[i]
-
-
+        vs = v_pred[i, 1]
+        vd = v_pred[i, 2]
+        ws = w_s[i] + Δv[i, 3] * dt
+        ic[1] = (vs - vd) * d.gax[i] # axial current soma -> d
         Δv[i, 1] =
-            1/C * (
-                + gl * (-(v_s[i] + Δv[i, 1] * dt) + El) +
-                ΔT * exp256(1 / ΔT * (v_s[i] + Δv[i, 1] * dt - θ[i])) - w_s[i]  # adaptation
+            (
+                gl * (El - vs) +
+                ΔT * exp256((vs - θ[i]) / ΔT) - ws  # adaptation
                 - is[i, 1]   # synapses
-                - ic[1] # axial currents
+                - ic[1] # axial current
                 # + I[i]  # external current
-            )
-
-        Δv[i, 2] = ((-(v_d[i] + Δv[i, 2] * dt) + El) * d.gm[i] - is[i, 2] + ic[1]) / d.C[i]
-        Δv[i, 3] = (a * ((v_s[i] + Δv[i, 1]) - El) - (w_s[i] + Δv[i, 3])) / τw
+            ) / C
+        Δv[i, 2] = ((El - vd) * d.gm[i] - is[i, 2] + ic[1]) / d.C[i]
+        Δv[i, 3] = (a * (vs - El) - ws) / τw
     end
 end
 

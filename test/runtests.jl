@@ -60,6 +60,7 @@ end
     _inc("hh_neuron",    "pop/hh_neuron.jl")
     _inc("tripod",       "pop/tripod.jl")
     _inc("ballandstick", "pop/ballandstick.jl")
+    _ts("multicompartment_numerics", "pop/multicompartment_numerics.jl")
 end
 
 # ── Stimuli ───────────────────────────────────────────────────────────────────
