@@ -18,8 +18,11 @@ if ``x > 0`` else 1):
 r^{E} = \Big[\tfrac{r_0}{2}\, R(\beta\,\eta) + r\Big]_+, \qquad
 r \leftarrow r + \frac{r_0 - r^{E}}{400\,\mathrm{ms}}\,\Delta t
 ```
-and the excitatory target receives ``w\,k^{E}`` with ``k^{E} \sim \mathrm{Poisson}(r^{E}\,\Delta t)``
-(see the warnings in `BalancedStimulus` on how the excitatory draws are applied in 1.8.4).
+and the excitatory target of neuron ``n`` receives ``w\,k^{E}_n`` with
+``k^{E}_n \sim \mathrm{Poisson}(r^{E}_n\,\Delta t)`` (one draw per neuron and step). With
+`same_input = true` a single rate process (``\eta``, ``r``, ``r^E`` shared by all neurons) is used
+and every neuron draws its own Poisson count at that rate. Note the rule ``R(x)`` (1 for
+``x \le 0``), transcribed from the code.
 
 # Fields
 - `kIE::Float32 = 1.0`: ratio of the inhibitory rate to `r0`.
@@ -28,8 +31,8 @@ and the excitatory target receives ``w\,k^{E}`` with ``k^{E} \sim \mathrm{Poisso
 - `r0::Float32 = 1kHz`: baseline rate (library units: `1kHz` = 1 per ms).
 - `w::Float32 = 1.0`: increment per input spike (excitatory and inhibitory).
 - `wIE::Float32 = 1.0`: extra factor on the inhibitory increment.
-- `same_input::Bool = false`: use a single excitatory rate process (index 1) instead of
-  one per neuron.
+- `same_input::Bool = false`: use a single excitatory rate process shared by all neurons
+  instead of one per neuron.
 
 Reference not given in the code.
 """
@@ -54,16 +57,15 @@ Balanced excitatory and inhibitory Poisson drive to all `post.N` neurons of `pos
 rates defined by [`BalancedParameter`](@ref). `sym_e` and `sym_i` select the excitatory and
 inhibitory target variables (`target` is the compartment for multicompartment models).
 
-!!! warning "Known defects in SNNModels 1.8.4"
-    - With `same_input = false` (the default) `stimulate!` throws
-      `UndefVarError: randcache not defined`, so the default configuration cannot be
-      simulated.
-    - With `same_input = true` all excitatory draws are added to neuron 1 only.
-    - In the per-neuron branch the excitatory target of neuron `i` receives `N` Poisson
-      draws per step instead of one.
-    - The generic `Stimulus(param::BalancedParameter, post, sym)` passes `sym` as both the
-      excitatory and the inhibitory target, so inhibition is added to the same variable.
-    - Passing a number as `param` fails (it refers to the undefined `BSParam`).
+`param` may also be a number, the baseline rate `r0` (library units, e.g. `2kHz`), used with
+the other defaults of `BalancedParameter`.
+
+!!! note "Changed after SNNModels 1.8.4"
+    Up to 1.8.4: the default `same_input = false` threw `UndefVarError: randcache`;
+    `same_input = true` added all excitatory draws to neuron 1; the per-neuron branch added `N`
+    Poisson draws per step to each neuron (rate multiplied by `N`); `Stimulus(param, post, sym)`
+    used `sym` as both the excitatory and the inhibitory target; a numeric `param` referred to
+    the undefined `BSParam`.
 
 # Fields
 - `id::String`; `param::BalancedParameter`; `name::String = "Balanced"`
@@ -111,8 +113,7 @@ function BalancedStimulus(
     gi, _ = synaptic_target(targets, post, sym_i, target)
 
     if typeof(param) <: Real
-        r = param
-        param = BSParam(rate = (x, y) -> r, r * param.kIE)
+        param = BalancedParameter(r0 = Float32(param))
     end
 
     r = ones(Float32, post.N) * param.r0
@@ -131,11 +132,27 @@ function BalancedStimulus(
 end
 
 
+const _BALANCED_INH = Dict(:ge => :gi, :glu => :gaba, :he => :hi, :AMPA => :GABAa)
+
 """
+    Stimulus(param::BalancedParameter, post::AbstractPopulation, sym_e::Symbol, sym_i::Symbol, target = nothing; kwargs...)
     Stimulus(param::BalancedParameter, post::AbstractPopulation, sym::Symbol, target = nothing; kwargs...)
 
-Build a [`BalancedStimulus`](@ref) with `sym` as both the excitatory and the inhibitory target.
+Build a [`BalancedStimulus`](@ref). In the second form `sym` is the excitatory target and the
+inhibitory one is its counterpart (`:ge` -> `:gi`, `:glu` -> `:gaba`, `:he` -> `:hi`,
+`:AMPA` -> `:GABAa`); other symbols raise an `ArgumentError`.
 """
+function Stimulus(
+    param::BalancedParameter,
+    post::T,
+    sym_e::Symbol,
+    sym_i::Symbol,
+    target = nothing;
+    kwargs...,
+) where {T<:AbstractPopulation}
+    return BalancedStimulus(post, sym_e, sym_i, target; param, kwargs...)
+end
+
 function Stimulus(
     param::BalancedParameter,
     post::T,
@@ -143,15 +160,15 @@ function Stimulus(
     target = nothing;
     kwargs...,
 ) where {T<:AbstractPopulation}
-    return BalancedStimulus(post, sym, sym, target; param, kwargs...)
+    haskey(_BALANCED_INH, sym) || throw(ArgumentError("no inhibitory counterpart known for :$sym; use Stimulus(param, post, sym_e, sym_i)"))
+    return BalancedStimulus(post, sym, _BALANCED_INH[sym], target; param, kwargs...)
 end
 
 
 """
     stimulate!(p::BalancedStimulus, param::BalancedParameter, time::Time, dt::Float32)
 
-One step of the balanced input (equations in [`BalancedParameter`](@ref)). See the warnings in
-[`BalancedStimulus`](@ref): the default `same_input = false` branch throws in SNNModels 1.8.4.
+One step of the balanced input (equations in [`BalancedParameter`](@ref)).
 """
 function stimulate!(p::BalancedStimulus, param::BalancedParameter, time::Time, dt::Float32)
     @unpack N, randcache_β, ge, gi = p
@@ -167,40 +184,28 @@ function stimulate!(p::BalancedStimulus, param::BalancedParameter, time::Time, d
         gi[n] += w * rand(my_rate) * wIE
     end
 
-    # Excitatory spike
-    re::Float32 = 0.0f0
-    cc::Float32 = 0.0f0
-    Erate::Float32 = 0.0f0
+    # Excitatory spikes: one Poisson draw per neuron and step
+    cc = 1.0f0 - dt / τ
     rand!(randcache_β)
     if same_input
-        i = 1
-        re = randcache_β[i] - 0.5f0
-        cc = 1.0f0 - dt / τ
-        noise[i] = (noise[i] - re) * cc + re
-        Erate = R(r0 ./ 2 * R(noise[i] * β, 1.0f0) + r[i], 0.0f0)
-        r[i] += (r0 - Erate) / 400ms * dt
-        @assert Erate >= 0
-
+        # one rate process shared by all neurons (state stored at index 1)
+        re = randcache_β[1] - 0.5f0
+        noise[1] = (noise[1] - re) * cc + re
+        Erate = R(r0 / 2 * R(noise[1] * β, 1.0f0) + r[1], 0.0f0)
+        r[1] += (r0 - Erate) / 400ms * dt
         my_rate = Distributions.Poisson{Float32}(Erate * dt)
-        @fastmath @simd for n = 1:N
+        @inbounds for i = 1:N
             ge[i] += w * rand(my_rate)
         end
     else
-        @inbounds @fastmath for i = 1:N
+        @inbounds for i = 1:N
             re = randcache_β[i] - 0.5f0
-            cc = 1.0f0 - dt / τ
             noise[i] = (noise[i] - re) * cc + re
-            Erate = R(r0 ./ 2 * R(noise[i] * β, 1.0f0) + r[i], 0.0f0)
+            Erate = R(r0 / 2 * R(noise[i] * β, 1.0f0) + r[i], 0.0f0)
             r[i] += (r0 - Erate) / 400ms * dt
-            @assert Erate >= 0
-            rand!(randcache)
-            my_rate = Distributions.Poisson{Float32}(Erate * dt)
-            @fastmath @simd for n = 1:N
-                ge[i] += w * rand(my_rate)
-            end
+            ge[i] += w * rand(Distributions.Poisson{Float32}(Erate * dt))
         end
     end
-
 end
 
-export BalancedStimulus, stimulate!, BSParam, BalancedParameter
+export BalancedStimulus, stimulate!, BalancedParameter
