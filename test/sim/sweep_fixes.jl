@@ -153,3 +153,28 @@ end
     dw_rest, _ = vstdp_dw(0.125; vpost = -70.6f0)
     @test dw_rest == 0
 end
+
+@testset "AggregateScaling: rate estimate in 1/ms, dt-independent" begin
+    function run_as(dt; rate_period = 10.0f0, Tsim = 1000.0f0)
+        P = Identity(N = 5)
+        E = IF(N = 2)
+        S = SpikingSynapse(P, E, :ge; conn = (p = 1.0, μ = 2.0))
+        A = AggregateScaling(E, [S]; param = AggregateScalingParameter(E.N, 50Hz))
+        @test A.N == 2
+        T = SNNModels.Time()
+        nper = round(Int, rate_period / dt)
+        for k = 1:round(Int, Tsim / dt)
+            update_time!(T, Float32(dt))
+            E.fire .= (k % nper == 0)          # 100 Hz
+            SNNModels.forward!(A, A.param, Float32(dt), T)
+            SNNModels.plasticity!(A, A.param, Float32(dt), T)
+        end
+        A.y[1], A.WT[1], sum(S.W[S.index[S.rowptr[1]:(S.rowptr[2]-1)]])
+    end
+    y1, WT1, W1 = run_as(0.125)
+    y2, WT2, W2 = run_as(0.05)
+    @test isapprox(y1, 0.1; rtol = 0.15) && isapprox(y2, 0.1; rtol = 0.15)  # 100 Hz in 1/ms
+    @test isapprox(WT1, WT2; rtol = 0.02)
+    @test WT1 < 10.0                       # rate above target: the target weight decreases
+    @test isapprox(W1, WT1; rtol = 0.1)    # weights follow the target after rescaling
+end
