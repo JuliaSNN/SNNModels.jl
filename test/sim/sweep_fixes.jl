@@ -287,3 +287,30 @@ end
     set_variable!(P, :rate, 20Hz)
     @test P.param.rate ≈ 20Hz
 end
+
+@testset "Recording: interpolated_record time axis, indexed :fire" begin
+    E = IF(N = 5)
+    stim = Stimulus(PoissonFixed(rate = 2kHz), E, :ge)
+    model = compose(; E, stim, silent = true)
+    sim!(model, 2s)
+    monitor!(E, [:v], sr = 10Hz)
+    sim!(model, 2s)
+    y, r = SNNModels.interpolated_record(E, :v)
+    @test first(r) ≈ 2100 && last(r) ≈ 4000 && step(r) ≈ 100
+    @test length(r) == size(getvariable(E, :v), 2)
+    # 1 kHz for 10.5 ms from t = 0: samples at 0, 1, ..., 10 ms
+    F = IF(N = 2)
+    monitor!(F, [:v], sr = 1kHz)
+    sim!([F]; duration = 10.5ms)
+    _, r2 = SNNModels.interpolated_record(F, :v)
+    @test first(r2) ≈ 0 && last(r2) ≈ 10 && length(r2) == 11
+    # indexed spike recording keeps the original neuron indices
+    G = IF(N = 10)
+    sG = Stimulus(PoissonFixed(rate = 5kHz), G, :ge)
+    monitor!(G, [(:fire, [2, 5])])
+    sim!(compose(; G, sG, silent = true), 300ms)
+    st = spiketimes(G)
+    @test length(st) == 10
+    @test all(isempty(st[i]) for i in (1, 3, 4, 6, 7, 8, 9, 10))
+    @test !isempty(st[2]) && !isempty(st[5])
+end

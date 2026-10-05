@@ -100,7 +100,7 @@ function record_fire!(
     ind::Vector{Int} = haskey(indices, :fire) ? indices[:fire] : collect(eachindex(fire))
     t::Float32 = get_time(T)
     push!(record[:time], t)
-    push!(record[:neurons], findall(fire[ind]))
+    push!(record[:neurons], ind[findall(fire[ind])])
 end
 
 """
@@ -164,7 +164,7 @@ end
 end
 
 @inline function record_step(T, sr)
-    period = max(1, floor(Int, 1.0f0 / sr / get_dt(T)))
+    period = max(1, round(Int, 1.0f0 / sr / get_dt(T)))
     (get_step(T) % period) == 0
 end
 
@@ -230,7 +230,7 @@ function record_fire_dense!(
         end
         wp = length(times_buf) - meta[:allocated][:fire] + 1
         times_buf[wp] = t
-        neurons_buf[wp] = has_ind ? j : i
+        neurons_buf[wp] = i
         meta[:allocated][:fire] -= 1
     end
     return
@@ -290,7 +290,7 @@ function _allocate_component!(obj, dt::Float32, duration::Float32)
         end
         # Reconcile period against the real dt now that it is known.
         sr = obj.records[:sr][key]
-        period = max(1, floor(Int, 1.0f0 / Float32(sr) / dt))
+        period = max(1, round(Int, 1.0f0 / Float32(sr) / dt))
         meta[:period][key] = period
 
         snap_size = meta[:snapshot_size][key]
@@ -389,8 +389,19 @@ function record!(obj, T::Time)
     time = get_time(T)
     mode = meta[:mode]
     for key::Symbol in records[:data]
-        isnan(get(records[:start_time], key, NaN32)) && (records[:start_time][key] = time)
-        records[:end_time][key] = time
+        # start/end time = times of the first and last sample actually taken (every step for
+        # :fire, every `period` steps of the global step counter otherwise)
+        sampled = if key === :fire
+            true
+        elseif get(mode, key, :legacy) === :dense
+            (get_step(T) % meta[:period][key]) == 0
+        else
+            record_step(T, records[:sr][key])
+        end
+        if sampled
+            isnan(get(records[:start_time], key, NaN32)) && (records[:start_time][key] = time)
+            records[:end_time][key] = time
+        end
         if key === :fire
             if get(mode, :fire, :legacy) === :dense
                 record_fire_dense!(obj.fire, records, meta, T, records[:indices])
@@ -477,8 +488,10 @@ here.
   sampling rate is then `200Hz` instead of `1000Hz`.
 - `keys`: field names of `obj` (e.g. `:v`, `:w`, `:W`, `:ρ`, `:fire`). A tuple
   `(sym, indices)` records only the listed elements of a vector field.
-- `sr = 1000Hz`: sampling rate. The sampling period is `max(1, floor(1 / (sr * dt)))` steps,
-  so `sr` larger than `1/dt` records every step. Ignored for `:fire`.
+- `sr = 1000Hz`: sampling rate. The sampling period is `max(1, round(1 / (sr * dt)))` steps,
+  so `sr` larger than `1/dt` records every step. Ignored for `:fire`. (Up to SNNModels 1.8.4
+  the period was rounded down, and Float32 rounding made, e.g., `sr = 10Hz` sample every
+  799 steps, 99.875 ms, instead of every 100 ms at `dt = 0.125ms`.)
 - `variables = :none`: name of a nested field holding the variables, e.g. `:STPVars` or
   `:LTPVars` of a `SpikingSynapse`, or `:synvars`. The key `sym` is then read from
   `obj.<variables>.<sym>` and stored as `Symbol(variables, "_", sym)`, e.g. `:STPVars_u`.
@@ -503,9 +516,9 @@ here.
 Already-monitored keys and missing fields are skipped silently (with a warning if
 `verbose = true`).
 
-!!! note
-    In SNNModels 1.8.4 the indices of `(:fire, indices)` are ignored: the spikes of all
-    neurons are recorded.
+With `(:fire, indices)` only the spikes of the listed neurons are recorded (with their
+original neuron indices, so `spiketimes` still returns one entry per neuron of the
+population). (Up to SNNModels 1.8.4 the indices were ignored.)
 
 # Example
 ```julia
@@ -550,6 +563,7 @@ function monitor!(
                 :neurons_buf => Vector{Int}(),
             )
             obj.records[:start_time][:fire] = NaN32
+            !isempty(ind) && (obj.records[:indices][:fire] = collect(Int, ind))
             meta[:mode][:fire] = :dense
             meta[:allocated][:fire] = 0
             meta[:step_count][:fire] = 0
@@ -604,7 +618,7 @@ function monitor!(
         # Classify dense vs legacy (manifesto §8) and init meta.
         mode, snap_size = _classify_record(sample, !isempty(ind), length(ind))
         meta[:mode][key] = mode
-        meta[:period][key] = max(1, floor(Int, 1.0f0 / Float32(sr) / dt_hint))
+        meta[:period][key] = max(1, round(Int, 1.0f0 / Float32(sr) / dt_hint))
         meta[:step_count][key] = 0
         meta[:grew][key] = false
         meta[:allocated][key] = 0
@@ -648,20 +662,23 @@ It is evaluated with call syntax, `y(i, t)` (indices or ranges), at any `t` with
 interpolation; singleton dimensions are not interpolated). Indexing with square brackets and
 a non-integer time does not work.
 
-`r` spans from the time of the first `record!` call to the time of the last one
-(`records[:start_time][sym]` to `records[:end_time][sym]`) with as many points as samples,
-i.e. it assumes evenly spaced samples between these two times. The samples are actually taken
-at the steps whose global step counter is a multiple of the sampling period (including
-`t = 0` for a fresh model). The axis is therefore exact only when monitoring starts at
-`t = 0` and the simulated time is a multiple of the sampling period; otherwise (e.g. a
-variable monitored from `t = 2s` on) `r` is shifted or stretched by up to one sampling
-period with respect to the true sample times.
+Samples are taken at the steps whose global step counter is a multiple of the sampling
+period (including `t = 0` for a fresh model). `r` spans from the time of the first sample to
+the time of the last one (`records[:start_time][sym]` to `records[:end_time][sym]`) with as many
+points as samples, so it is the exact sample-time axis, also when monitoring starts after
+`t = 0` or the simulated time is not a multiple of the sampling period.
 
-For `sym == :fire` it returns `firing_rate(p, τ = 20ms)` (the argument `τ` is not used).
+For `sym == :fire` it returns `firing_rate(p, τ = τ)`.
+
+!!! note "Changed after SNNModels 1.8.4"
+    Up to 1.8.4 the start and end times were those of the first and last `record!` call, not
+    of the first and last sample, so the axis was shifted or stretched by up to one sampling
+    period (e.g. `:W` sampled at 10 Hz from 2 s to 4 s: true times `2100:100:4000` ms, axis
+    `2000.125:105.26:4000`); the `τ` argument was ignored for `:fire`.
 """
 function interpolated_record(p, sym, τ = 20ms)
     if sym == :fire
-        return firing_rate(p, τ = 20ms)
+        return firing_rate(p, τ = τ)
     end
     v_dt = getvariable(p, sym)
 
@@ -836,7 +853,7 @@ function record(
         else
             v, r = interpolated_record(p, sym)
             if !isnothing(interval)
-                @assert interval[1] .>= r[1] "Interval start $(interval[1]) is out of bounds $(r_v[1])"
+                @assert interval[1] .>= r[1] "Interval start $(interval[1]) is out of bounds $(r[1])"
                 @assert interval[end] .<= r[end] "Interval end $(interval[end]) is out of bounds $(r[end])"
                 v_dt = v(axes(v, 1), interval)
                 r = interval
