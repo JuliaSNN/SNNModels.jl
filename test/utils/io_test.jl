@@ -45,3 +45,15 @@ import Dates: DateTime
         rm(test_dir; recursive = true, force = true)
     end
 end
+
+@testset "get_git_commit_hash outside a git repository" begin
+    # cluster jobs often run from a copied directory with no .git: must not throw
+    h = cd(mktempdir()) do
+        withenv("GIT_DIR" => nothing, "GIT_WORK_TREE" => nothing, "GIT_CEILING_DIRECTORIES" => tempdir()) do
+            SNNModels.get_git_commit_hash()
+        end
+    end
+    @test h == "unknown"
+    # inside this repository it still returns a 40-character hash
+    @test length(cd(SNNModels.get_git_commit_hash, pkgdir(SNNModels))) == 40
+end

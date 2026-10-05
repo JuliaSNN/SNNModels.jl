@@ -361,16 +361,23 @@ end
 """
     get_git_commit_hash()
 
-Get current git commit hash of the repository.
+Get current git commit hash of the repository containing the working directory.
 
 # Returns
-- String containing the full commit hash
+- String containing the full commit hash, or `"unknown"` when the working directory is not inside
+  a git repository or git is not available (e.g. cluster jobs run from a copied directory).
+  `write_config` records this string, so a missing repository no longer aborts the run.
 
 # Note
-- Requires git to be available in PATH
+- Uses `git` from PATH; honours `GIT_DIR`/`GIT_WORK_TREE` if set.
 """
 function get_git_commit_hash()
-    return readchomp(`git rev-parse HEAD`)
+    try
+        return readchomp(pipeline(`git rev-parse HEAD`; stderr = devnull))
+    catch
+        @warn "get_git_commit_hash: not inside a git repository (or git unavailable); recording \"unknown\"" maxlog = 1
+        return "unknown"
+    end
 end
 
 """

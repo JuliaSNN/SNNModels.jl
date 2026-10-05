@@ -104,6 +104,12 @@ over incoming synapses; traces read before the current step's spikes). They agre
 (2e-6) and Auryn (2e-7). Details: `src/connections/sparse_plasticity/STDP_kernels.jl` and
 `docs/stdp_rules_memo.md`.
 
+## Release notes: 1.8.4
+
+- **Bug fix, `get_git_commit_hash`.** Outside a git repository (e.g. cluster jobs run from a
+  copied directory) it threw, so `write_config` aborted the run. It now warns once and records
+  `"unknown"`; `GIT_DIR`/`GIT_WORK_TREE` are still honoured.
+
 ## Release notes: 1.8.3
 
 - **Bug fix, `CurrentStimulus` on a neuron subset.** With `CurrentNoise` and a `neurons` subset
