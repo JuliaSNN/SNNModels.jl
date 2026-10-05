@@ -18,9 +18,9 @@ where the sums run over the spikes delivered since the previous step. The struct
 to zero. With the forward Euler membrane update ``V \mathrel{+}= \frac{dt}{\tau_m} R (\ldots - I_{syn})``
 of `IF`, a weight `w` therefore produces a voltage jump of ``R\,w\,dt/\tau_m``, which depends on `dt`.
 
-Only the three-argument `synaptic_current!` method exists, so `DeltaSynapse` works with the
-generalized IF point neurons (`IF`, `AdEx`, `ExtendedIF`) but not with `Tripod` or
-`BallAndStick`, which call the five-argument form.
+`DeltaSynapse` works with the generalized IF point neurons (`IF`, `AdEx`, `ExtendedIF`) only.
+`Tripod` and `BallAndStick` call the five-argument `synaptic_current!`, which raises an
+`ArgumentError` for `DeltaSynapse` (use a conductance-based synapse such as `ReceptorSynapse`).
 
 State variables: `DeltaSynapseVars`.
 
@@ -89,3 +89,15 @@ end
 end
 
 export DeltaSynapse
+
+# Multicompartment models evaluate the synaptic current at given compartment potentials
+# (five-argument form); a delta synapse has no such current.
+function synaptic_current!(
+    p::AbstractPopulation,
+    synapse::DeltaSynapse,
+    synvars::AbstractSynapseVariable,
+    v::AbstractVector,
+    syncurr::AbstractVector,
+)
+    throw(ArgumentError("DeltaSynapse cannot be used with $(nameof(typeof(p))) (it has no voltage-dependent current); use a conductance-based synapse such as ReceptorSynapse"))
+end

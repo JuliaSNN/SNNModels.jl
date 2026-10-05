@@ -68,3 +68,55 @@ end
     @test maximum(abs.(st1 .- st2)) <= 0.15
     @test abs(w1 - w2) < 0.5
 end
+
+@testset "Tripod/BallAndStick spike threshold, dendritic El, external currents" begin
+    # Default Vspike reproduces the previous hard-coded -10 mV threshold.
+    @test Tripod(N = 1).Vspike == -10.0f0
+    @test BallAndStick(N = 1).Vspike == -10.0f0
+    # A threshold above AP_membrane can never be reached on the upstroke prediction:
+    # a lower threshold detects spikes earlier.
+    function nspikes(Vspike)
+        p = Tripod(N = 1, param = TripodParameter(ds = [200um, 300um]), Vspike = Vspike)
+        p.v_s .= -70.6f0; p.v_d1 .= -70.6f0; p.v_d2 .= -70.6f0; p.I .= 1500.0f0
+        n = 0
+        for _ = 1:2000
+            SNNModels.integrate!(p, p.param, 0.05f0)
+            n += p.fire[1]
+        end
+        n
+    end
+    @test nspikes(-10.0f0) > 0
+    @test nspikes(-45.0f0) >= nspikes(-10.0f0)
+    # Dendrites relax to their own El (default: adex.El).
+    p = Tripod(N = 1, adex = AdExParameter(El = -65mV))
+    @test all(p.d1.El .== -65.0f0) && all(p.d2.El .== -65.0f0)
+    p.d1.El .= -60.0f0; p.d2.El .= -60.0f0
+    p.v_s .= -60.0f0; p.v_d1 .= -60.0f0; p.v_d2 .= -60.0f0
+    leak_old = 0.1f0 * (-65.0f0 + 60.0f0) * p.d1.gm[1] / p.d1.C[1] # step with the somatic El
+    SNNModels.integrate!(p, p.param, 0.1f0)
+    @test abs(p.v_d1[1] + 60.0f0) < abs(leak_old) / 2
+    # BallAndStick external currents are applied.
+    b = BallAndStick(N = 1, param = BallAndStickParameter(ds = [300um]))
+    b.v_s .= -70.6f0; b.v_d .= -70.6f0
+    b.Is .= 200.0f0
+    for _ = 1:200
+        SNNModels.integrate!(b, b.param, 0.1f0)
+    end
+    @test b.v_s[1] > -68.0f0
+    b2 = BallAndStick(N = 1, param = BallAndStickParameter(ds = [300um]))
+    b2.v_s .= -70.6f0; b2.v_d .= -70.6f0
+    b2.Id .= 100.0f0
+    for _ = 1:200
+        SNNModels.integrate!(b2, b2.param, 0.1f0)
+    end
+    @test b2.v_d[1] > b2.v_s[1] > -70.5f0
+end
+
+@testset "Dendritic models: invalid targets and DeltaSynapse" begin
+    E = Poisson(N = 5, param = PoissonParameter(10Hz))
+    T = Tripod(N = 2)
+    @test_throws ArgumentError SpikingSynapse(E, T, :glu, :d3; conn = (p = 1.0, μ = 1.0))
+    @test SpikingSynapse(E, T, :glu, :d2; conn = (p = 1.0, μ = 1.0)) isa SpikingSynapse
+    Td = Tripod(N = 2, soma_syn = DeltaSynapse())
+    @test_throws ArgumentError SNNModels.integrate!(Td, Td.param, 0.1f0)
+end

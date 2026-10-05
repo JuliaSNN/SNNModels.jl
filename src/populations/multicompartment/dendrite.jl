@@ -92,9 +92,9 @@ population (`Tripod` has two, `d1` and `d2`; `BallAndStick` has one, `d`). Norma
 
 # Fields (all `Vector{Float32}` of length `N`, default `zeros(N)`)
 - `N::Int32 = 100`: number of neurons.
-- `El::VFT`: resting potential (mV); `create_dendrite` sets it to `-70.6mV`. Note that the
-  current `Tripod`/`BallAndStick` equations use the somatic `adex.El` as dendritic leak
-  reversal, not this field.
+- `El::VFT`: leak reversal (resting) potential of the dendrite (mV), used by the
+  `Tripod`/`BallAndStick` dendritic equations. `create_dendrite` sets it from its `El` keyword
+  (default `-70.6mV`); `Tripod` and `BallAndStick` pass the somatic `adex.El` by default.
 - `l::VFT`: compartment length (cm); `-1` marks a disconnected compartment (`l <= 0`).
 - `d::VFT`: compartment diameter (cm).
 - `C::VFT`: membrane capacitance (pF), `C_mem`.
@@ -122,7 +122,7 @@ Dendrite
 end
 
 """
-    create_dendrite(N::Int, l; d = 4um, physiology = human_dend) -> Dendrite
+    create_dendrite(N::Int, l; El = -70.6mV, d = 4um, physiology = human_dend) -> Dendrite
     create_dendrite(l; d = 4um, physiology = human_dend) -> NamedTuple
     create_dendrite(; l, kwargs...)
 
@@ -134,7 +134,7 @@ is drawn uniformly from `lmin:1um:lmax` (independently for each of the `N` neuro
 first form). Lengths above `500um` raise an error. For `l > 0` it returns
 `(gm = G_mem(Rd, d, l), gax = G_axial(Ri, d, l), C = C_mem(Cd, d, l), l, d)`; for `l <= 0` it
 returns a disconnected compartment `(gm = 1, gax = 0, C = 1, l = -1, d)`.
-The `N` form returns a `Dendrite` with these values per neuron and `El = -70.6mV`.
+The `N` form returns a `Dendrite` with these values per neuron and leak reversal `El`.
 
 # Example
 ```julia
@@ -144,11 +144,11 @@ SNN.create_dendrite(200um)                          # one dendrite, human physio
 SNN.create_dendrite(5, (150um, 400um); physiology = SNN.mouse_dend)
 ```
 """
-function create_dendrite(N::Int, l; kwargs...)
+function create_dendrite(N::Int, l; El::Real = -70.6mV, kwargs...)
     dendrites = Dendrite(N = N)
     for i = 1:N
         dendrite = create_dendrite(l; kwargs...)
-        dendrites.El[i] = -70.6f0
+        dendrites.El[i] = El
         dendrites.l[i] = dendrite.l
         dendrites.d[i] = dendrite.d
         dendrites.C[i] = dendrite.C

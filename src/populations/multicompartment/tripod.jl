@@ -17,7 +17,7 @@ Soma (AdEx-like, parameters from `adex`, an `AdExParameter`), for each dendrite 
 \begin{aligned}
 C \frac{dV_s}{dt} &= g_L (E_L - V_s) + g_L \Delta_T\, e^{(V_s - \theta)/\Delta_T} - w_s
     - I_{syn,s} - \sum_k g_{ax,k}\,(V_s - V_{d,k}) + I \\
-C_{d,k} \frac{dV_{d,k}}{dt} &= g_{m,k} (E_L - V_{d,k}) - I_{syn,d,k}
+C_{d,k} \frac{dV_{d,k}}{dt} &= g_{m,k} (E_{L,k} - V_{d,k}) - I_{syn,d,k}
     + g_{ax,k}\,(V_s - V_{d,k}) + I_d \\
 \tau_w \frac{dw_s}{dt} &= a (V_s - E_L) - w_s \\
 \tau_A \frac{d\theta}{dt} &= V_t - \theta
@@ -26,8 +26,8 @@ C_{d,k} \frac{dV_{d,k}}{dt} &= g_{m,k} (E_L - V_{d,k}) - I_{syn,d,k}
 ``I_{syn,s}`` and ``I_{syn,d,k}`` are computed by `synaptic_current!` of `soma_syn` and
 `dend_syn` with the compartment potentials of the Heun stage being evaluated, and are clamped to
 ``\pm 1500`` pA (`Tripod`) or ``\pm 1000`` pA (`BallAndStick`). ``C_{d,k}``, ``g_{m,k}``,
-``g_{ax,k}`` come from the `Dendrite` structs (see `create_dendrite`). The dendritic leak
-reversal is the somatic ``E_L`` (`adex.El`). The exponential term is multiplied by ``g_L``, as in
+``g_{ax,k}`` and the dendritic leak reversal ``E_{L,k}`` come from the `Dendrite` structs (see
+`create_dendrite`); by default ``E_{L,k}`` is the somatic ``E_L`` (`adex.El`). The exponential term is multiplied by ``g_L``, as in
 the AdEx model (Brette and Gerstner 2005) and in the published Tripod model (Quaresima et al.
 2023, Eq. 1, where ``g_L`` multiplies both the leak and the exponential term; the published code,
 TripodNeuron.jl, computes `gl * (-v + Er + ΔT * exp((v - θ) / ΔT))`).
@@ -38,13 +38,16 @@ TripodNeuron.jl, computes `gl * (-v + Er + ΔT * exp((v - θ) / ΔT))`).
     ``g_L / 1\,\mathrm{nS}`` times (40 times with the default `gl = 40nS`) smaller than in the
     published model.
 
-Spike: when the predicted somatic potential ``V_s + dt\,\dot V_s`` reaches ``-10`` mV
-(hard-coded, not `adex.Vt`), the neuron fires: ``V_s \leftarrow`` `AP_membrane`,
+Spike: when the predicted somatic potential ``V_s + dt\,\dot V_s`` reaches `Vspike`
+(population field, default ``-10`` mV; `adex.Vt` is only the resting value of ``\theta``), the
+neuron fires: ``V_s \leftarrow`` `AP_membrane`,
 ``w_s \leftarrow w_s + b``, ``\theta \leftarrow \theta + A_t``, and the refractory counter is set
 to `round((up + τabs)/dt)` steps. During the first `up` the soma is clamped at `AP_membrane`
 (back-propagation period), during the following `τabs` at `adex.Vr`; in both periods the
 dendrites only relax towards the soma through the axial term (forward Euler) and `w_s` is not
-integrated. ``\theta`` relaxes to `adex.Vt` at every step (forward Euler).
+integrated. ``\theta`` relaxes to `adex.Vt` at every step (forward Euler). The published Tripod
+code (TripodNeuron.jl) detects spikes at ``V_s \ge V_T``; `Vspike = adex.Vt` reproduces that
+rule.
 
 # Integration
 Heun (explicit trapezoidal) method on ``x = (V_s, V_{d,k}, w_s)``. Synaptic conductances are
@@ -71,7 +74,8 @@ between spikes.
   (resting value of the threshold ``\theta``), `Vr`, `a`, `b`, `τw`.
 - `soma_syn::SYNS = TripodSomaSynapse`, `dend_syn::SYND = TripodDendSynapse`: synapse models.
 - `spike::PST = PostSpike()`: `AP_membrane`, `up`, `τabs`, `At`, `τA`.
-- `d1::VDT`, `d2::VDT`: `Dendrite`s built with `create_dendrite(N, param.ds[1])` and `param.ds[2]`.
+- `d1::VDT`, `d2::VDT`: `Dendrite`s built with `create_dendrite(N, param.ds[k]; El = adex.El)`.
+- `Vspike::Float32 = -10mV`: spike detection threshold on the predicted somatic potential.
 
 ## State variables
 - `v_s`, `v_d1`, `v_d2::VFT`: compartment potentials (mV), initialised uniformly in `[Vr, Vt]`.
@@ -132,8 +136,9 @@ Tripod
     soma_syn::SYNS = TripodSomaSynapse
     dend_syn::SYND = TripodDendSynapse
     spike::PST = PostSpike()
-    d1::VDT = create_dendrite(N, param.ds[1])
-    d2::VDT = create_dendrite(N, param.ds[2])
+    Vspike::Float32 = -10mV
+    d1::VDT = create_dendrite(N, param.ds[1]; El = adex.El)
+    d2::VDT = create_dendrite(N, param.ds[2]; El = adex.El)
 
     # Membrane potential and adaptation
     v_s::VFT = rand_value(N, adex.Vt, adex.Vr)
@@ -181,7 +186,7 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     @unpack synvars_s, synvars_d1, synvars_d2, d1, d2, I_d = p
     @unpack receptors_d1, receptors_d2, receptors_s = p
 
-    @unpack spike, adex, soma_syn, dend_syn = p
+    @unpack spike, adex, soma_syn, dend_syn, Vspike = p
     @unpack AP_membrane, up, τabs, At, τA = spike
     @unpack Vr, Vt, b = adex
 
@@ -212,7 +217,7 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
             v_d1[i] += dt * (v_s[i] - v_d1[i]) * d1.gax[i] / d1.C[i]
             v_d2[i] += dt * (v_s[i] - v_d2[i]) * d2.gax[i] / d2.C[i]
         elseif tabs[i] <= 0
-            fire[i] = v_s[i] .+ Δv[i, 1] * dt >= -10mV
+            fire[i] = v_s[i] + Δv[i, 1] * dt >= Vspike
             Δv[i, 1] = ifelse(fire[i], AP_membrane - v_s[i], Δv[i, 1])
             v_s[i] = ifelse(fire[i], AP_membrane, v_s[i])
             w_s[i] = ifelse(fire[i], w_s[i] + b, w_s[i])
@@ -260,8 +265,8 @@ end
         ws = w_s[i] + Δv[i, 4] * dt
         ic[1] = (vs - vd1) * d1.gax[i] # axial current soma -> d1
         ic[2] = (vs - vd2) * d2.gax[i] # axial current soma -> d2
-        Δv[i, 2] = ((El - vd1) * d1.gm[i] - is[i, 2] + ic[1] + I_d[i]) / d1.C[i]
-        Δv[i, 3] = ((El - vd2) * d2.gm[i] - is[i, 3] + ic[2] + I_d[i]) / d2.C[i]
+        Δv[i, 2] = ((d1.El[i] - vd1) * d1.gm[i] - is[i, 2] + ic[1] + I_d[i]) / d1.C[i]
+        Δv[i, 3] = ((d2.El[i] - vd2) * d2.gm[i] - is[i, 3] + ic[2] + I_d[i]) / d2.C[i]
         Δv[i, 1] =
             (
                 gl * (El - vs) +

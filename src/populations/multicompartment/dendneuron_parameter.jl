@@ -130,7 +130,8 @@ end
 Target the receptor buffer `post.receptors_<target>.<sym>` of compartment `target` (`:s`,
 `:d1`, `:d2` for `Tripod`; `:s`, `:d` for `BallAndStick`); `sym` is mapped with
 `get_synapse_symbol` (`:ge`/`:he` -> `:glu`, `:gi`/`:hi` -> `:gaba`). Returns the buffer and
-`post.v_<target>`. Records `:sym => "<sym>_<target>"` in `targets`.
+`post.v_<target>`. Records `:sym => "<sym>_<target>"` in `targets`. An unknown `target`
+raises an `ArgumentError`.
 """
 function synaptic_target(
     targets::Dict,
@@ -140,9 +141,13 @@ function synaptic_target(
 ) where {T<:AbstractDendriteIF}
     receps = Symbol("receptors_$target")
     v = Symbol("v_$target")
+    if !(hasfield(typeof(post), receps) && hasfield(typeof(post), v))
+        comps = [Symbol(string(f)[3:end]) for f in fieldnames(typeof(post)) if startswith(string(f), "v_")]
+        throw(ArgumentError("unknown compartment `$target` for $(nameof(typeof(post))); valid targets: $(comps)"))
+    end
     sym = get_synapse_symbol(post.soma_syn, sym)
     g = getfield(getfield(post, receps), sym)
-    hasfield(typeof(post), v) && (v_post = getfield(post, v))
+    v_post = getfield(post, v)
     push!(targets, :sym => "$(sym)_$target")
     push!(targets, :g => post.id)
     return g, v_post
