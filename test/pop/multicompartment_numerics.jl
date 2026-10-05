@@ -120,3 +120,19 @@ end
     Td = Tripod(N = 2, soma_syn = DeltaSynapse())
     @test_throws ArgumentError SNNModels.integrate!(Td, Td.param, 0.1f0)
 end
+
+@testset "Refractory period survives rounding (up = τabs = 0.1 ms)" begin
+    function rate(dt)
+        p = Tripod(N = 1, param = TripodParameter(ds = [160um, 200um]),
+                   spike = PostSpike(At = 10.0mV, τA = 30.0ms, τabs = 0.1ms, up = 0.1ms))
+        p.v_s .= -70.6f0; p.v_d1 .= -70.6f0; p.v_d2 .= -70.6f0; p.I .= 1500.0f0
+        n = 0
+        for _ = 1:round(Int, 1000 / dt)
+            SNNModels.integrate!(p, p.param, Float32(dt))
+            n += p.fire[1]
+        end
+        n
+    end
+    r1, r2 = rate(0.1), rate(0.125)
+    @test r1 < 100 && abs(r1 - r2) <= 3   # it was ~1100 Hz at dt = 0.125 ms
+end

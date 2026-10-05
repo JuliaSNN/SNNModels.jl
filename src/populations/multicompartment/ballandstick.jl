@@ -39,8 +39,9 @@ Spike: when the predicted somatic potential ``V_s + dt\,\dot V_s`` reaches `Vspi
 (population field, default ``-10`` mV; `adex.Vt` is only the resting value of ``\theta``), the
 neuron fires: ``V_s \leftarrow`` `AP_membrane`,
 ``w_s \leftarrow w_s + b``, ``\theta \leftarrow \theta + A_t``, and the refractory counter is set
-to `round((up + τabs)/dt)` steps. During the first `up` the soma is clamped at `AP_membrane`
-(back-propagation period), during the following `τabs` at `adex.Vr`; in both periods the
+to `n_up + n_abs` steps, with `n_up = max(1, round(up/dt))` and `n_abs = max(1, round(τabs/dt))`.
+The soma is clamped at `AP_membrane` until the counter reaches `n_abs` (back-propagation
+period; the spike step itself counts as one), then at `adex.Vr` for `n_abs` steps; in both periods the
 dendrites only relax towards the soma through the axial term (forward Euler) and `w_s` is not
 integrated. ``\theta`` relaxes to `adex.Vt` at every step (forward Euler). The published Tripod
 code (TripodNeuron.jl) detects spikes at ``V_s \ge V_T``; `Vspike = adex.Vt` reproduces that
@@ -56,6 +57,11 @@ is advanced by ``x_{n+1} = x_n + \frac{dt}{2}(k_1 + k_2)``. The scheme is second
 between spikes.
 
 !!! note "Changed after SNNModels 1.8.4"
+    Up to SNNModels 1.8.4 the refractory counter was `round((up + τabs)/dt)` and the
+    back-propagation test `tabs > τabs/dt`: when `up + τabs` rounded to a value below
+    `τabs/dt + 1` (e.g. `up = τabs = 0.1ms` at `dt = 0.125ms`) the reset to `Vr` was skipped and
+    the neuron fired every second step (about 1 kHz). With `up` and `τabs` multiples of `dt`
+    the result is unchanged.
     Up to SNNModels 1.8.4 the predicted adaptation state was `w_s + Δv` and `v_s + Δv`
     (without the factor `dt`), the first-stage adaptation derivative read the already updated
     somatic derivative, and the synaptic currents and `w_s` in the somatic equation were not
@@ -177,6 +183,9 @@ function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
     @unpack spike, adex, soma_syn, dend_syn, Vspike = p
     @unpack AP_membrane, up, τabs, At, τA = spike
     @unpack Vr, Vt, b = adex
+    # refractory counters in steps; each period lasts at least one step
+    n_abs = max(1, round(Int, τabs / dt))
+    n_ref = max(1, round(Int, up / dt)) + n_abs
 
     update_synapses!(p, soma_syn, receptors_s, synvars_s, dt)
     update_synapses!(p, dend_syn, receptors_d, synvars_d, dt)
@@ -192,7 +201,7 @@ function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
     @inbounds for i ∈ 1:N
         tabs[i] -= 1
         θ[i] += dt * (Vt - θ[i]) / τA
-        if tabs[i] > τabs / dt # backpropagation period
+        if tabs[i] > n_abs # backpropagation period
             v_s[i] = AP_membrane
             v_d[i] += dt * (v_s[i] - v_d[i]) * d.gax[i] / d.C[i]
         elseif tabs[i] > 0 # absolute refractory period
@@ -204,7 +213,7 @@ function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
             v_s[i] = ifelse(fire[i], AP_membrane, v_s[i])
             w_s[i] = ifelse(fire[i], w_s[i] + b, w_s[i])
             θ[i] = ifelse(fire[i], θ[i] + At, θ[i])
-            tabs[i] = ifelse(fire[i], round(Int, (up + τabs) / dt), tabs[i])
+            tabs[i] = ifelse(fire[i], n_ref, tabs[i])
             fire[i] && continue
             v_s[i] += 0.5 * dt * (Δv_temp[i, 1] + Δv[i, 1])
             v_d[i] += 0.5 * dt * (Δv_temp[i, 2] + Δv[i, 2])
