@@ -3,7 +3,8 @@ import DrWatson: save, load
 """
     SNNfolder(path, name, info)
 
-Generate folder path for SNN model storage using DrWatson's savename convention.
+Folder in which `SNNsave` stores a model: `joinpath(path, savename(name, info, connector = "-"))`
+(DrWatson `savename`, so the folder name encodes the `info` parameters).
 
 # Arguments
 - `path`: Base directory path
@@ -18,16 +19,10 @@ function SNNfolder(path, name, info)
 end
 
 """
-    SNNfile(type, count)
+    SNNfile(type, count::Int, suffix = "")
 
-Generate filename for SNN data files.
-
-# Arguments
-- `type`: Type of file (:model, :data, etc.)
-- `count`: File counter (0 for base file, >0 for numbered versions)
-
-# Returns
-- Filename string with .jld2 extension
+File name used by `SNNsave`/`SNNload`: `"\$(type)-\$(count)-\$(suffix).jld2"` for `count > 0`,
+`"\$(type)-\$(suffix).jld2"` for `count == 0` (e.g. `"model-.jld2"`, `"data-2-trial.jld2"`).
 """
 function SNNfile(type, count::Int, suffix="")
     count_string = count > 0 ? "-$(count)" : ""
@@ -37,7 +32,8 @@ end
 """
     SNNpath(path, name, info, type, count)
 
-Generate complete file path for SNN data files.
+Full path `joinpath(SNNfolder(path, name, info), SNNfile(type, count))` of a stored file
+(empty suffix).
 
 # Arguments
 - `path`: Base directory path
@@ -54,22 +50,39 @@ function SNNpath(path, name, info, type, count)
 end
 
 """
-    SNNload(; path, name="", info=nothing, count=1, type=:model)
+    SNNload(; path, name = "", info = nothing, count = 0, suffix = "", type = :model)
+    SNNload(path, name = "", info = nothing)
 
-Load SNN model or data from disk.
+Load a file written by `SNNsave`.
+
+If `path` is a file, it is loaded directly. Otherwise the file
+`joinpath(SNNfolder(path, name, info), SNNfile(type, count, suffix))` is loaded.
 
 # Arguments
-- `path::String`: File path or directory
-- `name::String`: Model name (required if path is directory)
-- `info`: NamedTuple with model metadata (required if path is directory)
-- `count::Int`: File version number (default: 1)
-- `type::Symbol`: Type to load (:model or :data, default: :model)
+- `path::String`: file, or base directory used in `SNNsave`.
+- `name::String`, `info`: model name and metadata `NamedTuple` (required if `path` is not a file).
+- `count::Int = 0`: file counter.
+- `suffix = ""`: file suffix.
+- `type::Symbol = :model`: `:model` (records cleared) or `:data` (with records).
 
 # Returns
-- Loaded data as NamedTuple
+- The stored dictionary as a `NamedTuple` (`(model = ..., config = ..., extra keys...)`), or
+  `nothing` (with an `@error` message) if the file does not exist.
 
 # Throws
-- `ArgumentError` if path is directory but name or info is missing
+- `ArgumentError` if `path` is not a file and `name` or `info` is missing.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+@load_units
+E = SNN.IF(N = 10, name = "E")
+model = SNN.compose(; E, silent = true)
+dir = mktempdir()
+SNN.save_model(; model, path = dir, name = "toy", info = (seed = 1,))
+loaded = SNN.load_model(dir, "toy", (seed = 1,))
+loaded.model.pop.E.N   # 10
+```
 """
 function SNNload(;
     path::String,
@@ -115,7 +128,8 @@ SNNload(path::String, name::String = "", info = nothing, kwargs...) =
 """
     load_model(path, name, info; kwargs...)
 
-Load a saved model from disk.
+Load the `:model` file (records cleared) stored by `SNNsave`; same as
+`SNNload(; path, name, info, kwargs..., type = :model)`. Returns `nothing` if the file is missing.
 
 # Arguments
 - `path::String`: Directory path
@@ -132,7 +146,8 @@ load_model(path::String, name::String, info::NamedTuple; kwargs...) =
 """
     load_data(path, name, info; kwargs...)
 
-Load saved data from disk.
+Load the `:data` file (model with its records) stored by `SNNsave`; same as
+`SNNload(; path, name, info, kwargs..., type = :data)`.
 
 # Arguments
 - `path::String`: Directory path  
@@ -150,7 +165,11 @@ load_data(path, name, info) = SNNload(; path, name, info, type = :data, kwargs..
 """
     load_or_run(f; path, name, info, exp_config...)
 
-Load model from disk if available, otherwise run function to generate it.
+Return `load_model(path, name, info)` if that file exists; otherwise call `f(info)`, save the
+result with `save_model` and return it.
+
+Note: before saving, `name` is replaced by `savename(name, info, connector = "-")`, so the file is
+written to a different folder from the one `load_model(path, name, info)` looks in.
 
 # Arguments
 - `f::Function`: Function to run if model doesn't exist (receives `info` as argument)
@@ -178,27 +197,26 @@ end
 
 
 """
-    SNNsave(model; path, name, info, config=nothing, type=:all, count=1, kwargs...)
+    SNNsave(model; path, name, info, suffix = "", config = nothing, type = :all, count = 0, kwargs...)
 
-Save SNN model and/or data to disk.
+Save a model to `SNNfolder(path, name, info)` with JLD2 (through `DrWatson.save`).
 
 # Arguments
-- `model`: The model to save
-- `path`: Base directory path
-- `name`: Model name
-- `info`: NamedTuple with model metadata
-- `config`: Optional configuration to save alongside model
-- `type`: What to save - :all (both model and data), :model (model only), :data (data only)
-- `count`: Version number for the file
-- `kwargs...`: Additional data to save
+- `model`: the model to save.
+- `path`, `name`, `info`: base directory, model name and metadata `NamedTuple`; the folder name is
+  `savename(name, info, connector = "-")`.
+- `suffix = ""`, `count = 0`: file suffix and counter, see `SNNfile`.
+- `config = nothing`: configuration stored with the model and written in `config.jl`.
+- `type = :all`: `:all` writes the `:data` file (model with records) and the `:model` file
+  (a `deepcopy` with `clear_records!` applied); `:model` writes only the `:model` file. Any other
+  value logs an error and saves nothing.
+- `kwargs...`: additional entries stored in the same file.
+
+When `count < 2`, the folder also receives a human-readable `config.jl` written by
+`write_config`, with a timestamp and the git commit hash (`"unknown"` outside a git repository).
 
 # Returns
-- Path to the saved file
-
-# Details
-- When type=:all, saves both model (with cleared records) and full data
-- Creates config.jl file with metadata and git commit hash
-- Model records are cleared before saving to reduce file size
+- The path of the `:model` file.
 """
 function SNNsave(
     model;
@@ -259,9 +277,10 @@ end
 export load, save, load_model, load_data, SNNload, SNNsave, SNNpath, SNNfolder, savename
 
 """
-    save_model(; model, path, name, info, config=nothing, kwargs...)
+    save_model(; model, path, name, info, config = nothing, kwargs...)
 
-Convenience function to save both model and data.
+Save both the `:data` and the `:model` file, i.e. `SNNsave(model; path, name, info, config,
+type = :all, kwargs...)`. See `SNNsave` for the file layout and `load_model`/`load_data`.
 
 # Arguments
 - `model`: The model to save
@@ -288,7 +307,11 @@ save_model
 """
     data2model(; path, name=randstring(10), info=nothing, kwargs...)
 
-Convert data file to model file by clearing records.
+Create the `:model` file (records cleared) from an existing `:data` file.
+
+Note: the paths it checks, `joinpath(path, savename(name, info, "data.jld2"))` and
+`... "model.jld2"`, do not follow the folder layout written by `SNNsave`
+(`SNNfolder(path, name, info)/data-.jld2`).
 
 # Arguments
 - `path`: Directory path
@@ -324,7 +347,8 @@ end
 """
     save_config(; path, name=randstring(10), config, info=nothing)
 
-Save configuration to disk as JLD2 file.
+Save `config` as `joinpath(path, savename(name, info, "config.jld2", connector = "-"))`
+(JLD2, key `"config"`), creating `path` if needed.
 
 # Arguments
 - `path`: Directory path
@@ -349,10 +373,7 @@ end
 """
     get_timestamp()
 
-Get current timestamp.
-
-# Returns
-- Current date and time
+Return the current date and time (`Dates.now()`).
 """
 function get_timestamp()
     return now()
@@ -383,7 +404,7 @@ end
 """
     write_value(file, key, value, indent="", equal_sign="=")
 
-Write a value to a configuration file with proper formatting.
+Write `key = value,` to `file` as Julia source (helper of `write_config`).
 
 # Arguments
 - `file`: IO stream to write to
@@ -393,8 +414,9 @@ Write a value to a configuration file with proper formatting.
 - `equal_sign`: Assignment operator (default: "=")
 
 # Details
-- Recursively handles nested structures
-- Formats different types appropriately (quoted strings, symbols with :, etc.)
+- Recursively handles nested structures; other structs are written as `TypeName(field = ..., ...)`.
+- Formats different types appropriately (quoted strings, symbols with :, ranges as `a:s:b`).
+- In a `Dict`, non-numeric values are written as quoted strings.
 """
 function write_value(file, key, value, indent = "", equal_sign = "=")
     if isa(value, Number)
@@ -452,19 +474,24 @@ end
 """
     write_config(path, info; config, name="", kwargs...)
 
-Write configuration and metadata to a Julia config file.
+Write `info` (and `config` if not `nothing`) as Julia source to a text file, preceded by the
+generation timestamp and the git commit hash (`get_git_commit_hash`, `"unknown"` outside a git
+repository).
 
 # Arguments
-- `path::String`: File path or directory for config file
-- `info`: NamedTuple with model metadata
-- `config`: Configuration to save
-- `name`: Optional name for the config file
-- `kwargs...`: Additional named tuples to save
+- `path::String`: file path; if `name` is given, the file is
+  `joinpath(path, savename(name, info, "config", connector = "-"))` instead.
+- `info`: `NamedTuple` written as `info = (...)`.
+- `config`: `NamedTuple` written as `config = (...)`, or `nothing`.
+- `kwargs...`: accepted and ignored.
+
+# Returns
+- The path of the written file.
 
 # Details
-- Generates timestamped config file with git commit hash
-- Creates human-readable Julia syntax output
-- Skips "study" and "models" fields
+- Entries named `models` are skipped. (The intended skip of `study` is not effective: because of
+  operator precedence, `String(key) == "study" || String(key) == "models" && continue` only skips
+  `models`.)
 """
 function write_config(path::String, info; config, name = "", kwargs...)
     timestamp = get_timestamp()
@@ -513,7 +540,7 @@ end
 """
     print_summary(p)
 
-    Prints a summary of the given element.
+Print the type, parameter type, `name`, `N` and every parameter field of a population `p`.
 """
 function print_summary(p)
     println("Type: $(nameof(typeof(p))) $(nameof(typeof(p.param)))")
@@ -528,14 +555,17 @@ end
 """
     read_folder(path, files=nothing; my_filter=(file,_type)->endswith(file,"type.jld2"), type=:model, name=nothing)
 
-Read all matching files from a folder.
+List the files of the directory `path` for which `my_filter(file, type)` is true (logging
+each match) and append their full paths to `files`.
 
 # Arguments
 - `path`: Directory path to read from
 - `files`: Optional vector to append results to (default: creates new vector)
-- `my_filter`: Filter function (file, type) -> Bool (default: matches .jld2 files)
+- `my_filter`: Filter function `(file, type) -> Bool`; the default matches names ending in
+  `"\$(type).jld2"`, e.g. `model.jld2` (note that `SNNsave` with the default empty suffix writes
+  `model-.jld2`, which the default filter does not match).
 - `type`: File type to match (default: :model)
-- `name`: Optional name filter
+- `name`: accepted and ignored.
 
 # Returns
 - Vector of file paths matching the filter
@@ -564,7 +594,7 @@ end
 """
     read_folder!(df, path; type=:model, name=nothing)
 
-Read matching files from folder and append to existing vector.
+Same as `read_folder(path, df; type, name)`: append the matching file paths to `df`.
 
 # Arguments
 - `df`: Vector to append results to

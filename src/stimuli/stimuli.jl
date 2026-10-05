@@ -1,5 +1,14 @@
 """
     AbstractStimulusParameter <: AbstractParameter
+
+Supertype of all stimulus parameter types. The parameter object stored in the `param`
+field of a stimulus selects, by dispatch, the `stimulate!` method that is called once per
+time step by `sim!` and `train!`, and the generic [`Stimulus`](@ref) constructor that builds
+the stimulus.
+
+Loaded subtypes: `PoissonStimulusParameter` (`PoissonFixed`, `PoissonInterval`,
+`PoissonVariable`), `PoissonLayerParameter` (`PoissonLayer`, `PoissonLayerHet`),
+`CurrentParameter` (`CurrentNoise`), `SpikeTimeStimulusParameter`, `BalancedParameter`.
 """
 abstract type AbstractStimulusParameter <: AbstractParameter end
 
@@ -11,7 +20,25 @@ include("timed.jl")
 include("balanced.jl")
 include("stimulus_group.jl")
 
+"""
+    stimulate!(stim, param, time::Time, dt::Float32)
 
+Advance the stimulus `stim` by one time step. Called by `sim!` and `train!` for every
+stimulus of the model, after the clock has been advanced (`update_time!`) and before the
+populations are integrated. The method is selected by the type of `param` (normally
+`stim.param`). Each stimulus type documents what its `stimulate!` method writes into the
+target population (conductance increments, current values).
+"""
+stimulate!
+
+"""
+    neurons(stim::AbstractStimulus)
+
+Return the indices of the postsynaptic neurons targeted by `stim` (its `neurons` field).
+Stimuli without a `neurons` field (`PoissonStimulusLayer`, `SpikeTimeStimulus`,
+`BalancedStimulus`) return `nothing` with a warning; for those the targets are defined by
+the connectivity matrix or by the whole population.
+"""
 function neurons(stim::G) where {G<:AbstractStimulus}
     if hasfield(typeof(stim), :neurons) 
         return stim.neurons
@@ -21,6 +48,29 @@ function neurons(stim::G) where {G<:AbstractStimulus}
     end
 end
 
+"""
+    set_variable!(stim::AbstractStimulus, var::Symbol, value)
+
+Change a parameter of a stimulus at runtime.
+
+- If `stim.param` has a `variables` dictionary (e.g. `PoissonVariable`), sets
+  `stim.param.variables[var] = value`.
+- Otherwise, if `stim.param` has a field `var`, broadcasts `value` into it in place
+  (`getfield(stim.param, var) .= value`); the field must therefore be mutable (an array,
+  e.g. `active`, `I_base`, `rates`). Scalar fields of immutable parameter structs, such as
+  `PoissonFixed.rate`, cannot be changed this way (the broadcast throws an error).
+- Otherwise a warning is emitted and nothing changes.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 10)
+f(t, v) = v[:r]
+stim = SNN.Stimulus(SNN.PoissonVariable(variables = Dict{Symbol,Any}(:r => 5Hz), rate = f), E, :ge)
+SNN.set_variable!(stim, :r, 20Hz)
+```
+"""
 function set_variable!(stim::G, var::Symbol, value) where {G<:AbstractStimulus}
     if hasfield(typeof(stim), :param) && hasfield(typeof(stim.param), :variables)
         @info "Setting variable $var to $value for stimulus $(stim.name)"
@@ -34,6 +84,13 @@ function set_variable!(stim::G, var::Symbol, value) where {G<:AbstractStimulus}
 end
 
 
+"""
+    set_intervals!(stim::AbstractStimulus, intervals)
+
+Replace the activity intervals of a stimulus whose parameter has an `intervals` field
+(`PoissonInterval`): the vector is emptied and `intervals` (a vector of `[start, end]`
+vectors, in ms) is appended. Warns and does nothing otherwise.
+"""
 function set_intervals!(stim::G, intervals) where {G<:AbstractStimulus}
     if hasfield(typeof(stim), :param) && hasfield(typeof(stim.param), :intervals)
         empty!(stim.param.intervals)
@@ -43,6 +100,17 @@ function set_intervals!(stim::G, intervals) where {G<:AbstractStimulus}
     end
 end 
 
+"""
+    set_active!(stim::AbstractStimulus, active::Bool)
+
+Switch a stimulus on or off by writing `stim.param.active[1] = active`. Warns and does
+nothing if the parameter has no `active` field.
+
+Only the `stimulate!` methods of `PoissonStimulus` (all `PoissonStimulusParameter`s) read
+the flag. `PoissonLayer` and `PoissonLayerHet` have an `active` field but their
+`stimulate!` ignores it (SNNModels 1.8.4), so `set_active!(stim, false)` does not silence a
+`PoissonStimulusLayer`.
+"""
 function set_active!(stim::G, active::Bool) where {G<:AbstractStimulus}
     if hasfield(typeof(stim), :param) && hasfield(typeof(stim.param), :active)
         stim.param.active[1] = active

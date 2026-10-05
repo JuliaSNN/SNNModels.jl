@@ -1,3 +1,10 @@
+"""
+    FLSynapseParameter()
+
+Parameter of `FLSynapse` (no fields). Note: it is not a subtype of
+`AbstractConnectionParameter`, so the generic `forward!(c, param, dt, T)` used by `sim!` and
+`train!` does not apply to it (see the `FLSynapse` docstring).
+"""
 struct FLSynapseParameter end
 
 @snn_kw mutable struct FLSynapse{
@@ -22,8 +29,60 @@ struct FLSynapseParameter end
     records::Dict = Dict()
 end
 
-"""
-[Force Learning Full Receptors](http://www.theswartzfoundation.org/docs/Sussillo-Abbott-Coherent-Patterns-August-2009.pdf)
+@doc raw"""
+    FLSynapse(pre, post; μ = 1.5, p = 0.0, α = 1, kwargs...)
+
+Dense recurrent connection between rate populations trained with FORCE learning
+(recursive least squares on a linear readout fed back into the network).
+
+# Model
+State: recurrent weights ``W`` (`N_post x N_pre`), readout weights ``w``, feedback weights
+``u``, running inverse correlation matrix ``P``, readout ``z`` and target ``f`` (scalar field
+`c.f`, to be set by the user at every step).
+
+`forward!(c, param)`:
+```math
+z = w^\top r^{post}, \qquad q = P\, r^{pre}, \qquad g = W\, r^{pre} + z\, u
+```
+(`g` is overwritten). `plasticity!(c, param, dt, T)`:
+```math
+C = \frac{1}{1 + q^\top r^{post}}, \qquad
+w \leftarrow w + C\,(f - z)\, q, \qquad
+P \leftarrow P - C\, q\, q^\top
+```
+
+# Initialisation
+- ``W_{ij} = \mu\, \xi_{ij} / \sqrt{N_{pre}}``, ``\xi_{ij} \sim \mathcal{N}(0, 1)`` (dense).
+- ``w_i \sim \mathcal{U}(-1, 1) / \sqrt{N_{post}}``, ``u_i \sim \mathcal{U}(-1, 1)``.
+- ``P = \alpha\, \mathbb{1}`` (`N_post x N_post`), ``z \sim 0.5\,\mathcal{N}(0, 1)``, ``f = 0``.
+
+# Keyword arguments
+- `μ = 1.5`: gain of the recurrent weights; `p`: unused (the matrix is dense);
+  `α = 1`: initial value of the diagonal of ``P``; `kwargs...`: forwarded to the struct.
+
+# Notes
+- `pre` and `post` must have a rate field `r`, and `post` a target `:g` (e.g. `Rate`).
+  ``P`` is `N_post x N_post` and multiplies ``r^{pre}``, so the connection only works for
+  `pre.N == post.N` (recurrent use).
+- `FLSynapseParameter` is not a subtype of `AbstractConnectionParameter`; in SNNModels 1.8.4
+  `sim!`/`train!` raise a `MethodError` for this connection (no `forward!(c, param, dt, T)`
+  method). `forward!(c, c.param)` and `plasticity!(c, c.param, dt, T)` can be called
+  directly.
+
+# References
+Sussillo D, Abbott LF (2009). Generating coherent patterns of activity from chaotic neural
+networks. Neuron 63:544-557 (linked in the code).
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+R = SNN.Rate(N = 100)
+F = SNN.FLSynapse(R, R; μ = 1.5, α = 1)
+SNN.SNNModels.forward!(F, F.param)                 # one transmission step
+F.f = 1.0f0                                        # target of the readout
+SNN.SNNModels.plasticity!(F, F.param, 0.125f0, SNN.SNNModels.Time())
+```
 """
 FLSynapse
 
@@ -46,6 +105,12 @@ function FLSynapse(pre, post; μ = 1.5, p = 0.0, α = 1, kwargs...)
     FLSynapse(; @symdict(W, rI, rJ, g, P, q, u, w)..., kwargs..., targets = targets)
 end
 
+"""
+    forward!(c::FLSynapse, param::FLSynapseParameter)
+
+Compute the readout `c.z`, the vector `c.q = P r_pre` and overwrite the target with
+`g = W r_pre + z u`.
+"""
 function forward!(c::FLSynapse, param::FLSynapseParameter)
     @unpack W, rI, rJ, g, P, q, u, w, z = c
     c.z = dot(w, rI)
@@ -55,6 +120,11 @@ function forward!(c::FLSynapse, param::FLSynapseParameter)
     axpy!(c.z, u, g)
 end
 
+"""
+    plasticity!(c::FLSynapse, param::FLSynapseParameter, dt, T)
+
+Recursive-least-squares update of the readout `w` and of `P` (see `FLSynapse`).
+"""
 function plasticity!(c::FLSynapse, param::FLSynapseParameter, dt::Float32, T::Time)
     @unpack rI, P, q, w, f, z = c
     C = 1 / (1 + dot(q, rI))

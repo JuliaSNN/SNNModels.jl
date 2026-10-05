@@ -1,17 +1,39 @@
 """
     AbstractParameter
 
-An abstract type representing a parameter.
+Root of all parameter types (population, connection and stimulus parameters).
+
+Every model object stores its parameter struct in the field `param`; the simulation loop
+dispatches `integrate!`, `forward!` and `stimulate!` on `typeof(obj.param)`. Direct subtypes are
+`AbstractPopulationParameter`, `AbstractConnectionParameter` and `AbstractStimulusParameter`.
 """
 abstract type AbstractParameter end
 
+"""
+    AbstractComponent
+
+Root of all network components: populations (`AbstractPopulation`), connections
+(`AbstractConnection`), stimuli (`AbstractStimulus`), groups of stimuli (`AbstractGroup`) and
+synapse models (`AbstractSynapseParameter`, `AbstractSynapseVariable`).
+"""
 abstract type AbstractComponent end
 
+"""
+    AbstractGroup <: AbstractComponent
+
+Abstract type for containers of components that act as one unit (e.g. `StimulusGroup`).
+"""
 abstract type AbstractGroup <: AbstractComponent end
 """
     Spiketimes
 
-A type alias for a vector of vectors of Float32, representing spike times.
+Type alias for `Vector{Vector{Float32}}`: one vector of spike times (ms) per neuron.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+st = SNN.Spiketimes([[1.0f0, 5.0f0], Float32[]])   # neuron 1 fires at 1 and 5 ms, neuron 2 never
+```
 """
 Spiketimes = Vector{Vector{Float32}}
 
@@ -30,17 +52,24 @@ EmptyParam
 end
 
 """
-    struct Time
-    Time
+    Time(; t = [0.0f0], tt = Int32[0], dt = 0.125f0)
 
-A mutable struct representing time. 
-A mutable struct representing time.
+Mutable simulation clock shared by all components of a model.
+
+The values are stored in one-element vectors so that the clock can be shared and updated in place
+by `update_time!`. Use `get_time`, `get_step`, `get_dt` and `reset_time!` to read or reset it.
 
 # Fields
-- `t::Vector{Float32}`: A vector containing the current time.
-- `tt::Vector{Int}`: A vector containing the current time step.
-- `dt::Float32`: The time step size.
+- `t::Vector{Float32} = [0.0f0]`: current time (ms), `t[1]`.
+- `tt::Vector{Int32} = Int32[0]`: number of integration steps performed, `tt[1]`.
+- `dt::Float32 = 0.125f0`: time step (ms) of the last update.
 
+# Example
+```julia
+using SpikingNeuralNetworks
+T = SNN.Time()
+SNN.get_time(T)   # 0.0f0
+```
 """
 Time
 
@@ -53,17 +82,16 @@ end
 """
     Time(time::Number)
 
-Create a Time struct from a numeric time value.
+Create a clock set at `time` (ms), with `dt = 0.125f0` and step counter `tt = time / 0.125`.
 
-# Arguments
-- `time::Number`: Time value (in ms units typically)
+`time` must be an integer multiple of 0.125 ms, otherwise the conversion `Int32(time / 0.125)`
+throws an `InexactError`.
 
-# Returns
-- Time struct with t, tt, and dt fields initialized
-
-# Details
-- Converts time to timesteps using dt=0.125ms
-- Initializes vectors for current time and timestep
+# Example
+```julia
+using SpikingNeuralNetworks
+T = SNN.Time(100.0)   # t = 100 ms, tt = 800
+```
 """
 function Time(time::Number)
     tts = time / 0.125f0
@@ -79,42 +107,50 @@ export AbstractParameter,
 
 
 """
-    AbstractStimulus
+    AbstractStimulus <: AbstractComponent
 
-An abstract type representing a stimulus. Any struct inheriting from this type must implement:
+Abstract type of external inputs. A concrete stimulus has at least the fields `param`
+(an `AbstractStimulusParameter`), `id`, `name` and `records`, and implements
 
-# Methods
-- `stimulate!(p::Stimulus, param::StimulusParameter, time::Time, dt::Float32)`: Applies the stimulus to the population.
+- `stimulate!(s, param, T::Time, dt::Float32)`: called once per time step, before the populations
+  are integrated, to write the input into the target population variable.
 """
 abstract type AbstractStimulus <: AbstractComponent end
 
 """
-    AbstractStimulusGroup
-An abstract type representing a group of stimuli. Any struct inheriting from this type must implement: 
-# Methods
-- `stimulate!(p::StimulusGroup, param::StimulusParameter, time::Time, dt::Float32)`: Applies the stimulus group to the population.
+    AbstractStimulusGroup <: AbstractGroup
+
+Abstract type of groups of stimuli. When a model is simulated, the `elements` of a group are
+expanded and each element is stimulated as an individual `AbstractStimulus`
+(see `sim!`/`train!`).
 """
 abstract type AbstractStimulusGroup <: AbstractGroup end
 
 """
-    AbstractPopulation
+    AbstractPopulation <: AbstractComponent
 
-An abstract type representing a population. Any struct inheriting from this type must implement:
+Abstract type of neuron populations. A concrete population has at least the fields `N`, `param`
+(an `AbstractPopulationParameter`), `id`, `name` and `records` (checked by
+`validate_population_model`), and implements
 
-# Methods
-- `integrate!(p::NeuronModel, param::NeuronModelParam, dt::Float32)`: Integrates the neuron model over a time step `dt` using the given parameters.
-- `plasticity!(p::NeuronModel, param::NeuronModelParam, dt::Float32, T::Time)`: Updates the neuron model parameters based on plasticity rules.
+- `integrate!(p, param, dt::Float32)`: advance the state by one step `dt` (called by `sim!` and
+  `train!`).
+- optionally `update_traces!(p, param, dt, T)` and `plasticity!(p, param, dt, T)`, called only by
+  `train!` (the defaults do nothing).
 """
 abstract type AbstractPopulation <: AbstractComponent end
 
 """
-    AbstractConnection
+    AbstractConnection <: AbstractComponent
 
-An abstract type representing a connection. Any struct inheriting from this type must implement:
+Abstract type of connections between populations (synapses, metaplasticity operators). A concrete
+connection has at least the fields `param` (an `AbstractConnectionParameter`), `id`, `name` and
+`records` (checked by `validate_synapse_model`), and implements
 
-# Methods
-- `forward!(c::Receptors, param::SynapseParameter)`: Propagates the signal through the synapse.
-- `plasticity!(c::Receptors, param::SynapseParameter, dt::Float32, T::Time)`: Updates the synapse parameters based on plasticity rules.
+- `forward!(c, param, dt::Float32, T::Time)`: propagate presynaptic activity to the postsynaptic
+  target variable; called every step by `sim!` and `train!`, after all populations are integrated.
+- optionally `update_traces!(c, param, dt, T)` and `plasticity!(c, param, dt, T)`, called only by
+  `train!`.
 """
 abstract type AbstractConnection <: AbstractComponent end
 
@@ -124,6 +160,12 @@ Component = Union{AbstractPopulation, AbstractConnection, AbstractStimulus}
 
 
 
+"""
+    NetworkModel
+
+Alias of `NamedTuple`. A network model, as returned by `compose`, is a `NamedTuple` with fields
+`pop`, `syn`, `stim` (each a `NamedTuple` of components), `time::Time` and `name::String`.
+"""
 NetworkModel = NamedTuple
 
 VBT = Vector{Bool}

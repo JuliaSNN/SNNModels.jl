@@ -29,6 +29,19 @@ Dispatches on the fire recording format stored in `p.records[:fire]`:
 - Neurons are indexed `1:p.N` in the output vector; empty inner vectors mean
   the neuron never fired or fired outside the requested interval.
 - The returned `Spiketimes` is always freshly allocated (safe to mutate).
+- In the legacy format fewer than two recorded spike events return empty trains.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+@load_units
+E = SNN.Poisson(N = 10, param = SNN.PoissonParameter(20Hz))
+SNN.monitor!(E, [:fire])
+model = SNN.compose(; E, silent = true)
+sim!(model, 1s)
+st = SNN.spiketimes(E)                          # all spikes
+st2 = SNN.spiketimes(E; interval = (200ms, 500ms))
+```
 """
 function spiketimes(
     p::T;
@@ -130,9 +143,10 @@ function spiketimes(Ps::Vector{T}; kwargs...) where {T<:Union{AbstractPopulation
 end
 
 """
-    spiketimes_split(Ps; kwargs...)
+    spiketimes_split(Ps; kwargs...) -> (Vector{Spiketimes}, Vector{String})
 
-    Return the spiketimes of each population in a vector of Spiketimes.
+Return, for each element of `Ps` that has a `:fire` record, its `spiketimes(p; kwargs...)`,
+together with the vector of the population names. Elements without a `:fire` record are skipped.
 """
 function spiketimes_split(Ps; kwargs...)
     st_ps = Vector{Vector{Vector{Float32}}}()
@@ -148,9 +162,10 @@ end
 
 
 """
-    spikecount(model, Trange, neurons)
+    spikecount(pop::AbstractPopulation, Trange::AbstractVector, neurons::Vector{Int})
 
-    Return the total number of spikes of the neurons in the selected interval
+Total number of spikes emitted by the neurons `neurons` of `pop` in the interval `Trange`
+(open bounds, see `spiketimes`).
 """
 function spikecount(
     pop::T,
@@ -176,10 +191,11 @@ export spikecount
 # Θ(x::Float32) = x > 0.0 ? x : 0.0
 
 
-"""
-    alpha_function(t::T; t0::T, τ::T) where T <: AbstractFloat
+@doc raw"""
+    alpha_function(t::Float32, τ::Float32)
 
-    Alpha function for convolution of spiketimes. Evaluate the alpha function at time t, with time of peak t0 and time constant τ.
+Alpha function ``\alpha(t) = (t/\tau)\,e^{1 - t/\tau}`` for ``t \ge 0`` and ``0`` otherwise
+(peak value 1 at ``t = \tau``). Used by `alpha_kernel`.
 """
 function alpha_function(t::Float32, τ::Float32)
     if t >= 0
@@ -189,6 +205,13 @@ function alpha_function(t::Float32, τ::Float32)
     end
 end
 
+"""
+    alpha_kernel(; τ = 25ms, interval, kwargs...)
+
+Causal alpha-function kernel sampled with the step of `interval` on `0:step(interval):10τ`, and
+normalised so that `sum(kernel) * step(interval) == 1` (unit area, in 1/ms). Default kernel of
+`firing_rate`.
+"""
 function alpha_kernel(;τ=25ms, interval, kwargs...)
     kernel_length = τ * 10  # Length of the kernel in ms
     bin_width = step(interval) # kernel window in ms
@@ -199,18 +222,17 @@ function alpha_kernel(;τ=25ms, interval, kwargs...)
     return alpha_kernel
 end
 """
-    merge_spiketimes(spikes::Vector{Spiketimes}; start::Float32=0.0f0)
+    merge_spiketimes(spikes::Vector{Spiketimes}; start::Float32 = 0.0f0) -> Spiketimes
+    merge_spiketimes(spikes::Spiketimes) -> Vector{Float32}
 
-    Merge spiketimes from different simulations. 
-    This function is not thread safe, it is not recommended to use it in parallel.
-    Parameters
-    ----------
-    spikes: Vector{Spiketimes}
-        Vector of spiketimes from different simulations
-    Return
-    ------
-    neurons: Spiketimes
-        Single vector of spiketimes 
+Merge the spike trains of several simulations of the same network, neuron by neuron.
+
+With `start > 0`, the spikes of the `k`-th element are shifted by `start * (k - 1)` **in place**
+(the input is modified) before merging, so that consecutive simulations are placed one after the
+other. The result is sorted per neuron. The neurons are split over `Threads.nthreads()` tasks;
+the function is not meant to be called from several threads at once.
+
+The `Spiketimes` method returns all spikes of all neurons in one sorted vector.
 """
 function merge_spiketimes(spikes::Vector{Spiketimes}; start::Float32=0.0f0)
     if start > 0.0f0
@@ -258,16 +280,25 @@ end
 """
     firing_rate(spiketimes::Spiketimes; interval, kwargs...) -> (rates, interval)
 
-Estimate per-neuron instantaneous firing rates from a `Spiketimes` object by
-convolving each spike train with a kernel. Returns `(rates, interval)`.
+    firing_rate(p::Union{AbstractPopulation,AbstractStimulus}; kwargs...)
+    firing_rate(P, interval::AbstractRange; kwargs...)
+    firing_rate(populations; mean_pop = false, kwargs...) -> (rates_per_pop, interval, names)
 
-`interval` must be an `AbstractRange` in milliseconds (e.g. `0:1ms:500ms`). It
-sets the time grid for binning and convolution. Omitting `interval` is only valid
-when `time_average=true`; in all other cases an error will be thrown.
+Estimate per-neuron instantaneous firing rates (Hz) from a `Spiketimes` object by
+convolving each binned spike train (bin = `step(interval)`) with a kernel of unit area,
+then multiplying by `1s`. Returns `(rates, interval)`.
+
+`interval` should be an `AbstractRange` in milliseconds (e.g. `0:1ms:500ms`). It
+sets the time grid for binning and convolution. If it is omitted, it is built as
+`tt0:sampling:ttf` with the keyword arguments `sampling = 20ms`, `tt0 = 0` and `ttf` = last spike
+time.
+
+A population (or stimulus) is converted with `spiketimes` first. The method for a collection
+of populations (e.g. `model.pop`) applies `spiketimes_split` and returns one rate object per
+population with a `:fire` record (`mean_pop = true` averages each over its neurons).
 
 # Keyword arguments
-- `interval`: time grid in ms, e.g. `0f0:1f0:1000f0`. Required unless
-  `time_average=true`.
+- `interval`: time grid in ms, e.g. `0f0:1f0:1000f0`.
 - `kernel`: kernel function called as `kernel(; interval, kwargs...)` returning a
   `Vector` of weights. Default: `alpha_kernel` (causal alpha function, controlled
   by the `τ` kwarg, default `τ=25ms`).
@@ -280,7 +311,8 @@ when `time_average=true`; in all other cases an error will be thrown.
 - `pop_average` (`false`): if `true`, averages over neurons (dim 1) and returns a
   plain `Vector` of length `length(interval)` regardless of `interpolate`.
 - `time_average` (`false`): if `true`, skips convolution entirely and returns the
-  mean firing rate per neuron (in Hz) over `interval` as a `Vector{Float32}`.
+  mean firing rate per neuron (in Hz) over `interval` as a `Vector{Float32}`
+  (spikes with `first(interval) < t <= last(interval)`; the `neurons` selection is not applied).
   Setting both `time_average` and `pop_average` collapses to a single scalar.
 
 # Return types summary
@@ -295,13 +327,16 @@ when `time_average=true`; in all other cases an error will be thrown.
 
 # Example
 ```julia
-st = spiketimes(model.pop.exc)
-fr, r = firing_rate(st; interval = 0:1ms:2s, τ = 50ms)
-# evaluate neuron 3 at t = 500ms:
-fr(3, 500f0)
-
-# population-averaged rate trace:
-fr_avg, r = firing_rate(st; interval = 0:1ms:2s, pop_average = true)
+using SpikingNeuralNetworks
+@load_units
+E = SNN.Poisson(N = 10, param = SNN.PoissonParameter(20Hz))
+SNN.monitor!(E, [:fire])
+sim!(SNN.compose(; E, silent = true), 2s)
+st = SNN.spiketimes(E)
+fr, r = SNN.firing_rate(st; interval = 0:1ms:2s, τ = 50ms)
+fr(3, 500f0)                                   # neuron 3 at t = 500 ms
+fr_avg, r = SNN.firing_rate(st; interval = 0:1ms:2s, pop_average = true)
+mean_rates, _ = SNN.firing_rate(E; interval = 0:1ms:2s, time_average = true)
 ```
 """
 function firing_rate(
@@ -411,6 +446,17 @@ function firing_rate(populations; mean_pop = false, kwargs...)
     return fr_pop, interval, names_pop
 end
 
+"""
+    average_firing_rate(spiketimes::Spiketimes; interval = [])
+    average_firing_rate(populations; interval)
+
+`Spiketimes` method: per-neuron time average of the convolved rate returned by
+`firing_rate(spiketimes; interval, interpolate = false)` (Hz).
+
+The `populations` method is meant to return the histogram of all spike times over `interval`
+and the left bin edges, but it fails with an `UndefVarError` in SNNModels 1.8.4 (the local
+variable `spiketimes` shadows the function it calls).
+"""
 function average_firing_rate(
     spiketimes::Spiketimes;
     interval::AbstractVector = [],
@@ -430,19 +476,15 @@ function average_firing_rate(populations; interval)
 end
 
 """
-    autocor(spiketimes::Spiketimes; interval = 0:1:1000)
+    compute_cross_correlogram(spike_times1::Vector{Float32}, spike_times2 = Float32[];
+                              bin_width = 1ms, max_lag = 100.0, shift_predictor = false)
 
-Calculate the cross-correlation of two spike trains.
+Intended to return `(lags, corr)`: the cross-correlogram (`DSP.xcorr`) of the binned spike
+trains of two neurons (or the autocorrelogram if `spike_times2` is empty) for lags up to
+`max_lag` ms. With `shift_predictor = true` the second train is shifted by 1000 ms.
 
-# Arguments
-- `spike_times1`: A vector of spike times for the first neuron.
-- `spike_times2`: A vector of spike times for the second neuron.
-- `bin_width`: The width of the time bins in milliseconds.
-- `max_lag`: The maximum time lag in milliseconds.
-
-# Returns
-- `lags`: The time lags in milliseconds.
-- `auto_corr`: The auto-correlation for each time lag.
+Not functional in SNNModels 1.8.4: it calls `bin_spiketimes` without the required `interval`
+keyword, and the autocorrelation branch refers to an undefined variable `auto_corr`.
 """
 function compute_cross_correlogram(
     spike_times1::Vector{Float32},
@@ -481,21 +523,17 @@ function compute_cross_correlogram(
     return lags, _corr
 end
 
-"""
-    compute_covariance_density(t_post, t_pre, T; τ=200ms, sr=50Hz)
+@doc raw"""
+    compute_covariance_density(spike_times1::Vector{Float32}, spike_times2::Vector{Float32};
+                               bin_width = 1ms, max_lag = 200ms)
 
-Compute the covariance density of spike trains `t_post` and `t_pre` over a time interval `T`.
-The function returns the covariance density vectors for positive and negative time lags.
+Intended to return `(lags, C)` with the covariance density
+``C(\tau) = \mathrm{xcorr}(\tau) - \lambda_x \lambda_y\,\Delta\,n_{bins}`` (cross-correlogram
+minus its value for independent trains with rates ``\lambda_x, \lambda_y``; ``\Delta`` =
+`bin_width`).
 
-# Arguments
-- `spike_times1`:: Vector{Float32}: A vector of spike times for the first neuron.
-- `spike_times2`:: Vector{Float32}: A vector of spike times for the second neuron.
-- `bin_width`:: Float32: The width of the time bins in milliseconds.
-- `max_lag`:: Float32: The maximum time lag in milliseconds.
-
-# Returns
-- `lags`:: Vector{Float32}: The time lags in milliseconds.
-- `covariance_density`:: Vector{Float32}: The covariance density for each time lag.
+Not functional in SNNModels 1.8.4, because it relies on `compute_cross_correlogram` and on
+`bin_spiketimes` called without the required `interval` keyword.
 """
 function compute_covariance_density(
     spike_times1::Vector{Float32},
@@ -521,21 +559,31 @@ end
 
 
 """
-    bin_spiketimes(spiketimes, interval, sr)
+    bin_spiketimes(spike_times::Vector{Float32}; interval::AbstractRange, do_sparse = true)
+    bin_spiketimes(spiketimes::Spiketimes; interval, do_sparse = true)
+    bin_spiketimes(p::Union{AbstractPopulation,AbstractStimulus}; kwargs...)
+    bin_spiketimes(P, interval::AbstractRange; kwargs...)
+    bin_spiketimes(populations::NamedTuple; interval = nothing, do_sparse = true)
 
-Given a list of spike times `spiketimes`, an interval `[start, end]`, and a sampling rate `sr`,
-this function counts the number of spikes that fall within each time bin of width `1/sr` within the interval.
-The function returns a sparse matrix `count` containing the spike counts for each bin, and an array `r`
-containing the time points corresponding to the center of each bin.
-
-# Arguments
-- `spiketimes`: A 1-dimensional array of spike times.
-- `interval`: A 2-element array specifying the start and end times of the interval.
-- `sr`: The sampling rate, i.e., the number of time bins per second.
+Count spikes in the bins of `interval` (bin width `step(interval)`, one bin per element of
+`interval`; bin `k` covers `[first(interval) + (k-1)Δ, first(interval) + kΔ)`). Spikes at or
+before `first(interval)` are ignored.
 
 # Returns
-- `count`: A sparse matrix containing the spike counts for each time bin.
-- `r`: An array of time points corresponding to the center of each time bin.
+- One train: `(counts, interval)` with `counts` a `SparseVector` (`do_sparse = true`) or a dense
+  `Vector{Float64}` of length `length(interval)`.
+- `Spiketimes` or a population: `(counts::Matrix{Float64}, interval)` of size
+  `(N_neurons, length(interval))`.
+- `NamedTuple` of populations: `(counts_per_population, interval, names)`, via
+  `spiketimes_split`.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+@load_units
+st = SNN.Spiketimes([[1.5f0, 2.2f0, 7.0f0], Float32[3.0]])
+counts, r = SNN.bin_spiketimes(st; interval = 0:1ms:10ms)   # 2 x 11 matrix
+```
 """
 function bin_spiketimes(
     spike_times::Vector{Float32};
@@ -580,6 +628,11 @@ function bin_spiketimes(populations::NamedTuple; interval=nothing, do_sparse = t
     return ss, interval, names_pop
 end
 
+"""
+    shift_spikes!(spiketimes::Spiketimes, delay::Number)
+
+Add `delay` (ms) to every spike time, in place.
+"""
 function shift_spikes!(spiketimes::Spiketimes, delay::Number)
     for n in eachindex(spiketimes)
         spiketimes[n] .+= delay
@@ -587,7 +640,13 @@ function shift_spikes!(spiketimes::Spiketimes, delay::Number)
 end
 
 
+"""
+    isi(spiketimes::Spiketimes) -> Vector{Vector{Float32}}
+    isi(spiketimes::Vector{Float32}) -> Vector{Float32}
+    isi(pop::AbstractPopulation; interval = nothing)
 
+Inter-spike intervals (ms), i.e. `diff` of each (sorted) spike train.
+"""
 function isi(spiketimes::Spiketimes)
     return diff.(spiketimes)
 end
@@ -610,14 +669,10 @@ function CV(spikes::Spiketimes)
 end
 
 """
-spikes_in_interval(spiketimes::Spiketimes, interval::AbstractRange)
+    spikes_in_interval(spiketimes::Spiketimes, interval, margin = [0, 0]; collapse = false) -> Spiketimes
 
-Return the spiketimes in the selected interval
-
-# Arguments
-spiketimes::Spiketimes: Vector with each neuron spiketime
-interval: 2 dimensional array with the start and end of the interval
-
+Copy of the spikes with `interval[1] + margin[1] < t <= interval[end] + margin[2]` (spike
+trains must be sorted). `collapse` is accepted and ignored.
 """
 function spikes_in_interval(
     spiketimes::Spiketimes,
@@ -637,7 +692,13 @@ function spikes_in_interval(
 end
 
 
+"""
+    spikes_in_intervals(spiketimes::Spiketimes, intervals::Vector{Vector{R}}; margin = [0, 0], floor = true)
 
+Apply `spikes_in_interval` to each interval (in parallel with `tmap`) and return a
+`Vector{Spiketimes}`. With `floor = true` the spikes of each interval are expressed relative to
+the interval start (`interval_standard_spikes!`).
+"""
 function spikes_in_intervals(
     spiketimes::Spiketimes,
     intervals::Vector{Vector{R}};
@@ -651,6 +712,12 @@ function spikes_in_intervals(
     return st
 end
 
+"""
+    find_interval_indices(intervals::AbstractVector, interval::Vector)
+
+Index range `x1:x2` of the vector of times `intervals`, with `x1` (`x2`) the first index with
+value `>= interval[1]` (`>= interval[2]`).
+"""
 function find_interval_indices(
     intervals::AbstractVector{T},
     interval::Vector{T},
@@ -662,15 +729,22 @@ end
 
 
 """
-    interval_standard_spikes(spiketimes, interval)
+    interval_standard_spikes(spiketimes::Spiketimes, interval::Vector; margin = [0, 0])
 
-Standardize the spiketimes to the interval [0, interval_duration].
-Return a copy of the 'Spiketimes' vector. 
+Express spike times relative to the interval start: subtract `interval[1] + margin[1]` from every
+spike. Works on a copy; see `interval_standard_spikes!` for the in-place version.
 """
 function interval_standard_spikes(spiketimes::Spiketimes, interval::Vector{R}; margin = [0, 0]) where {R<:Real}
     interval_standard_spikes!(deepcopy(spiketimes), interval; margin)
 end
 
+"""
+    interval_standard_spikes!(spiketimes, interval::Vector; margin = [0, 0])
+    interval_standard_spikes!(spiketimes::Vector{Spiketimes}, intervals::Vector{Vector}; margin = [0, 0])
+
+In-place version of `interval_standard_spikes`: subtract `interval[1] + margin[1]` from every
+spike time; for a `Vector{Spiketimes}`, element `i` is shifted by `intervals[i]`.
+"""
 function interval_standard_spikes!(
     spiketimes::Vector{Spiketimes},
     intervals::Vector{Vector{R}};
@@ -711,7 +785,7 @@ end
 #     return smoothed_signal, xvals
 # end
 """
-    gaussian_smooth(xs, x, sigma; skewed=:none) -> Vector
+    gaussian_smooth(xs, x, σ; skewed = :none) -> Vector
 
 Apply a normalized Gaussian kernel to signal `x` sampled on grid `xs`.
 Kernel half-width is `3σ` (truncated); boundary bins are renormalized by
@@ -765,11 +839,23 @@ end
 
 
 
-"""
-    ISI_CV2(spiketimes::Vector{Float32})
+@doc raw"""
+    ISI_CV2(spiketime::Vector{Float32}; interval = nothing)
+    ISI_CV2(spiketimes::Spiketimes; interval = nothing)
+    ISI_CV2(pop::AbstractPopulation; interval = nothing)
 
-    Return the local coefficient of variation of the interspike intervals
-    Holt, G. R., Softky, W. R., Koch, C., & Douglas, R. J. (1996). Comparison of discharge variability in vitro and in vivo in cat visual cortex neurons. Journal of Neurophysiology, 75(5), 1806–1814. https://doi.org/10.1152/jn.1996.75.5.1806
+Local coefficient of variation of the inter-spike intervals,
+```math
+CV_2 = \left\langle \frac{2\,|I_{i+1} - I_i|}{I_{i+1} + I_i} \right\rangle_i ,
+```
+averaged over consecutive ISI pairs of one train (0 if undefined, e.g. fewer than three
+spikes). The `Spiketimes` method returns one value per neuron; the population method first
+restricts the spikes to `interval`, the other methods ignore `interval`.
+
+# References
+Holt, G. R., Softky, W. R., Koch, C., & Douglas, R. J. (1996). Comparison of discharge
+variability in vitro and in vivo in cat visual cortex neurons. Journal of Neurophysiology,
+75(5), 1806–1814. https://doi.org/10.1152/jn.1996.75.5.1806
 """
 function ISI_CV2(spiketime::Vector{Float32}; interval=nothing)
     ISI = diff(spiketime)
@@ -800,6 +886,19 @@ export ISI_CV2
 
 ##
 
+@doc raw"""
+    ISI_CV(spiketime::Vector{Float32}; interval = nothing)
+    ISI_CV(spiketimes::Spiketimes; interval = nothing)
+
+Coefficient of variation of the inter-spike intervals, ``CV = \sigma_{ISI} / \mu_{ISI}``
+(0 if undefined). The `Spiketimes` method returns one value per neuron; `interval` is ignored.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.ISI_CV(Float32[0, 10, 20, 30])   # 0.0 (regular train)
+```
+"""
 function ISI_CV(spiketime::Vector{Float32}; interval=nothing)
     ISI = diff(spiketime)
     cv = sqrt(var(ISI) / mean(ISI)^2)
@@ -813,11 +912,29 @@ end
 export ISI_CV
 
 """
-    FanoFactor(spiketimes::Vector{Float32}; window=100ms)
+    FanoFactor(spiketime::Vector{Float32}; interval::AbstractRange)
+    FanoFactor(spiketimes::Spiketimes; interval::AbstractRange)
+    FanoFactor(pop::AbstractPopulation; interval)
 
-    Return the Fano Factor of the spike train
-    Softky, W. R., & Koch, C. (1993). The highly irregular firing of cortical cells is inconsistent with temporal integration of random EPSPs. Journal of Neuroscience, 13(1), 334–350. https://doi.org/10.1523/JNEUROSCI.13-01-00334.1993  
+Fano factor `var(counts) / mean(counts)` of the spike counts in the bins of `interval`
+(see `bin_spiketimes`; the bin width is `step(interval)`), 0 if undefined. The `Spiketimes` and
+population methods return one value per neuron.
 
+`interval` must be an `AbstractRange`: the default `nothing` (and the tuple built by the
+population method when `interval = nothing`) is rejected by `bin_spiketimes`.
+
+# References
+Softky, W. R., & Koch, C. (1993). The highly irregular firing of cortical cells is inconsistent
+with temporal integration of random EPSPs. Journal of Neuroscience, 13(1), 334–350.
+https://doi.org/10.1523/JNEUROSCI.13-01-00334.1993
+
+# Example
+```julia
+using SpikingNeuralNetworks
+@load_units
+st = SNN.Spiketimes([Float32.(sort(rand(50) .* 1000))])
+SNN.FanoFactor(st; interval = 0:100ms:1s)
+```
 """
 function FanoFactor(spiketime::Vector{Float32}; interval=nothing)
     bins, r = bin_spiketimes(spiketime; interval) 
@@ -839,7 +956,15 @@ end
 export FanoFactor
 
 """
-    st_order(spiketimes::Spiketimes)
+    st_order(spiketimes::Vector)
+    st_order(spiketimes::Spiketimes, pop::Vector{Int}, intervals)
+    st_order(spiketimes::Spiketimes, populations::Vector{Vector{Int}}, intervals, unique_pop = false)
+
+Indices that sort the elements of `spiketimes` (`sort(eachindex(spiketimes), by = x -> spiketimes[x])`;
+for a `Spiketimes`, trains are compared lexicographically, i.e. by first spike).
+
+The methods with `pop`/`populations` call `spike_statistics`, which is not defined in
+SNNModels 1.8.4, and therefore throw an `UndefVarError`.
 """
 function st_order(spiketimes::T) where {T<:Vector{}}
     ii = sort(eachindex(1:length(spiketimes)), by = x -> spiketimes[x])
@@ -862,9 +987,10 @@ function st_order(
 end
 
 """
-    relative_time(spiketimes::Spiketimes, start_time)
+    relative_time!(spiketimes::Spiketimes, start_time)
 
-Return the spiketimes relative to the start_time of the interval
+Subtract `start_time` from every spike time (the vectors are replaced in place) and return
+`spiketimes`.
 """
 function relative_time!(spiketimes::Spiketimes, start_time)
     neurons = 1:length(spiketimes)
@@ -876,26 +1002,7 @@ end
 
 
 
-"""
-    firing_rate(P, τ; dt=0.1ms)
-
-Calculate the firing rate of neurons.
-
-# Arguments
-- `P`: A struct or object containing neuron information, including records of when each neuron fires.
-- `τ`: The time window over which to calculate the firing rate.
-
-# Keywords
-- `dt`: The time step for calculation (default is 0.1 ms).
-
-# Returns
-A 2D array with firing rates. Each row corresponds to a neuron and each column to a time point.
-
-# Note
-This function assumes that the firing records in `P` are stored as columns corresponding to different time points. 
-The result is normalized by `(dt/1000)` to account for the fact that `dt` is typically in milliseconds.
-
-"""
+# Legacy rolling-window firing rate (disabled):
 # function firing_rate(P, τ; dt = 0.1ms)
 #     spikes = hcat(P.records[:fire]...)
 #     time_span = round(Int, size(spikes, 2) * dt)
@@ -910,6 +1017,12 @@ The result is normalized by `(dt/1000)` to account for the fact that `dt` is typ
 #     return rates
 # end
 
+"""
+    resample_spikes(X, Y)
+
+If there are more than 200 000 points, return a random subsample (without replacement) of
+200 000 pairs `(X[i], Y[i])` and warn; otherwise return `(X, Y)`. Used for raster plots.
+"""
 function resample_spikes(X, Y)
     if length(X) > 200_000
         s = ceil(Int, length(X) / 200_000)
@@ -954,21 +1067,22 @@ end
 
 
 """
-    sample_spikes(N, rate::Vector, interval::R; dt=0.125f0) where {R <: AbstractRange}
+    sample_spikes(N, rate::Vector, interval::AbstractRange; rate_factor = 1.0f0, dt = 0.125f0) -> Vector{Vector{Float32}}
 
-Generate sample spike times for N neurons from a rate vector.
-The function generates spike times for each neuron based on the rate vector and the time interval. The spike times are generated such that during the interval of the rate, the number of spikes is Poisson distributed with the rate.
+Draw spike trains for `N` independent neurons from a time-varying rate (Bernoulli
+approximation of an inhomogeneous Poisson process).
 
-# Arguments
-- `N`: The number of neurons.
-- `rate::Vector`: The vector with the rate to be sampled.
-- `interval::R`: The time interval over which the rate is recorded.
-- `dt=0.125f0`: The time step size.
+`rate[i]` is the rate in Hz (a plain number, multiplied by `Hz` internally) during the `i`-th
+step of `interval`; each step of `interval` is divided in `step(interval) / dt` sub-steps, and in
+every sub-step each neuron spikes with probability `rate[i] * Hz * dt * rate_factor`. Spike times
+start at `first(interval) + dt`. `length(rate) == length(interval)` is required.
 
-
-# Returns
-An array of spike times for each neuron.
-
+# Example
+```julia
+using SpikingNeuralNetworks
+@load_units
+st = SNN.sample_spikes(5, fill(10.0, 100), 0:10ms:990ms)   # 5 neurons at 10 Hz for 1 s
+```
 """
 function sample_spikes(
     N,
@@ -995,6 +1109,13 @@ function sample_spikes(
     spiketimes
 end
 
+"""
+    infer_spikes(n_spikes::Vector{<:Integer}, interval::AbstractRange; dt = 0.125f0)
+
+Place exactly `n_spikes[i]` spikes, at distinct random sub-steps of size `dt`, inside the `i`-th
+bin of `interval` (`(interval[i], interval[i] + step(interval)]`). Returns a one-element
+`Vector{Vector{Float32}}`.
+"""
 function infer_spikes(
     n_spikes::Vector{In},
     interval::R;
@@ -1017,6 +1138,12 @@ function infer_spikes(
     spiketimes
 end
 
+"""
+    infer_spiketimes(rate::Matrix{<:Integer}, interval::AbstractRange; dt = 0.125f0, seed = nothing)
+
+Apply `infer_spikes` to each row of the spike-count matrix `rate` (rows = neurons, columns = bins
+of `interval`) and return one spike train per row. `seed` seeds the global RNG.
+"""
 function infer_spiketimes(
     rate::Matrix{In},
     interval::R;
@@ -1033,6 +1160,21 @@ function infer_spiketimes(
     inputs
 end
 
+"""
+    sample_inputs(N, rate::Matrix{<:Integer}, interval; dt = 0.125f0, rate_factor = 1.0f0, seed = nothing)
+    sample_inputs(N, rate::Matrix{<:Real}, interval; dt = 0.125f0, rate_factor = 1.0f0, seed = nothing)
+    sample_inputs(N, spikes::BitMatrix, interval; rate_factor, dt = 0.125f0, seed = nothing)
+
+Build input spike trains from a matrix sampled on `interval` (columns = time bins):
+
+- integer matrix: spike counts per bin, converted with `infer_spikes` (one train per row; `N`
+  and `rate_factor` are ignored);
+- real matrix: rates in Hz, converted with `sample_spikes(N, row, interval)` (`N` trains per row,
+  concatenated);
+- `BitMatrix`: spike indicators; each row gives the train `interval[findall(row)]`.
+
+`seed` seeds the global RNG. Returns a `Vector{Vector{Float32}}`.
+"""
 function sample_inputs(
     N::Int, 
     rate::Matrix{In},

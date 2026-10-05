@@ -1,10 +1,28 @@
 """
-    Abstract type for turnover parameters.
+    TurnoverParam <: MetaPlasticityParameter
+
+Abstract type of the structural-turnover rules used by `Turnover`: `RandomTurnover` and
+`ActivityDependentTurnover`.
 """
 abstract type TurnoverParam <: MetaPlasticityParameter end
 
-"""
-    RandomTurnover{FT = Float32} <: TurnoverParam
+@doc raw"""
+    RandomTurnover(; rate = -1.0f0, τ = 1 / rate, threshold = 0.1f0, μ = 3.0f0)
+
+Parameters of random structural turnover (intended: every `τ`, a random subset of synapses
+is moved to new, randomly chosen postsynaptic targets).
+
+# Fields
+- `rate::Float32 = -1`: turnover rate (1/ms); only used to compute the default `τ`.
+- `τ::Float32 = 1 / rate`: interval between turnover events (ms).
+- `threshold::Float32 = 0.1`: intended fraction of rewired synapses; unused by the code.
+- `μ::Float32 = 3.0`: mean of the new weights, drawn from ``\mathcal{N}(\mu, \sqrt{\mu})``.
+
+# Status in SNNModels 1.8.4
+No `plasticity!(c::Turnover, ::RandomTurnover, dt, T)` method exists, so `train!` raises a
+`MethodError` for a `Turnover` with this parameter. Calling
+`plasticity!(c, c.param)` directly runs `synaptic_turnover!` with `p_rewire = c.p_rewire[1]`
+(0 unless set by the user) and fresh uniform `p_values`.
 """
 RandomTurnover
 
@@ -15,8 +33,23 @@ RandomTurnover
     μ::FT = 3.0f0
 end
 
-"""
-    ActivityDependentTurnover{VFT <: Vector{Float32}} <: TurnoverParam
+@doc raw"""
+    ActivityDependentTurnover(; rate = -1, τ = 1 / rate, fraction = 0.1f0,
+                              τpre = 250ms, τpost = 250ms, μ = 3.0f0)
+
+Parameters of activity-dependent structural turnover: every `τ`, the `fraction` of
+synapses with the lowest pre/post co-activity are moved to new postsynaptic targets.
+
+# Fields
+- `rate = -1`: turnover rate (1/ms); only used for the default `τ`. Pass `rate` or `τ`.
+- `τ = 1 / rate`: interval between turnover events (ms).
+- `fraction::Float32 = 0.1`: quantile of co-activity below which synapses are rewired.
+- `τpre::Float32 = 250ms`, `τpost::Float32 = 250ms`: time constants of the pre- and
+  postsynaptic activity traces (ms).
+- `μ::Float32 = 3.0`: mean of the new weights, ``\mathcal{N}(\mu, \sqrt{\mu})``.
+
+The element type `FT` is inferred from the arguments (no default), so give `rate`/`τ` as
+`Float32` values for a `Float32` struct.
 """
 ActivityDependentTurnover
 
@@ -29,6 +62,51 @@ ActivityDependentTurnover
     μ::FT = 3.0f0
 end
 
+
+@doc raw"""
+    Turnover{VFT, MFT, ST} <: AbstractMetaPlasticity
+
+Structural turnover acting on one `SpikingSynapse` (`synapse`). Built with
+`MetaPlasticity(param::TurnoverParam, synapse)` and added to the model as a connection; it
+transmits nothing (`forward!` is a no-op), its `plasticity!` runs only under `train!`.
+
+# Update (`ActivityDependentTurnover`)
+At every `train!` step the presynaptic and postsynaptic traces are updated as
+```math
+a^{pre}_j \leftarrow a^{pre}_j + \frac{-a^{pre}_j\,dt + \delta_j}{\tau_{pre}}, \qquad
+a^{post}_i \leftarrow a^{post}_i + \frac{-a^{post}_i\,dt + \delta_i}{\tau_{post}}
+```
+(``\delta = 1`` for a spike in this step). Every `round(Int, τ / dt)` steps:
+1. ``p_s = a^{pre}_{j(s)}\, a^{post}_{i(s)}`` for every synapse ``s``;
+2. `p_rewire` = the `fraction`-quantile of ``p``;
+3. `synaptic_turnover!` moves every synapse with ``p_s \le`` `p_rewire` to a new
+   postsynaptic neuron, chosen without replacement among the neurons not yet targeted by the
+   same presynaptic neuron (uniform weights `p[post, pre] = 1`), and draws its weight from
+   ``\mathcal{N}(\mu, \sqrt{\mu})``; the sparse structure is then rebuilt.
+
+# Fields
+- `param::TurnoverParam`; `synapse`: the rewired connection.
+- `pre`, `post::Vector{Float32}`: activity traces.
+- `p::Matrix{Float32}`: `N_post x N_pre` sampling weights of new targets (all ones).
+- `p_rewire::Vector{Float32}`: current rewiring threshold (1 element).
+- `p_values::Vector{Float32}`: co-activity of every synapse.
+- `id`, `name = "Turnover"`, `targets`, `records`.
+
+# References
+Reference not given in the code.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 100)
+EE = SNN.SpikingSynapse(E, E, :ge; conn = (p = 0.2, μ = 2.0))
+TO = SNN.MetaPlasticity(SNN.ActivityDependentTurnover(τ = 50.0f0ms), EE)
+model = SNN.compose(; E, EE, TO)
+SNN.train!(model; duration = 100ms)
+```
+"""
+Turnover
 
 @snn_kw struct Turnover{
     VFT = Vector{Float32},
@@ -49,6 +127,11 @@ end
 end
 
 
+"""
+    MetaPlasticity(param::TurnoverParam, synapse; kwargs...)
+
+Build a `Turnover` acting on `synapse`.
+"""
 function MetaPlasticity(param::T, synapse; kwargs...) where {T<:TurnoverParam}
     targets = Dict(:synapses => [synapse.id], :post => synapse.targets[:post])
     Turnover(; param, kwargs..., synapse, targets)
@@ -56,6 +139,12 @@ end
 
 function forward!(c::Turnover, param::T) where {T<:TurnoverParam} end
 
+"""
+    plasticity!(c::Turnover, param::ActivityDependentTurnover, dt::Float32, T::Time)
+
+Update the activity traces and, every `round(Int, τ / dt)` steps, rewire the least
+co-active synapses (see `Turnover`). Called only by `train!`.
+"""
 function plasticity!(c::Turnover, param::ActivityDependentTurnover, dt::Float32, T::Time)
     @unpack synapse, p, pre, post, p_values = c
     @unpack fraction, μ, τpre, τpost = param
@@ -85,6 +174,12 @@ function plasticity!(c::Turnover, param::ActivityDependentTurnover, dt::Float32,
     end
 end
 
+"""
+    plasticity!(c::Turnover, param::TurnoverParam)
+
+Run `synaptic_turnover!` on `c.synapse` with the current `c.p_rewire[1]`, `c.p_values` and
+`param.μ`.
+"""
 function plasticity!(c::Turnover, param::TT) where {TT<:TurnoverParam}
     @unpack synapse, p = c
     @unpack μ = param
@@ -101,27 +196,30 @@ end
 export TurnoverParam, RandomTurnover, ActivityDependentTurnover, Turnover, MetaPlasticity
 
 
-"""
-    synaptic_turnover!(C::SpikingSynapse; p_rewire=0.05, p_pre = x->rand(), p_new = x->rand(), μ = 3.0)
+@doc raw"""
+    synaptic_turnover!(C; p_rewire = 0.05, p_new = x -> rand(), μ = 3.0, p_values = nothing)
 
-Perform synaptic turnover on a spiking synapse connection matrix.
+Rewire, in place, the synapses of a sparse connection `C` (e.g. `SpikingSynapse`).
 
-# Arguments
-- `C::SpikingSynapse`: The spiking synapse connection to modify
-- `p_rewire::Float64=0.05`: Probability threshold for rewiring existing connections
-- `p_pre::Function=x->rand()`: Function that returns probability for each presynaptic connection `s` to be rewired 
-- `p_new::Function=x->rand()`: Function that returns probability for selecting new postsynaptic neurons
-- `μ::Float64=3.0`: Weight value for new connections
+# Keyword arguments
+- `p_rewire = 0.05`: threshold; synapse ``s`` is rewired if `p_values[s] <= p_rewire`.
+- `p_values = nothing`: one value per synapse (CSC order of `C.W`); if `nothing`, drawn
+  uniformly in [0, 1], so that a fraction `p_rewire` of synapses is rewired on average.
+- `p_new`: function `(post, pre) -> weight` giving the sampling weight of each candidate new
+  postsynaptic neuron. It is called with two arguments: the default `x -> rand()` takes one
+  argument and raises a `MethodError`, so always pass a two-argument function.
+- `μ = 3.0`: new weights are drawn from ``\mathcal{N}(\mu, \sqrt{\mu})``.
 
-# Description
-This function implements synaptic turnover by:
-1. Generating thresholds for selecting connections to rewire. 
-2. Identifying plausible new connections for each presynaptic neuron
-3. Selecting connections to rewire based on the probability thresholds
-4. Replacing the selected connections with new ones
-5. Updating the sparse matrix structure
+# Procedure
+1. For every presynaptic neuron, the candidate targets are the postsynaptic neurons it does
+   not contact yet, weighted by `p_new(post, pre)`.
+2. The synapses to rewire are selected with `p_values[s] <= p_rewire`.
+3. For each presynaptic neuron, as many new targets as rewired synapses are sampled without
+   replacement; the postsynaptic index `C.I[s]` and the weight `C.W[s]` are replaced.
+4. `update_sparse_matrix!(C)` rebuilds `colptr`, `rowptr`, `J` and `index`.
 
-The function modifies the connection matrix in-place and updates its sparse matrix representation.
+Per-synapse arrays other than `I`, `J`, `W`, `index` (short-term efficacy `ρ`, plasticity
+variables) are not reordered.
 """
 function synaptic_turnover!(
     C::S;

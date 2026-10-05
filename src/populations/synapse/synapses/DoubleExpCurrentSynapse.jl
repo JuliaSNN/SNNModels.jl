@@ -1,20 +1,38 @@
 abstract type AbstractDoubleExpCurrentParameter <: AbstractSynapseParameter end
 
-"""
-    DoubleExpCurrentSynapse{FT} <: AbstractDoubleExpCurrentParameter
+@doc raw"""
+    DoubleExpCurrentSynapse(; τre = 1ms, τde = 6ms, τri = 0.5ms, τdi = 2ms)
 
-A synaptic parameter type that models double exponential current synaptic dynamics.
+Current-based synapse with double-exponential (rise and decay) kinetics. Same kinetics as
+`DoubleExpSynapse`, but `ge` and `gi` are currents (pA) and do not depend on the membrane
+potential.
+
+# Equations
+```math
+\frac{dh_e}{dt} = -\frac{h_e}{\tau_{re}} + \sum_k w_k\,\delta(t - t_k), \qquad
+\frac{dg_e}{dt} = -\frac{g_e}{\tau_{de}} + h_e
+```
+(same for the inhibitory pair), and ``I_{syn} = -(g_e - g_i)``.
+
+# Integration
+Forward Euler, in the same order as `DoubleExpSynapse` (input into `he`/`hi`, update `ge`/`gi`
+with the new `he`/`hi`, then decay `he`/`hi`). The receptor buffers are then zeroed.
 
 # Fields
-- `τre::FT`: Rise time constant for excitatory synapses (default: 1ms)
-- `τde::FT`: Decay time constant for excitatory synapses (default: 6ms)
-- `τri::FT`: Rise time constant for inhibitory synapses (default: 0.5ms)
-- `τdi::FT`: Decay time constant for inhibitory synapses (default: 2ms)
+- `τre::FT = 1ms`: rise time constant, excitatory (ms).
+- `τde::FT = 6ms`: decay time constant, excitatory (ms).
+- `τri::FT = 0.5ms`: rise time constant, inhibitory (ms).
+- `τdi::FT = 2ms`: decay time constant, inhibitory (ms).
 
-# Type Parameters
-- `FT`: Floating point type (default: `Float32`)
+`FT` defaults to `Float32`. State variables: `DoubleExpCurrentSynapseVars`.
 
-This type implements double exponential current synaptic dynamics, where synaptic currents are calculated using separate rise and decay time constants for both excitatory and inhibitory synapses.
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 10, param = SNN.IFParameter(C = 281pF, gl = 40nS),
+           synapse = SNN.DoubleExpCurrentSynapse())
+```
 """
 DoubleExpCurrentSynapse
 
@@ -27,13 +45,15 @@ end
 
 """
     DoubleExpCurrentSynapseVars{VFT} <: AbstractSynapseVariable
-A synaptic variable type that stores the state variables for double exponential current synaptic dynamics.
+
+State variables of `DoubleExpCurrentSynapse`.
+
 # Fields
-- `N::Int`: Number of synapses
-- `ge::VFT`: Vector of excitatory conductances
-- `gi::VFT`: Vector of inhibitory conductances
-- `he::VFT`: Vector of auxiliary variables for excitatory synapses
-- `hi::VFT`: Vector of auxiliary variables for inhibitory synapses
+- `N::Int = 100`: number of neurons.
+- `ge::VFT`: excitatory synaptic current (pA).
+- `gi::VFT`: inhibitory synaptic current (pA).
+- `he::VFT`: excitatory rise (auxiliary) variable (pA/ms).
+- `hi::VFT`: inhibitory rise (auxiliary) variable (pA/ms).
 """
 DoubleExpCurrentSynapseVars
 @snn_kw struct DoubleExpCurrentSynapseVars{VFT = Vector{Float32}} <: AbstractSynapseVariable

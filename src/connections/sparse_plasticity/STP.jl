@@ -1,24 +1,49 @@
 """
-    MarkramSTPParameter{FT <: AbstractFloat} <: STPParameter
+    AbstractMarkramSTPParameter <: STPParameter
 
-    The model is based on refractoriness of the synaptic release process, which can be rephrased by stating that:
-    The fraction (U) of the synaptic efficacy used by an AP becomes instantaneously unavailable for subsequent use and recovers with a time constant of τD (τrec, depression). The fraction of available synaptic efficacy is termed `x.`  A facilitating mechanism is included in the model as a pulsed increase in U by each AP. The running value of U is referred to as u and U remains a parameter that applies to the first AP in a train. u decays with a single exponential, τF (facilitation), to its resting value U. The amount of synaptic efficacy enhanced by a action potential is assumed to be U(1-u).
-    The increase in the amplitude of the postsynaptic response is proportional to the product of u and x.
-
-    The actual implementation follows the equations described in Mongillo et al. (2008) for clarity.
-
-# Fields
-- `τD::FT`: Time constant for depression (default: 200ms)
-- `τF::FT`: Time constant for facilitation (default: 1500ms)
-- `U::FT`: Maximum utilization of synaptic resources (default: 0.2)
-- `Wmax::FT`: Maximum synaptic weight (default: 1.0pF)
-- `Wmin::FT`: Minimum synaptic weight (default: 0.0pF)
-
-This struct is used to configure the short-term plasticity dynamics in synaptic connections
-following the model described by Markram et al. (1998).
+Abstract supertype of the Tsodyks-Markram short-term plasticity rules:
+`MarkramSTPParameterEvent` (alias `MarkramSTPParameter`) and `MarkramSTPParameterHet` (both
+event-driven, subtypes of `AbstractMarkramSTPParameterEvent`) and the clock-driven
+`MarkramSTPParameterTimestep`. All use `MarkramSTPVariables`.
 """
 abstract type AbstractMarkramSTPParameter <: STPParameter end
 abstract type AbstractMarkramSTPParameterEvent <: AbstractMarkramSTPParameter end
+
+@doc raw"""
+    MarkramSTPParameterTimestep(; τD = 200ms, τF = 1500ms, U = 0.2, Wmax = 1pF, Wmin = 0pF)
+
+Tsodyks-Markram short-term plasticity integrated at every time step (clock-driven variant of
+[`MarkramSTPParameterEvent`](@ref)).
+
+Each presynaptic neuron ``j`` has a utilisation ``u_j`` and a fraction of available
+resources ``x_j``. The efficacy of all its outgoing synapses is ``ρ_s = u_j x_j`` and a spike
+adds ``W_s ρ_s`` to the target conductance.
+
+# Equations
+```math
+\frac{du}{dt} = \frac{U - u}{τ_F}, \qquad \frac{dx}{dt} = \frac{1 - x}{τ_D}
+```
+and, at a presynaptic spike, ``u \leftarrow u + U (1 - u)`` followed by
+``x \leftarrow x - u\, x`` (with the facilitated ``u``).
+
+# Integration
+`plasticity!` (called by `train!` after `forward!`, so the spike of step ``n`` is transmitted
+with the efficacy computed at the end of step ``n-1``): (1) the jumps above for the neurons
+that fired; (2) forward-Euler relaxation of ``u`` and ``x`` for all neurons; (3) ``ρ_s = u_j x_j``
+copied to every outgoing synapse ``s`` of ``j``. `sim!` never calls it.
+
+# Fields
+- `τD::FT = 200ms`: recovery (depression) time constant of ``x`` (ms).
+- `τF::FT = 1500ms`: facilitation time constant of ``u`` (ms).
+- `U::FT = 0.2`: baseline utilisation (dimensionless).
+- `Wmax::FT = 1pF`, `Wmin::FT = 0pF`: unused by the update (kept for compatibility).
+
+# References
+Tsodyks, M. V. & Markram, H. (1997). PNAS 94, 719-723; Markram, H., Wang, Y. & Tsodyks, M.
+(1998). PNAS 95, 5323-5328; Mongillo, G., Barak, O. & Tsodyks, M. (2008). Science 319,
+1543-1546 (the formulation named in the code).
+"""
+MarkramSTPParameterTimestep
 
 @snn_kw struct MarkramSTPParameterTimestep{FT = Float32} <: AbstractMarkramSTPParameter
     τD::FT = 200ms # τx
@@ -28,6 +53,69 @@ abstract type AbstractMarkramSTPParameterEvent <: AbstractMarkramSTPParameter en
     Wmin::FT = 0.0pF
 end
 
+@doc raw"""
+    MarkramSTPParameter(; τD = 200ms, τF = 1500ms, U = 0.2, Wmax = 1pF, Wmin = 0pF)
+    MarkramSTPParameterEvent(; τD = 200ms, τF = 1500ms, U = 0.2, Wmax = 1pF, Wmin = 0pF)
+
+Tsodyks-Markram short-term plasticity (depression and facilitation), event-driven.
+`MarkramSTPParameter` is an alias (a non-constant global) of `MarkramSTPParameterEvent`.
+Pass it to `SpikingSynapse` with `STPParam = MarkramSTPParameter()`.
+
+The model describes the refractoriness of release: a spike uses the fraction ``u`` of the
+available resources ``x``, which recover with time constant ``τ_D`` (depression); each spike
+increases ``u``, which relaxes to ``U`` with time constant ``τ_F`` (facilitation). The
+efficacy of every outgoing synapse ``s`` of the presynaptic neuron ``j`` is ``ρ_s = u_j x_j``
+and the spike adds ``W_s ρ_s`` to the target conductance.
+
+# Equations
+Between spikes
+```math
+\frac{du}{dt} = \frac{U - u}{τ_F}, \qquad \frac{dx}{dt} = \frac{1 - x}{τ_D}.
+```
+At a presynaptic spike at time ``t_n``, with ``Δ = t_n - t_{n-1}`` the interval from the
+previous spike of the same neuron:
+```math
+\begin{aligned}
+u^- &= U - (U - u)\, e^{-Δ/τ_F}, &\qquad x^- &= 1 - (1 - x)\, e^{-Δ/τ_D},\\
+ρ &= u^- x^-, & & \\
+u &\leftarrow u^- + U (1 - u^-), & x &\leftarrow x^- - u\, x^- .
+\end{aligned}
+```
+The first spike (``Δ = ∞``) is transmitted with ``ρ = U``. Note that the efficacy uses the
+utilisation before the facilitation jump and the depletion uses the utilisation after it.
+
+# Integration
+Exact solution between spikes, evaluated only at presynaptic spikes (no per-step work for
+silent neurons). The update is done in `update_traces!`, which `train!` calls *before*
+`forward!`, so the spike of the current step is transmitted with the new efficacy.
+`plasticity!` does nothing for this rule. Under `sim!` neither is called and `ρ` keeps its
+value (1 for a new synapse).
+
+# Fields
+- `τD::FT = 200ms`: recovery (depression) time constant of ``x`` (ms).
+- `τF::FT = 1500ms`: facilitation time constant of ``u`` (ms).
+- `U::FT = 0.2`: baseline utilisation (dimensionless).
+- `Wmax::FT = 1pF`, `Wmin::FT = 0pF`: unused by the update (kept for compatibility).
+
+# References
+Tsodyks, M. V. & Markram, H. (1997). PNAS 94, 719-723; Markram, H., Wang, Y. & Tsodyks, M.
+(1998). PNAS 95, 5323-5328; Mongillo, G., Barak, O. & Tsodyks, M. (2008). Science 319,
+1543-1546 (the formulation named in the code).
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.Poisson(N = 50, param = SNN.PoissonParameter(20Hz))
+P = SNN.IF(N = 10)
+syn = SNN.SpikingSynapse(E, P, :ge; conn = (p = 0.2, μ = 1.0),
+                         STPParam = SNN.MarkramSTPParameter(τD = 200ms, τF = 1500ms, U = 0.2))
+SNN.train!(model = SNN.compose(; E, P, syn), duration = 500ms)  # STP needs train!
+extrema(syn.ρ)
+```
+"""
+MarkramSTPParameterEvent
+
 @snn_kw struct MarkramSTPParameterEvent{FT = Float32} <: AbstractMarkramSTPParameterEvent
     τD::FT = 200ms # τx
     τF::FT = 1500ms # τu
@@ -35,6 +123,33 @@ end
     Wmax::FT = 1.0pF
     Wmin::FT = 0.0pF
 end
+@doc raw"""
+    MarkramSTPParameterHet(; τD::Vector{Float32}, τF::Vector{Float32}, U::Vector{Float32})
+
+Event-driven Tsodyks-Markram short-term plasticity with one parameter set per presynaptic
+neuron. The equations and the integration are those of [`MarkramSTPParameterEvent`](@ref), with
+``U``, ``τ_F`` and ``τ_D`` replaced by `U[j]`, `τF[j]` and `τD[j]` of the presynaptic neuron
+``j``.
+
+# Fields (no defaults, all required; vectors of length `Npre`)
+- `τD::VFT`: recovery (depression) time constants (ms).
+- `τF::VFT`: facilitation time constants (ms).
+- `U::VFT`: baseline utilisations.
+
+Unlike the homogeneous rules there are no `Wmax`/`Wmin` fields.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.Poisson(N = 50, param = SNN.PoissonParameter(20Hz))
+P = SNN.IF(N = 10)
+stp = SNN.MarkramSTPParameterHet(τD = fill(200f0, 50), τF = fill(1500f0, 50), U = rand(Float32, 50))
+syn = SNN.SpikingSynapse(E, P, :ge; conn = (p = 0.2, μ = 1.0), STPParam = stp)
+```
+"""
+MarkramSTPParameterHet
+
 @snn_kw struct MarkramSTPParameterHet{VFT = Vector{Float32}} <: AbstractMarkramSTPParameterEvent
     τD::VFT
     τF::VFT
@@ -42,20 +157,32 @@ end
 end
 
 MarkramSTPParameter =  MarkramSTPParameterEvent 
+"""
+    MarkramSTPParameter
+
+Alias of [`MarkramSTPParameterEvent`](@ref) (event-driven Tsodyks-Markram short-term
+plasticity); `MarkramSTPParameter(; τD = 200ms, τF = 1500ms, U = 0.2)` builds a
+`MarkramSTPParameterEvent`.
+"""
+MarkramSTPParameter
 
 """
-    MarkramSTPVariables{VFT <: AbstractVector{<:AbstractFloat}, IT <: Integer} <: STPVariables
-    Variables for Markram Short-Term Plasticity (STP) model.
+    MarkramSTPVariables(; Npre, Npost, u = zeros(Npre), x = ones(Npre), _ρ = ones(Npre),
+                        last_spike = fill(-Inf, Npre), active = [true])
+
+State of the Markram STP rules, one entry per presynaptic neuron. Created by
+`plasticityvariables(param, Npre, Npost)`, which sets `u .= U`, `x .= 1` and `_ρ .= U`
+(for `MarkramSTPParameterHet`, `U` is a vector and is broadcast elementwise).
+
 # Fields
-- `Npost::IT`: Number of postsynaptic neurons.
-- `Npre::IT`: Number of presynaptic neurons.
-- `u::VFT`: Utilization of synaptic efficacy for each presynaptic neuron.
-- `x::VFT`: Fraction of available synaptic resources for each presynaptic neuron.
-- `_ρ::VFT`: Intermediate variable representing the product of `u` and `x`.
-- `last_spike::VFT`: Time of the last spike for each presynaptic neuron.
-- `active::VBT`: Boolean vector indicating active synapses.
-This struct holds the dynamic variables required to implement the Markram STP model in synaptic connections.
+- `Npost`, `Npre`: number of postsynaptic and presynaptic neurons.
+- `u`: utilisation of each presynaptic neuron.
+- `x`: fraction of available resources of each presynaptic neuron.
+- `_ρ`: efficacy ``u x`` of each presynaptic neuron, copied to the synapse vector `c.ρ`.
+- `last_spike`: time of the previous spike (ms), used by the event-driven rules.
+- `active`: the rule is applied only if `any(active)`; see `set_STP!`.
 """
+MarkramSTPVariables
 
 @snn_kw struct MarkramSTPVariables{VFT = Vector{Float32},IT = Int} <: STPVariables
     ## Plasticity variables
@@ -172,7 +299,7 @@ function plasticity!(
         @fastmath _ρ[j] = u[j] * x[j]
     end
 
-    Threads.@threads :static for j in eachindex(fireJ) # Iterate over postsynaptic neurons
+    Threads.@threads :static for j in eachindex(fireJ) # Iterate over presynaptic neurons
         @inbounds @simd for s = colptr[j]:(colptr[j+1]-1)
             ρ[s] = _ρ[j]
         end

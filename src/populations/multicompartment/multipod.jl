@@ -1,4 +1,11 @@
 # Multipod
+#
+# NOT LOADED: the include of this file is commented out in src/populations/populations.jl
+# (SNNModels 1.8.4). It implements an AdEx soma coupled to `Nd` passive dendrites with
+# receptor-based synapses (Heun integration of soma and dendrites, Euler adaptation, spike
+# when v_s > θ + 10 mV). It depends on names that no longer exist in the loaded code
+# (`AdExSoma`, `synapsearray`, `PostSpike(A = ...)`), so it does not compile as is. The name
+# `Multipod` is used in dendneuron_parameter.jl for an (unused) `AbstractDendriticTree` tag.
 
 @snn_kw struct Multipod{
     TFT = Array{Float32,3}, ## Float type

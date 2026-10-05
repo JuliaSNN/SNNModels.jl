@@ -1,3 +1,16 @@
+"""
+    SNNModels
+
+Core library of the JuliaSNN ecosystem: neuron population models, synapse and receptor models,
+connections with long- and short-term plasticity, metaplasticity, stimuli, recording, analysis
+and input/output utilities.
+
+A network is a `NamedTuple` assembled with `compose` (fields `pop`, `syn`, `stim`, `name`,
+`time`) and simulated with `sim!` (no plasticity) or `train!` (plasticity active). Quantities
+are plain `Float32` in the unit system loaded by `@load_units` (ms, mV, pA, pF, nS, cm).
+Users normally load it through `SpikingNeuralNetworks`, which re-exports it as
+`SNN.SNNModels`.
+"""
 module SNNModels
 
 using DrWatson

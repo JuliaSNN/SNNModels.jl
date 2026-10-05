@@ -1,31 +1,54 @@
 
 """
-    train!(
-        P::Vector{TN},
-        C::Vector{TS};
-        dt = 0.1ms,
-        duration = 10ms,
-    ) where {TN <: AbstractPopulation, TS<:AbstractConnection }
+    train!(P::Vector{<:AbstractPopulation}, C::Vector{<:AbstractConnection} = [EmptySynapse()],
+           S::Vector{<:AbstractStimulus} = [EmptyStimulus()];
+           dt = 0.125ms, duration = 10ms, time = Time(), perturbation! = nothing, pbar = false)
+    train!(; model, duration = 10ms, dt = 0.125ms, pbar = false, perturbation! = nothing)
+    train!(model::NamedTuple, duration = 1s; kwargs...)
+    train!(args...; model, kwargs...)
 
-Trains the spiking neural network for a specified duration by repeatedly calling `train!` function.
+Simulate a network with plasticity for `duration` (ms) with time step `dt` (ms).
 
-`train!` is the only entry point that applies plasticity. Per step it runs the same
-stimulus / `integrate!` / `forward!` sequence as `sim!`, and in addition calls
-`update_traces!` before and `plasticity!` after `forward!` of every connection (long-term
-STDP/iSTDP/vSTDP rules and short-term plasticity). `sim!` never calls them: weights and STP
-variables stay frozen even if the synapse carries an `LTPParam` or `STPParam`.
+`train!` is the only entry point that applies plasticity. Each step runs:
+1. `update_time!` (the clock advances by `dt` first);
+2. for every stimulus: `stimulate!`, `record!`;
+3. for every population: `update_traces!`, `integrate!`, `plasticity!`, `record!`;
+4. for every connection: `update_traces!`, `forward!`, `plasticity!`, `record!`.
 
-**Arguments**
-- `P::Vector{TN}`: Vector of neurons in the network.
-- `C::Vector{TS}`: Vector of synapses in the network.
-- `dt::Float32`: Time step for the training. Default value is `0.1ms`.
-- `duration::Float32`: Duration of the training. Default value is `10ms`.
+`sim!` runs the same sequence without `update_traces!` and `plasticity!`, so weights and STP
+variables only change under `train!` (long-term STDP/iSTDP/vSTDP rules, short-term
+plasticity, metaplasticity components).
 
-**Details**
-- The function converts `dt` to `Float32` if it is not already.
-- The function creates a progress bar using the `ProgressBar` function with a range of time steps from `0.0f0` to `duration-dt` with a step size of `dt`.
-- The function iterates over the time steps and calls the `train!` function with `P`, `C`, and `dt`.
+# Arguments
+- `model`: a NamedTuple built with `compose`; its populations, connections and stimuli
+  (stimulus groups are unpacked) are simulated and `model.time` is advanced.
+- `args...`: extra components (or vectors of them) added to those of `model`.
+- `dt = 0.125ms`: time step (converted to `Float32`).
+- `duration = 10ms` (vector and keyword forms) or `1s` (positional model form): simulated time; the loop
+  runs over `0:dt:(duration - dt)`, i.e. `round(duration / dt)` steps.
+- `time = Time()`: clock of the vector form.
+- `perturbation!`: optional function called before every step as
+  `perturbation!(; P, C, S, t, dt, start_time)`.
+- `pbar = false`: show a progress bar with the running firing rates of the populations that
+  record `:fire`.
 
+Recording buffers are sized before the loop from `duration` (see `monitor!`). If the model
+time is 0, a first sample of every record is taken before the first step.
+
+# Returns
+The `Time` object (vector form) or the model time in ms after the run (model forms).
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 100)
+stim = SNN.Stimulus(SNN.PoissonFixed(rate = 2kHz), E, :ge)
+EE = SNN.SpikingSynapse(E, E, :ge; conn = (p = 0.1, μ = 0.5), LTPParam = SNN.STDPGerstner())
+model = SNN.compose(; E, EE, stim)
+SNN.train!(; model, duration = 100ms)
+SNN.get_time(model.time)   # 100.0
+```
 """
 function train!(
     P::Vector{TP},
@@ -154,31 +177,57 @@ end
 ##
 
 """
-    sim!(
-        P::Vector{TN},
-        C::Vector{TS};
-        dt = 0.1f0,
-        duration = 10.0f0,
-        pbar = false,
-    ) where {TN <: AbstractPopulation, TS<:AbstractConnection }
+    sim!(P::Vector{<:AbstractPopulation}, C::Vector{<:AbstractConnection} = [EmptySynapse()],
+         S::Vector{<:AbstractStimulus} = [EmptyStimulus()];
+         dt = 0.125f0, duration = 10.0f0, pbar = false, time = Time(), perturbation! = nothing)
+    sim!(; model, duration = 10ms, dt = 0.125ms, pbar = false, perturbation! = nothing)
+    sim!(model::NamedTuple, duration = 1s; kwargs...)
+    sim!(args...; model, kwargs...)
 
-Simulates the spiking neural network for a specified duration by repeatedly calling `sim!` function.
+Simulate a network without plasticity for `duration` (ms) with time step `dt` (ms).
 
-No plasticity is applied: `sim!` never calls `plasticity!`/`update_traces!`, so synaptic
-weights stay constant. Use `train!` to run plastic networks.
+Each step runs:
+1. `update_time!` (the clock advances by `dt` first);
+2. for every stimulus: `stimulate!(s, s.param, T, dt)`, `record!`;
+3. for every population: `integrate!(p, p.param, dt)`, `record!`;
+4. for every connection: `forward!(c, c.param, dt, T)`, `record!`.
 
-**Arguments**
-- `P::Vector{TN}`: Vector of neurons in the network.
-- `C::Vector{TS}`: Vector of synapses in the network.
-- `dt::Float32`: Time step for the simulation. Default value is `0.1f0`.
-- `duration::Float32`: Duration of the simulation. Default value is `10.0f0`.
-- `pbar::Bool`: Flag indicating whether to display a progress bar during the simulation. Default value is `false`.
+No plasticity is applied: `sim!` never calls `update_traces!` or `plasticity!`, so weights
+and short-term plasticity variables stay constant even if a synapse carries an `LTPParam`
+or `STPParam`. Use [`train!`](@ref) for plastic networks.
 
-**Details**
-- The function creates a range of time steps from `0.0f0` to `duration-dt` with a step size of `dt`.
-- If `pbar` is `true`, the function creates a progress bar using the `ProgressBar` function with the time step range. Otherwise, it uses the time step range directly.
-- The function iterates over the time steps and calls the `sim!` function with `P`, `C`, and `dt`.
+# Arguments
+- `model`: a NamedTuple built with `compose`; its populations, connections and stimuli
+  (stimulus groups are unpacked) are simulated and `model.time` is advanced.
+- `args...`: extra components (or vectors of them) added to those of `model`.
+- `dt = 0.125` ms: time step (converted to `Float32`).
+- `duration = 10` ms (vector and keyword forms) or `1s` (positional model form): the loop runs over
+  `0:dt:(duration - dt)`.
+- `time = Time()`: clock of the vector form.
+- `perturbation!`: optional function called before every step as
+  `perturbation!(; P, C, S, t, dt, start_time)`.
+- `pbar = false`: show a progress bar with the running firing rates of the populations that
+  record `:fire`.
 
+Recording buffers are sized before the loop (see `monitor!`). If the model time is 0, a first
+sample of every record is taken before the first step. Simulations can be continued by
+calling `sim!` again: time and recordings continue from where they stopped.
+
+# Returns
+The `Time` object (vector form) or the model time in ms after the run (model forms).
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 100)
+stim = SNN.Stimulus(SNN.PoissonFixed(rate = 2kHz), E, :ge)
+model = SNN.compose(; E, stim)
+SNN.monitor!(E, :fire)
+SNN.sim!(; model, duration = 1s)
+SNN.sim!(model, 500ms)          # continue for 500 ms
+SNN.get_time(model.time)        # 1500.0
+```
 """
 function sim!(
     P::Vector{TP},

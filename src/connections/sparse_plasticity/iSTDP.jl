@@ -7,13 +7,24 @@ Euler-integrated (not exact-decay) traces. See the notes on `iSTDPRate`.
 """
 abstract type iSTDPParameter <: STDPParameter end
 
-@doc """
-    iSTDPRate{FT = Float32}
+@doc raw"""
+    iSTDPRate(; η = 0.01pA, r = 3Hz, τy = 50ms, Wmax = 243pF, Wmin = 0.01pF)
 
 Inhibitory STDP with a target postsynaptic rate (Vogels, T. P., Sprekeler, H.,
 Zenke, F., Clopath, C., & Gerstner, W. (2011). Inhibitory plasticity balances excitation
 and inhibition in sensory pathways and memory networks. Science, 334(6062), 1569-1573.
 https://doi.org/10.1126/science.1211095).
+
+# Equations
+Traces ``x_j`` (presynaptic) and ``y_i`` (postsynaptic) jump by 1 at a spike and decay with
+time constant ``τ_y``. With ``α = 2 r τ_y``:
+```math
+Δw_{ij} = η\,(y_i - α) \;\text{at a presynaptic spike of } j, \qquad
+Δw_{ij} = η\, x_j \;\text{at a postsynaptic spike of } i,
+```
+then ``w_{ij}`` is clamped to `[Wmin, Wmax]`. For uncorrelated pre- and postsynaptic Poisson
+trains with rates ``r_j`` and ``r_i`` the mean drift is ``2 η τ_y r_j (r_i - r)``: inhibition
+grows onto neurons that fire above the target rate `r` and decreases onto the others.
 
 Fields (weights in the units of `W`, e.g. pF):
 - `η = 0.01pA`: learning rate.
@@ -45,9 +56,12 @@ Plasticity is applied only when the network is run with `train!`; `sim!` never c
 
 # Example
 ```julia
-E = SNN.IF(N = 800); I = SNN.IF(N = 200)
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 80)
+I = SNN.Poisson(N = 20, param = SNN.PoissonParameter(20Hz))
 IE = SNN.SpikingSynapse(I, E, :gi; conn = (p = 0.2, μ = 5.0), LTPParam = SNN.iSTDPRate(r = 5Hz))
-SNN.train!(model = SNN.compose(; E, I, IE), duration = 5s)   # plasticity needs train!
+SNN.train!(model = SNN.compose(; E, I, IE), duration = 500ms)   # plasticity needs train!
 ```
 """
 iSTDPRate
@@ -61,7 +75,7 @@ iSTDPRate
 end
 
 @doc """
-    iSTDPTime{FT = Float32}
+    iSTDPTime(; η = 0.01pA, τy = 50ms, Wmax = 243pF, Wmin = 0.01pF)
 
 Parameter container (`η`, `τy`, `Wmax`, `Wmin`) of a time-based variant of the Vogels et al.
 (2011) rule. The current code defines no `plasticity!` method for it, so it cannot be used as
@@ -77,11 +91,26 @@ iSTDPTime
     Wmin::FT = 0.01pF
 end
 
-@doc """
-    iSTDPPotential{FT = Float32}
+@doc raw"""
+    iSTDPPotential(; η = 0.001pA, v0 = -50mV, τy = 200ms, Wmax = 243pF, Wmin = 0.01pF)
 
 Inhibitory STDP in which the postsynaptic trace follows the membrane potential instead of the
-spike train (Vogels et al. 2011 form, with `tpost` low-pass filtering `v_post`).
+spike train (a variant of the Vogels et al. 2011 rule, with `tpost` low-pass filtering `v_post`).
+The rule increases inhibition onto neurons whose filtered potential is above `v0` and
+decreases it otherwise. Reference for the variant: not given in the code.
+
+# Equations
+```math
+τ_y \frac{dx_j}{dt} = -x_j + τ_y \sum_k δ(t - t_j^k), \qquad
+τ_y \frac{dy_i}{dt} = -(y_i - V_i),
+```
+```math
+Δw_{ij} = η\,(y_i - v_0) \;\text{at a presynaptic spike of } j, \qquad
+Δw_{ij} = η\, x_j \;\text{at a postsynaptic spike of } i,
+```
+with ``V_i`` the postsynaptic potential (`v_post`) and clamping to `[Wmin, Wmax]`.
+The trace `tpost` starts at 0 mV (`iSTDPVariables` default), so for the first few `τy` it is
+above `v0` whatever the potential.
 
 Fields: `η = 0.001pA` (learning rate), `v0 = -50mV` (reference potential),
 `τy = 200ms` (trace time constant), `Wmax = 243pF`, `Wmin = 0.01pF`.
@@ -122,8 +151,8 @@ iSTDPVariables
     ## Plasticity variables
     Npost::IT
     Npre::IT
-    tpost::VFT = zeros(Npost) # postsynaptic spiking time 
-    tpre::VFT = zeros(Npre) # presynaptic spiking time
+    tpost::VFT = zeros(Npost) # postsynaptic trace (spike trace, or filtered v_post for iSTDPPotential)
+    tpre::VFT = zeros(Npre) # presynaptic spike trace
     last_spike::VFT = zeros(Npost) # last spike time for each postsynaptic neuron
     active::VBT = [true]
 end
@@ -193,20 +222,17 @@ end
 """
     plasticity!(c::AbstractSparseSynapse, param::iSTDPPotential, variables::iSTDPVariables, dt::Float32, T::Time)
 
-Performs the synaptic plasticity calculation based on the inihibitory spike-timing dependent plasticity (iSTDP) model from Vogels (2011) using membrane potential traces.
-The function updates synaptic weights `W` of each synapse in the network according to the firing status of pre and post-synaptic neurons.
-This is an in-place operation that modifies the input `AbstractSparseSynapse` object `c`.
-
-# Arguments
-- `c::AbstractSparseSynapse`: The current spiking synapse object which contains data structures to represent the synapse network.
-- `param::iSTDPPotential`: Parameters needed for the iSTDP model, including learning rate `η`, reference membrane potential `v0`, STDP time constant `τy`, maximal and minimal synaptic weight (`Wmax` and `Wmin`).
-- `dt::Float32`: The time step for the numerical integration. 
+One step of the membrane-potential variant of the inhibitory STDP of Vogels et al. (2011);
+modifies `c.W` in place. Called by `train!` (never by `sim!`). See `iSTDPPotential` for the
+equations.
 
 # Algorithm
-- For each pre-synaptic neuron, if it fires, it increases the synaptic weight by an amount proportional to the difference between the post-synaptic membrane potential trace and a reference potential `v0`, otherwise the pre-synaptic trace decays exponentially over time with a time constant `τy`.
-- For each post-synaptic neuron, if it fires, it increases the synaptic weight by an amount proportional to the pre-synaptic trace, otherwise the post-synaptic trace decays exponentially over time with a time constant `τy`.
-- The synaptic weights are bounded by `Wmin` and `Wmax`.
-
+- Presynaptic pass, for every `j`: Euler decay `tpre[j] += -dt * tpre[j] / τy`; if `j` fired,
+  `tpre[j] += 1` and every outgoing synapse gets `η (tpost[i] - v0)` (depression if the
+  filtered potential is below `v0`), clamped to `[Wmin, Wmax]`.
+- Postsynaptic pass, for every `i`: Euler step `tpost[i] += dt * (v_post[i] - tpost[i]) / τy`;
+  if `i` fired, every incoming synapse gets `η tpre[j]`, clamped to `[Wmin, Wmax]`.
+- `T` is unused.
 """
 function plasticity!(
     c::AbstractSparseSynapse,

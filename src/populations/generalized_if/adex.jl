@@ -1,22 +1,41 @@
-"""
-    AdExParameter{FT} <: AbstractGeneralizedIFParameter
+@doc raw"""
+    AdExParameter{FT = Float32}(; C = 281pF, gl = 40nS, Vt = -50mV, Vr = -70.6mV, El = -70.6mV,
+                                 τm = C / gl, R = nS / gl, ΔT = 2mV, τw = 144ms, a = 4nS,
+                                 b = 80.5pA)
 
-The AdEx model extends the leaky integrate-and-fire model with exponential spiking dynamics and spike-triggered adaptation.
-This implementation follows the parameterization from Brette and Gerstner (2005).
+Neuron parameters of the adaptive exponential integrate-and-fire model (`AdEx`), in the
+parameterisation of Brette and Gerstner (2005). The code comment notes that the original paper
+uses a leak conductance of 30 nS; the default here is 40 nS.
+
+`AdExParameter` is mutable. With `FT = Vector{Float32}` (see `make_heterogeneous`) every
+parameter is per neuron and `AdEx` uses the heterogeneous method of `update_neuron!`.
 
 # Fields
-- `C::FT`: Membrane capacitance (default: 281 pF)
-- `gl::FT`: Leak conductance (default: 40 nS)
-- `Vt::FT`: Membrane potential threshold (default: -50 mV)
-- `Vr::FT`: Reset potential (default: -70.6 mV)
-- `El::FT`: Resting membrane potential (default: -70.6 mV)
-- `τm::FT`: Membrane time constant (default: C/gl)
-- `R::FT`: Resistance (default: nS/gl)
-- `ΔT::FT`: Slope factor (default: 2 mV)
-- `τw::FT`: Adaptation time constant (default: 144 ms)
-- `a::FT`: Subthreshold adaptation parameter (default: 4 nS)
-- `b::FT`: Spike-triggered adaptation parameter (default: 80.5 pA)
+- `C::FT = 281pF`: membrane capacitance (pF); only used to compute `τm`.
+- `gl::FT = 40nS`: leak conductance (nS); only used to compute `τm` and `R`.
+- `Vt::FT = -50mV`: threshold of the exponential term (rheobase threshold), also the resting
+  value of the adaptive threshold ``θ`` (mV). It is not the spike-detection threshold (0 mV).
+- `Vr::FT = -70.6mV`: reset potential (mV).
+- `El::FT = -70.6mV`: leak reversal potential (mV).
+- `τm::FT = C / gl`: membrane time constant (ms), 7.025 ms with the defaults.
+- `R::FT = nS / gl`: membrane resistance (GΩ), 0.025 GΩ with the defaults.
+- `ΔT::FT = 2mV`: slope factor of the exponential term (mV); a negative value removes the
+  exponential term.
+- `τw::FT = 144ms`: adaptation time constant (ms).
+- `a::FT = 4nS`: subthreshold adaptation conductance (nS).
+- `b::FT = 80.5pA`: spike-triggered adaptation increment (pA).
 
+# References
+Brette R., Gerstner W. (2005). Adaptive exponential integrate-and-fire model as an effective
+description of neuronal activity. J. Neurophysiol. 94:3637-3642.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+param = SNN.AdExParameter(a = 0nS, b = 0pA)   # exponential IF without adaptation
+E = SNN.AdEx(N = 10, param = param)
+```
 """
 AdExParameter
 @snn_kw mutable struct AdExParameter{FT = Float32} <: AbstractGeneralizedIFParameter
@@ -35,36 +54,68 @@ end
 
 
 
-"""
-    AdEx{VFT, MFT,  GIFT, SYNT} <: AbstractGeneralizedIF
+@doc raw"""
+    AdEx(; N = 100, param = AdExParameter(), synapse = DoubleExpSynapse(), spike = PostSpike(),
+           name = "AdEx", kwargs...)
 
-The AdEx model implements the adaptive exponential integrate-and-fire neuron model with support for any synaptic model.
+Population of adaptive exponential integrate-and-fire neurons with an adaptive spike threshold,
+combining `param::AdExParameter`, any synapse model and `spike::PostSpike`.
+
+# Equations
+```math
+\begin{aligned}
+\tau_m \frac{dv}{dt} &= -(v - E_l) + \Delta_T \exp\!\left(\frac{v - \theta}{\Delta_T}\right)
+                        - R\, I_{syn} - R\, w + R\, I \\
+\tau_w \frac{dw}{dt} &= a\,(v - E_l) - w \\
+\tau_A \frac{d\theta}{dt} &= V_t - \theta
+\end{aligned}
+```
+A spike is emitted when ``v \geq 0`` mV; then ``v`` is set to 20 mV for that step,
+``w \leftarrow w + b``, ``\theta \leftarrow \theta + A_t``, and the neuron is refractory.
+``I_{syn}`` is the synaptic current of the synapse model (`syn_curr`), ``τ_A``, ``A_t`` and
+`τabs` come from `spike` (with the default `At = 0mV` the threshold stays at `Vt`).
+
+# Integration
+Forward Euler, per neuron and per step (`update_neuron!`):
+1. if the neuron fired in the previous step, `v = Vr` (reset);
+2. `fire = false`; `tabs -= 1`; if `tabs > 0` the neuron is refractory and nothing else is
+   updated (so ``v`` stays at ``V_r`` and ``w``, ``θ`` are frozen);
+3. `w += dt * (a * (v - El) - w) / τw` (with the old ``v``);
+4. `v += dt * (-(v - El) + ΔT * exp((v - θ) / ΔT) - R * syn_curr - R * w + R * I) / τm`
+   (exponential term omitted if `ΔT < 0`);
+5. `θ += dt * (Vt - θ) / τA`;
+6. if `v >= 0mV`: `fire = true`, `v = 20mV`, `w += b`, `θ += At`,
+   `tabs = round(Int, τabs / dt)`.
+After a spike the neuron is therefore clamped for `round(Int, τabs / dt) - 1` steps.
 
 # Fields
-## Population Info
-- `name::String`: Name of the neuron model (default: "AdEx")
-- `id::String`: Unique identifier for the neuron population (default: random 12-character string)
-- `records::Dict`: Dictionary for storing simulation records (initialized empty)
+- `name::String = "AdEx"`, `id::String = randstring(12)`.
+- `param::AdExParameter = AdExParameter()`, `synapse = DoubleExpSynapse()`,
+  `spike::PostSpike = PostSpike()`.
+- `N::Int32 = 100`: number of neurons.
+- `v::Vector{Float32}`: membrane potential (mV), uniform in `[Vr, Vt]`.
+- `w::Vector{Float32}`: adaptation current (pA), zeros.
+- `fire::Vector{Bool}`: spike flags.
+- `θ::Vector{Float32}`: adaptive threshold of the exponential term (mV), initialised to `Vt`.
+- `tabs::Vector{Int}`: refractory counters (steps), ones.
+- `I::Vector{Float32}`: external current (pA).
+- `syn_curr::Vector{Float32}`: synaptic current (pA).
+- `synvars`: synaptic state; `receptors::NamedTuple`: spike input buffers (see `IF`).
+- `records::Dict`.
 
-## Model Parameters
-- `param::GIFT`: Parameters for the AdEx model (default: `AdExParameter()`)
-- `synapse::SYNT`: Synaptic parameters (default: `DoubleExpSynapse()`)
-- `spike::PST`: Post-spike parameters (default: `PostSpike()`)
-- `N::Int32`: Number of neurons in the population (default: 100)
+# References
+Brette R., Gerstner W. (2005). Adaptive exponential integrate-and-fire model as an effective
+description of neuronal activity. J. Neurophysiol. 94:3637-3642.
 
-## Model variable
-- `v::VFT`: Membrane potential (initialized randomly between `Vr` and `Vt`)
-- `w::VFT`: Adaptation current (initialized to zeros)
-- `fire::VBT`: Spike flags (initialized to false)
-- `θ::VFT`: Membrane potential thresholds (initialized to `Vt`)
-- `tabs::VIT`: Absolute refractory period counters (initialized to ones)
-- `I::VFT`: External current (initialized to zeros)
-- `syn_curr::VFT`: Total synaptic current (initialized to zeros)
-
-## Synapses
-- `synvars::SYNV`: Synaptic variables for the synapse model
-- `receptors<:NamedTuple`: Synaptic receptors triggered by spike events
-
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.AdEx(N = 10, param = SNN.AdExParameter(), spike = SNN.PostSpike(τabs = 2ms))
+E.I .= 1nA
+SNN.monitor!(E, [:v, :w, :fire])
+SNN.sim!([E]; duration = 500ms)
+```
 """
 AdEx
 
@@ -124,10 +175,7 @@ function Population(
 end
 
 
-"""
-	[Integrate-And-Fire Neuron](https://neuronaldynamics.epfl.ch/online/Ch1.S3.html)
-"""
-
+# Membrane update of `AdEx` (scalar parameters); see the `AdEx` docstring for the step order.
 function update_neuron!(
     p::P,
     param::T,
@@ -168,6 +216,7 @@ function update_neuron!(
 end
 
 
+# Heterogeneous version: every parameter of `AdExParameter{Vector{Float32}}` is per neuron.
 function update_neuron!(
     p::P,
     param::T,

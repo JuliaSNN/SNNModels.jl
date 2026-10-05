@@ -3,15 +3,29 @@ using Statistics
 using Distributions
 
 """
-    inter_spike_interval(spiketimes::Vector{Float32})
+    asynchronous_state(model, interval = nothing, pop = :Exc) -> (cv, ff, si)
 
-Calculate the inter-spike intervals (ISIs) for a given set of spike times.
+Summary statistics of the asynchronous-irregular state of the population `model.pop.<pop>`.
 
-# Arguments
-- `spiketimes`: A vector of spike times for a single neuron.
+- `cv`: mean over neurons of the ISI coefficient of variation `std(ISI) / (mean(ISI) + 1e-6)`
+  (NaN set to 0), with the spikes restricted to `interval`.
+- `ff`: `var / mean` of all the spike counts of the binned activity matrix (all neurons and bins
+  pooled).
+- `si`: mean of the `N x N` covariance matrix of the binned spike counts of the neurons
+  (`cov(bins, dims = 2)`), used as a synchrony index.
 
-# Returns
-- `isis`: A vector of inter-spike intervals.
+`interval` (default `0s:0.5s:get_time(model)`) is an `AbstractRange`; its step is the bin width.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+@load_units
+Exc = SNN.Poisson(N = 20, param = SNN.PoissonParameter(10Hz))
+SNN.monitor!(Exc, [:fire])
+model = SNN.compose(; Exc, silent = true)
+sim!(model, 2s)
+cv, ff, si = SNN.asynchronous_state(model, 0s:100ms:2s, :Exc)
+```
 """
 function asynchronous_state(model, interval = nothing, pop = :Exc)
     population = getfield(model.pop, pop)
@@ -33,17 +47,20 @@ function asynchronous_state(model, interval = nothing, pop = :Exc)
 end
 
 """
-    is_attractor_state(spiketimes::Spiketimes, interval::AbstractVector, N::Int)
+    is_attractor_state(pop::AbstractPopulation, interval::AbstractVector; ratio = 0.3, σ = 10.0f0, false_value = missing)
 
-Check if the network is in an attractor state by verifying that the average firing rate over the last N seconds of the simulation is a unimodal distribution.
+Test whether the time-averaged firing-rate profile over the neurons of `pop` (ordered by index,
+e.g. a ring network) is a single bump.
 
-# Arguments
-- `spiketimes`: A vector of vectors containing the spike times of each neuron.
-- `interval`: The time interval over which to compute the firing rate.
-- `N`: The number of seconds over which to check the unimodality of the firing rate distribution.
+The per-neuron mean rate over `interval` (from `firing_rate(pop; interval)`) is smoothed with
+`gaussian_kernel_estimate(rates, σ; boundary = :continuous)` (periodic). The profile is
+unimodal if `is_unimodal(kde, ratio)` holds for the profile or for the profile shifted by half
+its length.
 
 # Returns
-- `is_attractor`: A boolean indicating whether the network is in an attractor state.
+- `(width, kde)`: if unimodal, `width` is the number of neurons above half of the peak divided
+  by `σ`;
+- `(false_value, kde)` otherwise.
 """
 function is_attractor_state(
     pop::T,
@@ -91,7 +108,12 @@ function globalKDE(h::Real, ys; xs::AbstractVector, distance::Function )
     return kde
 end
 
-#Get its maxima
+"""
+    get_maxima(data)
+
+Indices `x` of the strict interior local maxima of `data` (`data[x] > data[x-1]` and
+`data[x] > data[x+1]`).
+"""
 function get_maxima(data)
     arg_maxima = []
     for x = 2:(length(data)-1)
@@ -100,7 +122,13 @@ function get_maxima(data)
     return arg_maxima
 end
 
-#Trash spurious values (below 30% of the true maximum)
+"""
+    is_unimodal(kernel, ratio)
+
+`true` if at most one local maximum of `kernel` (see `get_maxima`) exceeds `ratio` times the
+largest local maximum, i.e. maxima below `ratio` of the main peak are treated as spurious.
+Throws if `kernel` has no interior local maximum.
+"""
 function is_unimodal(kernel, ratio)
     maxima = get_maxima(kernel)
     z = maximum(kernel[maxima])
@@ -154,15 +182,30 @@ function _sttc_pair(A::Vector{Float32}, B::Vector{Float32}, TA::Float32, TB::Flo
     return 0.5f0 * ((PA - TB) / (1f0 - PA * TB) + (PB - TA) / (1f0 - PB * TA))
 end
 
-"""
-    STTC(spiketrain1::Vector{Float32}, spiketrain2::Vector{Float32}, Δt::Float32)
-Calculate the Spike Time Tiling Coefficient (STTC) between two spike trains.
-# Arguments
-- `spiketrain1`: A vector of spike times for the first neuron.
-- `spiketrain2`: A vector of spike times for the second neuron.
-- `Δt`: The time window for considering spikes as coincident.
-# Returns
-- `sttc_value`: The calculated STTC value.
+@doc raw"""
+    STTC(spiketrainA::Vector{Float32}, spiketrainB::Vector{Float32}, Δt::Float32, interval::AbstractVector)
+
+Spike Time Tiling Coefficient between two spike trains,
+```math
+\mathrm{STTC} = \frac{1}{2}\left(\frac{P_A - T_B}{1 - P_A T_B} + \frac{P_B - T_A}{1 - P_B T_A}\right),
+```
+where ``P_A`` is the fraction of spikes of A with a spike of B within ``\pm\Delta t``, and
+``T_A`` is the fraction of the recording `[interval[1], interval[end]]` covered by the windows
+``\pm\Delta t`` around the spikes of A (computed from the spikes inside the interval, the total
+duration being extended by ``2\Delta t``). The inputs are not modified.
+
+# References
+Cutts, C. S., & Eglen, S. J. (2014). Detecting pairwise correlations in spike trains: an
+objective comparison of methods and application to the study of retinal waves. Journal of
+Neuroscience, 34(43), 14288–14303.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+a = Float32[10, 50, 90]
+b = Float32[11, 52, 300]
+SNN.STTC(a, b, 5.0f0, 0:1:400)
+```
 """
 function STTC(spiketrainA::Vector{Float32}, spiketrainB::Vector{Float32}, Δt::Float32, interval::AbstractVector)
     istart = Float32(interval[1])
@@ -174,6 +217,12 @@ function STTC(spiketrainA::Vector{Float32}, spiketrainB::Vector{Float32}, Δt::F
     _sttc_pair(A, B, TA, TB, Δt)
 end
 
+"""
+    tile_interval(spiketrainA::Vector{Float32}, Δt::Float32, interval::StepRangeLen{Float32})
+
+Fraction ``T_A`` of `interval` covered by the windows ``±Δt`` around the spikes of
+`spiketrainA` (the tiling term of `STTC`). Sorts `spiketrainA` in place.
+"""
 function tile_interval(spiketrainA::Vector{Float32}, Δt::Float32, interval::StepRangeLen{Float32})
     width = Δt
     sort!(spiketrainA)
@@ -193,14 +242,20 @@ function tile_interval(spiketrainA::Vector{Float32}, Δt::Float32, interval::Ste
 end
 
 """
-    STTC(spiketrains::Vector{Vector{Float32}}, Δt::Float32, interval::AbstractVector=nothing)
-Calculate the Spike Time Tiling Coefficient (STTC) matrix for a set of spike trains.
+    STTC(spiketrains::Vector{Vector{Float32}}, Δt, interval = nothing) -> Matrix{Float32}
+    STTC(pop::AbstractPopulation; ΔT, interval)
+    STTC(pop::AbstractPopulation, ΔT::Real, interval::AbstractVector)
+
+Symmetric matrix of the pairwise `STTC` values of a set of spike trains (diagonal = 1, pairs with
+an empty train = 0), computed with threads over rows.
+
 # Arguments
 - `spiketrains`: A vector of vectors containing the spike times of each neuron.
-- `Δt`: The time window for considering spikes as coincident.
-- `interval`: The time interval over which to compute the STTC. If not provided, it will be inferred from the first and last events in the spike trains.
-# Returns
-- `sttc_matrix`: A matrix containing the STTC values between all pairs of spike trains.
+- `Δt`: The coincidence window (ms).
+- `interval`: recording interval; if `nothing`, it spans from the first spike minus `Δt` to the
+  last spike plus `Δt`.
+
+The population methods use `spiketimes(pop)`.
 """
 function STTC(spiketrains::Vector{Vector{Float32}}, Δt, interval = nothing)
     n  = length(spiketrains)
@@ -291,9 +346,10 @@ export is_unimodal,
 # end
 
 """
-    gaussian_kernel(σ::Float64, length::Int)
+    gaussian_kernel(σ::Real, ll::Int)
 
-Create a Gaussian kernel with standard deviation `σ` and specified `length`.
+Gaussian kernel `exp(-t^2 / (2σ^2))`, normalised to unit sum, sampled at `ll` equally spaced
+points `t` between `-(ll ÷ 2)` and `ll ÷ 2` (unit spacing when `ll` is odd).
 # Arguments
 - `σ`: Standard deviation of the Gaussian kernel.
 - `length`: Length of the kernel.
@@ -307,17 +363,19 @@ function gaussian_kernel(σ::Real, ll::Int)
 end
 
 """
-    gaussian_kernel_estimate(support_vector::Vector{Float64}, σ::Float64, length::Int)
+    gaussian_kernel_estimate(support_vector::Vector, σ::Real; boundary = :continuous)
 
-Apply a Gaussian kernel estimate to a support vector with closed boundary conditions.
+Smooth `support_vector` with `gaussian_kernel(σ, length(support_vector))` by convolution.
 
 # Arguments
-- `support_vector`: The input support vector.
-- `σ`: Standard deviation of the Gaussian kernel.
-- `length`: Length of the kernel.
+- `support_vector`: The input vector.
+- `σ`: Standard deviation of the Gaussian kernel, in samples.
+- `boundary`: `:continuous` extends the vector periodically (wrap-around) before convolving;
+  `:closed` pads it with zeros. Any other value throws an error.
 
 # Returns
-- `estimated_vector`: The estimated vector after applying the Gaussian kernel.
+- The smoothed vector, cut from the full convolution of the extended vector: same length as
+  the input for odd lengths, one element shorter for even lengths.
 """
 function gaussian_kernel_estimate(support_vector::Vector, σ::Real; boundary = :continuous)
 

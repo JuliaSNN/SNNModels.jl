@@ -1,3 +1,28 @@
+"""
+    AggregateScalingParameter(; τ = 10ms, τa, τe, Y, Wmin = 0.5pF, Wmax = 250pF)
+    AggregateScalingParameter(N, rate = 10Hz; τ = 10ms, τa = 100ms, τe = 100ms, Wmin = 0.05)
+
+Parameters of `AggregateScaling` (homeostatic scaling of the summed input weight towards a
+target activity).
+
+# Fields
+- `τ::Float32 = 10ms`: interval between two rescalings of the weights (ms).
+- `τa::Float32`: decay constant of the activity trace `y`, applied per step (see
+  `AggregateScaling`); positional constructor default `100ms`.
+- `τe::Float32`: time constant of the target total weight `WT`, applied per step; positional
+  constructor default `100ms`.
+- `Y::Vector{Float32}`: target value of the activity trace, one per postsynaptic neuron;
+  the positional constructor fills it with `rate` (default `10Hz`, i.e. `0.01` in the
+  library units of 1/ms).
+- `Wmin::Float32 = 0.5pF` (keyword constructor) or `0.05` (positional constructor): offset
+  added to every weight after rescaling. The `pF` unit in the code is a numerical factor
+  (1); the weight unit is that of the synapse target.
+- `Wmax::Float32 = 250pF`: soft upper bound of `WT`.
+
+The positional form builds the vector `Y` for `N` neurons and does not take `Wmax`.
+"""
+AggregateScalingParameter
+
 @snn_kw struct AggregateScalingParameter{FT = Float32,VFT = Vector{Float32}} <: NormParam
     τ::FT = 10ms
     τa::FT
@@ -18,7 +43,49 @@ function AggregateScalingParameter(
     AggregateScalingParameter(; τ = τ, τa = τa, τe = τe, Y = fill(Float32(rate), N), Wmin = Float32(Wmin))
 end
 
-# AggregateScaling
+@doc raw"""
+    AggregateScaling{VFT, VST} <: AbstractNormalization
+
+Homeostatic aggregate scaling of the excitatory input of each postsynaptic neuron: an
+activity trace ``y_i`` drives a target total weight ``W^T_i``, and the incoming weights are
+periodically rescaled so that their sum follows ``W^T_i``.
+
+# Update
+`forward!` (called at every step by both `sim!` and `train!`), for every postsynaptic neuron
+``i`` (per step, without `dt`):
+```math
+y_i \leftarrow y_i - \frac{y_i}{\tau_a} + \delta_i, \qquad
+W^T_i \leftarrow W^T_i + \frac{1}{\tau_e}\left(1 - \frac{W^T_i}{W_{max}}\right)
+\left(1 - \frac{y_i}{Y_i}\right)
+```
+with ``\delta_i = 1`` if neuron ``i`` fired in this step. ``W^T_i`` starts from the summed
+input weight at construction.
+
+`plasticity!` (only under `train!`), every `round(Int, τ / dt)` steps, with ``W^t_i`` the
+current summed input weight:
+```math
+\mu_i = \frac{W^T_i - W_{min}}{W^t_i}, \qquad W_s \leftarrow W_s\,\mu_i + W_{min}
+```
+for every synapse ``s`` onto neuron ``i``.
+
+Note that ``\tau_a`` and ``\tau_e`` are used per integration step (their effective time
+constants are ``\tau_a\,dt`` and ``\tau_e\,dt`` in ms), that ``y`` counts spikes while ``Y`` is
+given as a rate, and that `WT` evolves also under `sim!`.
+
+# Fields
+- `param::AggregateScalingParameter`; `synapses`: the scaled sparse synapses (same
+  postsynaptic population).
+- `Wt::Vector{Float32}`: summed input weight at the last rescaling.
+- `WT::Vector{Float32}`: target summed input weight.
+- `y::Vector{Float32}`: activity trace; `μ::Vector{Float32}`: last scaling factors.
+- `fire`: reference to the postsynaptic `fire` vector.
+- `N::Int32 = 0`: not set by the constructor (stays 0).
+- `id`, `targets`, `records`.
+
+# References
+Reference not given in the code.
+"""
+AggregateScaling
 
 @snn_kw struct AggregateScaling{
     VFT = Vector{Float32},
@@ -38,13 +105,23 @@ end
 end
 
 """
-    SynapseNormalization(N; param, kwargs...)
+    AggregateScaling(N, synapses; param::AggregateScalingParameter, kwargs...)
 
-Constructor function for the SynapseNormalization struct.
-- N: The number of synapses.
-- param: Normalization parameter, can be either MultiplicativeNorm or AdditiveNorm.
-- kwargs: Other optional parameters.
-Returns a SynapseNormalization object with the specified parameters.
+Build an `AggregateScaling` for the vector `synapses` (sparse synapses with the same
+postsynaptic population, asserted). `N` is the number of postsynaptic neurons, either an
+`Int` or any object with a field `N` (e.g. the postsynaptic population). `WT` is initialised
+with the current summed input weight of each neuron.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 100)
+EE = SNN.SpikingSynapse(E, E, :ge; conn = (p = 0.2, μ = 2.0))
+AS = SNN.AggregateScaling(E, [EE]; param = SNN.AggregateScalingParameter(E.N, 5Hz))
+model = SNN.compose(; E, EE, AS)
+SNN.train!(model; duration = 100ms)
+```
 """
 function AggregateScaling(N, synapses; param::AggregateScalingParameter, kwargs...)
     # Set the target and verify is the same population for all synapses
@@ -80,6 +157,12 @@ end
 
 
 
+"""
+    forward!(c::AggregateScaling, param::AggregateScalingParameter)
+
+Update the activity trace `y` and the target summed weight `WT` (see `AggregateScaling`).
+Runs at every step of both `sim!` and `train!`.
+"""
 function forward!(c::AggregateScaling, param::AggregateScalingParameter)
     @unpack y, fire, WT = c
     @unpack Y, τa, τe, Wmax = param
@@ -98,16 +181,10 @@ function forward!(c::AggregateScaling, param::AggregateScalingParameter)
 end
 
 """
-    plasticity!(c::SynapseNormalization, param::AdditiveNorm, dt::Float32)
+    plasticity!(c::AggregateScaling, param::AggregateScalingParameter, dt::Float32, T::Time)
 
-Updates the synaptic weights using additive or multiplicative normalization (operator). This function calculates 
-the rate of change `μ` as the difference between initial weight `W0` and the current weight `W1`, 
-normalized by `W1`. The weights are updated at intervals specified by time constant `τ`.
-
-# Arguments
-- `c`: An instance of SynapseNormalization.
-- `param`: An instance of AdditiveNorm.
-- `dt`: Simulation time step.
+Rescale the incoming weights (see `AggregateScaling`) when `get_step(T)` is a multiple of
+`round(Int, param.τ / dt)`. Called only by `train!`.
 """
 function plasticity!(
     c::AggregateScaling,
@@ -123,6 +200,11 @@ function plasticity!(
 
 end
 
+"""
+    plasticity!(c::AggregateScaling, param::AggregateScalingParameter)
+
+Rescale the incoming weights immediately: `W ← W μ + Wmin` with `μ = (WT - Wmin) / Wt`.
+"""
 function plasticity!(c::AggregateScaling, param::AggregateScalingParameter)
     @unpack Wt, WT, μ, synapses, y = c
     @unpack τe, Y, Wmin = param

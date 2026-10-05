@@ -1,15 +1,10 @@
 import Interpolations: scale, interpolate, BSpline, Linear, NoInterp
 """
     get_time(T::Time)
+    get_time(model::NamedTuple)
 
-Get the current time.
-
-# Arguments
-- `T::Time`: The Time object.
-
-# Returns
-- `Float32`: The current time.
-
+Current simulation time in ms (`T.t[1]`, or `model.time.t[1]` for a model built with
+`compose`), as `Float32`.
 """
 get_time(T::Time)::Float32 = T.t[1]
 
@@ -46,26 +41,17 @@ get_dt(T::Time)::Float32 = T.dt
 """
     get_interval(T::Time)
 
-Get the time interval from 0 to the current time.
-
-# Arguments
-- `T::Time`: The Time object.
-
-# Returns
-- `StepRange{Float32}`: The time interval.
-
+Time points `dt:dt:get_time(T)` (ms) of the steps simulated so far, as a `Float32` range.
 """
 get_interval(T::Time) = Float32(T.dt):Float32(T.dt):get_time(T)
 
 """
     update_time!(T::Time, dt::Float32)
+    update_time!(T::Time, myT::Time)
 
-Update the current time and time step.
-
-# Arguments
-- `T::Time`: The Time object.
-- `dt::Float32`: The time step size.
-
+Advance the clock by one step: `T.t[1] += dt` and the step counter `T.tt[1] += 1`. Called at
+the beginning of every `sim!`/`train!` step, before the stimuli. The second method copies
+time and step counter from `myT` into `T`.
 """
 function update_time!(T::Time, dt::Float32)
     T.t[1] += dt
@@ -77,6 +63,13 @@ function update_time!(T::Time, myT::Time)
     T.tt[1] = myT.tt[1]
 end
 
+"""
+    reset_time!(T::Time)
+    reset_time!(model::NamedTuple)
+
+Set the time to `0` and the step counter to `0` (for a model, its `model.time`). Recordings
+are not cleared; use `clear_records!` for that.
+"""
 function reset_time!(T::Time)
     T.t[1] = 0.0f0
     T.tt[1] = 0
@@ -421,37 +414,6 @@ function record!(obj, T::Time)
     end
 end
 
-"""
-    monitor!(obj, keys; sr=1000Hz, variables=:none, monitor_time=nothing, monitor_rate=nothing)
-
-Register variables on `obj` for recording during the next `sim!`/`train!` call.
-
-Buffers are allocated lazily by `_allocate_records!` just before the time loop, not here.
-
-# Arguments
-- `keys`: Vector of `Symbol` or `(Symbol, indices)` tuples. A tuple restricts recording
-  to the listed neuron indices (legacy path only).
-- `sr`: Sampling rate (default 1000 Hz). Ignored for `:fire`.
-- `variables`: Nested field group (e.g. `:STPVars`). If set, `keys` are looked up inside
-  `obj.<variables>` and stored under compound keys like `STPVars_x`.
-- `monitor_time`: Explicit capacity hint in ms. Overrides the `sim!` duration for
-  buffer sizing. Useful when the total simulation time is unknown at monitor time.
-- `monitor_rate`: Expected maximum firing rate in Hz, used to size the `:fire` COO
-  buffers. Defaults to a conservative 20 Hz if not set.
-
-# Recording modes
-- **Dense** (`:v`, `:ge`, `:gi`, scalar/Vector/Matrix Float32): a contiguous
-  `(snapshot_size..., capacity)` array written in-place via a countdown index.
-  `getvariable` returns a zero-copy `selectdim` view over written columns.
-- **COO event list** (`:fire`): two flat pre-allocated vectors `times_buf` and
-  `neurons_buf`, one entry per spike. Read via `spiketimes(obj)`.
-- **Legacy** (`push!`-based): ragged `Vector{Vector{Float32}}` for types that
-  cannot be pre-allocated (e.g. indexed subsets, `Vector{Vector{Float32}}`).
-
-# Notes
-- Already-monitored keys are silently skipped (warning with `verbose=true`).
-- Missing fields emit a warning with `verbose=true` and are skipped.
-"""
 # Keys created by _init_records!. _clear skips these (they are schema, not data).
 # Add here when adding a new metadata key to _init_records!.
 const _RECORD_META_KEYS = (:indices, :sr, :variables, :data, :meta)
@@ -499,6 +461,66 @@ function _classify_record(sample, has_indices::Bool, n_indices::Int = 0)
     end
 end
 
+"""
+    monitor!(obj, keys; sr = 1000Hz, variables = :none, monitor_time = nothing, monitor_rate = nothing, verbose = false)
+    monitor!(objs::Union{Array,NamedTuple}, keys; sr = 200Hz, kwargs...)
+    monitor!(obj, keys, variables::Symbol; kwargs...)
+
+Register variables of a population, connection or stimulus for recording during the next
+`sim!`/`train!` calls. `keys` is a `Symbol`, a `(Symbol, indices)` tuple, or a vector of
+them. Buffers are allocated just before the time loop starts (`_allocate_records!`), not
+here.
+
+# Arguments
+- `obj`: an `AbstractPopulation`, `AbstractConnection` or `AbstractStimulus`. For a vector
+  or a NamedTuple (e.g. `model.pop`) the call is repeated on each element, and the default
+  sampling rate is then `200Hz` instead of `1000Hz`.
+- `keys`: field names of `obj` (e.g. `:v`, `:w`, `:W`, `:ρ`, `:fire`). A tuple
+  `(sym, indices)` records only the listed elements of a vector field.
+- `sr = 1000Hz`: sampling rate. The sampling period is `max(1, floor(1 / (sr * dt)))` steps,
+  so `sr` larger than `1/dt` records every step. Ignored for `:fire`.
+- `variables = :none`: name of a nested field holding the variables, e.g. `:STPVars` or
+  `:LTPVars` of a `SpikingSynapse`, or `:synvars`. The key `sym` is then read from
+  `obj.<variables>.<sym>` and stored as `Symbol(variables, "_", sym)`, e.g. `:STPVars_u`.
+  The positional form `monitor!(obj, keys, :STPVars)` is equivalent.
+- `monitor_time`: capacity hint in ms used to size the buffers (default: the duration of the
+  `sim!` call, at least 1 s). Recording beyond the capacity is still correct: the buffer is
+  doubled with a one-time warning.
+- `monitor_rate`: expected maximum firing rate (Hz) used to size the `:fire` buffers
+  (default 20 Hz).
+- `verbose = false`: warn about keys already monitored or not found.
+
+# Storage
+- `:fire` is stored as a list of `(time, neuron)` events; read it with `spiketimes(obj)`,
+  `firing_rate`, or `record(obj, :fire; interval)`.
+- `Float32` scalars, `Vector{Float32}` (also with indices), and `Matrix{Float32}` /
+  `Array{Float32,3}` without indices are stored in a dense array with time as the last
+  dimension; read with `getvariable` (raw samples) or `record` (interpolated in time).
+- Other field types (e.g. matrices with indices, vectors of vectors) are stored as a vector
+  of snapshots.
+- A first sample is taken at `t = 0` when the model time is 0.
+
+Already-monitored keys and missing fields are skipped silently (with a warning if
+`verbose = true`).
+
+!!! note
+    In SNNModels 1.8.4 the indices of `(:fire, indices)` are ignored: the spikes of all
+    neurons are recorded.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 100)
+stim = SNN.Stimulus(SNN.PoissonFixed(rate = 2kHz), E, :ge)
+SNN.monitor!(E, [:v, :fire]; sr = 2kHz)
+SNN.monitor!(E, [(:w, [1, 2, 3])])
+model = SNN.compose(; E, stim)
+SNN.sim!(; model, duration = 200ms)
+v = SNN.getvariable(E, :v)          # 100 x 401 samples
+st = SNN.spiketimes(E)
+```
+"""
 function monitor!(
     obj::Item,
     keys::Vector;
@@ -618,13 +640,24 @@ monitor!(objs, keys, variables::Symbol; kwargs...) =
     monitor!(objs, keys; variables = variables, kwargs...)
 
 """
-    interpolated_record(p, sym)
+    interpolated_record(p, sym, τ = 20ms)
 
-    Returns the recording with interpolated time values and the extrema of the recorded time points.
+Return `(y, r)`: the recording `sym` of `p` as an `Interpolations` object `y` with time
+as the last axis, and the range `r` of time points (ms) assigned to the samples.
+It is evaluated with call syntax, `y(i, t)` (indices or ranges), at any `t` within `r` (linear
+interpolation; singleton dimensions are not interpolated). Indexing with square brackets and
+a non-integer time does not work.
 
-    N.B. 
-    ----
-    The element can be accessed at whichever time point by using the index of the array. The time point must be within the range of the recorded time points, in r_v.
+`r` spans from the time of the first `record!` call to the time of the last one
+(`records[:start_time][sym]` to `records[:end_time][sym]`) with as many points as samples,
+i.e. it assumes evenly spaced samples between these two times. The samples are actually taken
+at the steps whose global step counter is a multiple of the sampling period (including
+`t = 0` for a fresh model). The axis is therefore exact only when monitoring starts at
+`t = 0` and the simulated time is a multiple of the sampling period; otherwise (e.g. a
+variable monitored from `t = 2s` on) `r` is shifted or stretched by up to one sampling
+period with respect to the true sample times.
+
+For `sym == :fire` it returns `firing_rate(p, τ = 20ms)` (the argument `τ` is not used).
 """
 function interpolated_record(p, sym, τ = 20ms)
     if sym == :fire
@@ -645,6 +678,13 @@ function interpolated_record(p, sym, τ = 20ms)
     return y, r_v
 end
 
+"""
+    get_measure_interval(p, sym::Symbol, steps::Int)
+    get_measure_interval(p, sym::Symbol, step::AbstractFloat)
+
+Time range from `p.records[:start_time][sym]` to `p.records[:end_time][sym]`, with `steps`
+points or with step `step` (ms).
+"""
 function get_measure_interval(p::AbstractComponent, sym::Symbol, steps::Int)
     _start = p.records[:start_time][sym]
     _end = p.records[:end_time][sym]
@@ -663,6 +703,13 @@ end
 
 
 
+"""
+    add_endtime!(model::NamedTuple)
+
+For every monitored key of every component of `model` that has no end time, set
+`records[:end_time][key]` to the current model time. Used for records loaded from older
+files.
+"""
 function add_endtime!(model::NamedTuple)
     @assert isa_model(model) "Model is not a valid NetworkModel"
     time = model.time
@@ -686,6 +733,12 @@ function add_endtime!(model::NamedTuple)
     end
 end
 
+"""
+    add_starttime!(model::NamedTuple)
+
+For every monitored key of every component of `model` that has no start time, set
+`records[:start_time][key] = 0`. Used for records loaded from older files.
+"""
 function add_starttime!(model::NamedTuple)
     @assert isa_model(model) "Model is not a valid NetworkModel"
     for obj in values(model)
@@ -724,33 +777,39 @@ function get_interpolator(A::AbstractArray)
 end
 
 """
-    record(p, sym::Symbol; range = false, interval = nothing, kwargs...)
+    record(p, sym::Symbol; range = false, interval = nothing, interpolate = true, variables = nothing, kwargs...)
+    record(p, sym::Symbol, interval::AbstractRange; kwargs...)
+    record(pops, sym::Symbol; interval, interpolate = true, kwargs...)
 
-Record data from a population `p` based on the specified symbol `sym`.
+Read a recording of a population, connection or stimulus `p`.
 
-# Arguments
-- `p`: The population from which to record data.
-- `sym::Symbol`: The type of data to record. Valid options are `:fire` for firing rate, `:spiketimes` or `:spikes` for spike times.
-- `range::Bool=false`: If `true`, return both the recorded data and the range. Default is `false`.
-- `interval`: The time interval for recording. Required for firing rate recording (`sym = :fire`).
-- `kwargs...`: Additional keyword arguments to pass to the recording function.
+- `sym == :fire`: firing rates computed by `firing_rate(p, interval; interpolate, kwargs...)`;
+  `interval` (an `AbstractRange`, ms) is required.
+- `sym == :spiketimes` or `:spikes`: returns `spiketimes(p)` (ignores `range`).
+- any other `sym`: with `interpolate = true` (default) an interpolation object over time,
+  as returned by [`interpolated_record`](@ref), resampled on `interval` if given; with
+  `interpolate = false` the raw samples `getvariable(p, sym)` (and `r = interval`).
+- `variables`: name of the variable group used in `monitor!` (e.g. `:STPVars`); the key read is
+  `Symbol(variables, "_", sym)`. Equivalent to passing `:STPVars_u` directly.
+- `range = true` returns `(v, r)` instead of `v`.
 
-# Returns
-- If `sym = :fire` and `range = true`, returns a tuple `(v, r)` where `v` is the firing rate and `r` is the range.
-- If `sym = :fire` and `range = false`, returns the firing rate `v`.
-- If `sym = :spiketimes` or `sym = :spikes`, returns the spike times.
-- For other symbols, returns a tuple `(v, r)` if `range = true`, or `v` if `range = false`.
+The method on a collection `pops` stacks the interpolated recordings of all elements sampled
+on `interval` (required); elements that do not record `sym` contribute no rows.
 
-# Examples
+# Example
 ```julia
-# Record firing rate for a population p over a specific interval
-v = record(p, :fire; interval = (0.0, 1.0))
-
-# Record firing rate and range for a population p over a specific interval
-v, r = record(p, :fire; range = true, interval = (0.0, 1.0))
-
-# Record spike times for a population p
-spikes = record(p, :spiketimes)
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 50)
+stim = SNN.Stimulus(SNN.PoissonFixed(rate = 2kHz), E, :ge)
+SNN.monitor!(E, [:v, :fire])
+model = SNN.compose(; E, stim)
+SNN.sim!(; model, duration = 500ms)
+v = SNN.record(E, :v)                   # interpolated: v(1, 100.5ms)
+v, r = SNN.record(E, :v, range = true)  # r: time axis in ms
+v_raw = SNN.record(E, :v, interpolate = false)
+fr, r = SNN.record(E, :fire; interval = 0:10ms:500ms, range = true)
+st = SNN.record(E, :spikes)
 ```
 """
 function record(
@@ -820,9 +879,12 @@ record(p::T, sym::Symbol, interval::R; kwargs...) where {R<:AbstractRange, T<:Un
 
 
 """
-getvariable(obj, key, id=nothing)
+    getvariable(obj, key::Symbol, id = nothing)
 
-Returns the recorded values for a given object and key. If an id is provided, returns the recorded values for that specific id.
+Raw recorded samples of `key`, without interpolation, with time as the last dimension
+(neurons x samples for a vector field). For dense records this is a view on the buffer
+restricted to the samples written so far; `id` selects an index (or indices) along the
+first dimension. Legacy records are concatenated into a new array.
 """
 function getvariable(obj, key, id = nothing)
     # Dense path (manifesto §6): zero-copy view over written time-slots.
@@ -868,7 +930,9 @@ end
 """
     getrecord(p, sym)
 
-Return `p.records[sym]`, or throw `ArgumentError` if not found.
+Return the raw storage `p.records[sym]` (for dense records the full pre-allocated buffer,
+including unwritten slots; prefer `getvariable`). Throws `ArgumentError` if `sym` is not
+recorded.
 """
 function getrecord(p, sym)
     haskey(p.records, sym) && return p.records[sym]
@@ -876,9 +940,11 @@ function getrecord(p, sym)
 end
 
 """
-clear_records!(obj)
+    clear_records!(obj)
 
-Clears all the records of a given object.
+Delete the recorded data of `obj` (a component, or a model/NamedTuple/collection of
+components, recursing into groups) but keep the monitoring set-up: the next `sim!` records
+the same variables again, with new start and end times.
 """
 function clear_records!(obj)
     if obj isa AbstractPopulation || obj isa AbstractStimulus || obj isa AbstractConnection
@@ -944,9 +1010,9 @@ function _clear(z)
 end
 
 """
-clear_records!(obj, sym::Symbol)
+    clear_records!(obj, sym::Symbol)
 
-Clears the records of a given object for a specific symbol.
+Delete the recorded data of the key `sym` of `obj` only, keeping it monitored.
 """
 function clear_records!(obj, sym::Symbol)
     meta = get(obj.records, :meta, nothing)
@@ -971,9 +1037,9 @@ function clear_records!(obj, sym::Symbol)
 end
 
 """
-clear_records!(objs::AbstractArray)
+    clear_records!(objs::AbstractArray)
 
-Clears the records of multiple objects.
+Call `clear_records!` on each element of `objs`.
 """
 function clear_records!(objs::AbstractArray)
     for obj in objs

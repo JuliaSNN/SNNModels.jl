@@ -1,3 +1,30 @@
+@doc raw"""
+    ExtendedIFParameter{FT = Float32}(; Cm = 250pF, Vt = -40mV, Vr = -65mV, El = -70mV,
+                                       gl = 10nS, τe = 6ms, τi = 20ms, E_i = -75mV,
+                                       E_e = 0mV, τabs = 5ms, α = 0)
+
+Parameters of `ExtendedIF`, a conductance-based integrate-and-fire neuron with three synaptic
+conductances (excitatory, PV-like and SST-like inhibition) and a multiplicative
+excitation-SST interaction term.
+
+# Fields
+- `Cm::FT = 250pF`: membrane capacitance (pF).
+- `Vt::FT = -40mV`: spike threshold (mV).
+- `Vr::FT = -65mV`: reset potential (mV).
+- `El::FT = -70mV`: leak reversal potential (mV).
+- `gl::FT = 10nS`: leak conductance (nS); the code marks this value as arbitrary.
+- `τe::FT = 6ms`: decay time constant of `g_Exc` (ms).
+- `τi::FT = 20ms`: decay time constant of `g_PV` and `g_SST` (ms).
+- `E_i::FT = -75mV`: inhibitory reversal potential (mV), used by both PV and SST conductances.
+- `E_e::FT = 0mV`: excitatory reversal potential (mV).
+- `τabs::FT = 5ms`: absolute refractory period (ms).
+- `α::FT = 0.0`: strength of the interaction term ``-α\, g_E\, g_{SST} (E_e - v)``
+  (1/nS); `0` disables it ("dendritic interaction term" in the code).
+
+Reference not given in the code.
+"""
+ExtendedIFParameter
+
 @snn_kw struct ExtendedIFParameter{FT = Float32} <: AbstractGeneralizedIFParameter
     Cm::FT = 250pF
     Vt::FT = -40mV
@@ -11,6 +38,56 @@
     τabs::FT = 5ms # Absolute refractory period
     α::FT = 0.0 # Dendritic interaction term
 end
+
+@doc raw"""
+    ExtendedIF(; N = 100, param = ExtendedIFParameter(), name = "ExtendedIF", kwargs...)
+
+Conductance-based integrate-and-fire population with excitatory (`g_Exc`), PV (`g_PV`) and SST
+(`g_SST`) conductances and an optional multiplicative interaction between excitation and SST
+inhibition. Unlike `IF` and `AdEx`, it has no `synapse` field: the conductances are fields of the
+population and decay exponentially. No `synaptic_target` method is defined for `ExtendedIF`
+in SNNModels 1.8.4, so `SpikingSynapse(pre, post::ExtendedIF, ...)` raises a `MethodError`;
+the conductances can only be driven by writing into `g_Exc`, `g_PV`, `g_SST` directly.
+
+# Equations
+```math
+\begin{aligned}
+C_m \frac{dv}{dt} &= g_l (E_l - v) + g_E (E_e - v) + g_{PV} (E_i - v) + g_{SST} (E_i - v)
+                    - \alpha\, g_E\, g_{SST} (E_e - v) + I \\
+\frac{dg_E}{dt} &= -\frac{g_E}{\tau_e}, \qquad
+\frac{dg_{PV}}{dt} = -\frac{g_{PV}}{\tau_i}, \qquad
+\frac{dg_{SST}}{dt} = -\frac{g_{SST}}{\tau_i}
+\end{aligned}
+```
+Spike when ``v > V_t``, then ``v \leftarrow V_r`` and refractoriness for `τabs`.
+
+# Integration
+`integrate!` first decays the three conductances (forward Euler), then updates each neuron:
+if `tabs > 0` the neuron is refractory (`fire = false`, `tabs -= 1`, ``v`` unchanged); otherwise
+one forward-Euler step of ``v``, threshold test, reset to `Vr` and `tabs = round(Int, τabs / dt)`.
+
+# Fields
+- `id::String = randstring(12)`, `name::String = "ExtendedIF"`.
+- `param::ExtendedIFParameter = ExtendedIFParameter()`.
+- `N::Int32 = 100`.
+- `v`: membrane potential (mV), uniform in `[Vr, Vt]`.
+- `g_Exc`, `g_PV`, `g_SST`: conductances (nS), zeros.
+- `tabs`: refractory counters (steps, stored as `Float32`), zeros.
+- `w`: unused by the dynamics, zeros.
+- `fire::Vector{Bool}`; `I`: external current (pA); `records::Dict`.
+- `Δv`, `Δv_temp`: unused buffers.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.ExtendedIF(N = 10, param = SNN.ExtendedIFParameter(α = 0.01))
+E.I .= 400pA
+SNN.monitor!(E, [:v, :fire])
+SNN.sim!([E]; duration = 100ms)
+```
+"""
+ExtendedIF
 
 @snn_kw mutable struct ExtendedIF{
     VFT = Vector{Float32},

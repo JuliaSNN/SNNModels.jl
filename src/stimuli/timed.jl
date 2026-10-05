@@ -1,23 +1,23 @@
 """
-    SpikeTimeStimulusParameter{VFT, VIT} <: AbstractStimulusParameter
+    SpikeTimeStimulusParameter(; spiketimes = [], neurons = [])
+    SpikeTimeStimulusParameter(spiketimes::Vector{Float32}, neurons::Vector{Int})
 
-A parameter structure for spike time stimulus in spiking neural networks. Users are encouraged to create instances of this struct using the provided constructors rather than directly instantiating it. This will ensure that the spike times and neuron indices are properly sorted and with the correct types.
+List of input spikes for a [`SpikeTimeStimulus`](@ref): spike `k` is emitted by input
+neuron `neurons[k]` at time `spiketimes[k]` (ms).
 
+`SpikeTimeStimulus` walks through the list in order, so `spiketimes` must be sorted in
+increasing order. The direct constructors do not sort; prefer [`SpikeTimeParameter`](@ref),
+which sorts the spikes by time and converts the times to `Float32`.
 
 # Fields
-- `spiketimes::VFT`: Vector of spike times (default: `Float32[]`)
-- `neurons::VIT`: Vector of neuron indices corresponding to each spike time (default: `Int[]`)
+- `spiketimes::Vector{Float32} = []`: spike times (ms), sorted.
+- `neurons::Vector{Int} = []`: index of the input neuron of each spike (same length).
 
-# Constructors
-- `SpikeTimeStimulusParameter(spiketimes, neurons)`: Creates a parameter structure with given spike times and neuron indices.
-- `SpikeTimeStimulusParameter()`: Creates an empty parameter structure with default empty vectors.
-- `SpikeTimeParameter(spiketimes, neurons)`: Alternative constructor that sorts spike times and neuron indices by spike time.
-- `SpikeTimeParameter(;spiketimes, neurons)`: Keyword argument constructor that sorts spike times and neuron indices by spike time.
-- `SpikeTimeParameter(spiketimes::Spiketimes)`: Converts a `Spiketimes` object to a `SpikeTimeStimulusParameter` by flattening the spike times and neuron indices.
-
-# Notes
-- The spike times and neuron indices are automatically sorted by spike time in the constructors that accept them.
-- The `Spiketimes` type is expected to be a collection of spike times for each neuron.
+# Related functions
+- `SpikeTimeParameter(spiketimes, neurons)`, `SpikeTimeParameter(; spiketimes, neurons)`,
+  `SpikeTimeParameter(st::Spiketimes)`: build a sorted parameter.
+- `shift_spikes!(param, delay)`: add `delay` to all spike times.
+- `max_neuron(param)`: largest input neuron index (0 if empty).
 """
 SpikeTimeStimulusParameter
 
@@ -27,6 +27,29 @@ SpikeTimeStimulusParameter
     neurons::VIT=[]
 end
 
+"""
+    SpikeTimeParameter(spiketimes::Vector, neurons::Vector{Int})
+    SpikeTimeParameter(; neurons = Int[], spiketimes = Float32[])
+    SpikeTimeParameter(st::Spiketimes)
+    SpikeTimeParameter(st::Vector{Vector{Float64}})
+
+Build a [`SpikeTimeStimulusParameter`](@ref).
+
+- `SpikeTimeParameter(spiketimes, neurons)`: asserts equal lengths, sorts the pairs by spike
+  time and converts the times to `Float32`.
+- `SpikeTimeParameter(st::Spiketimes)` (and `Vector{Vector{Float64}}`): flattens one vector of
+  spike times per input neuron (`st[i]` are the times of neuron `i`) and sorts by time.
+- The keyword form `SpikeTimeParameter(; neurons, spiketimes)` passes the vectors to the
+  struct unchanged: it does NOT sort, so the spike times must already be sorted.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+param = SNN.SpikeTimeParameter([30ms, 10ms, 20ms], [1, 2, 3])
+param.spiketimes, param.neurons   # (Float32[10, 20, 30], [2, 3, 1])
+```
+"""
 SpikeTimeParameter(; neurons = Int[], spiketimes = Float32[]) =
     SpikeTimeStimulusParameter(spiketimes, neurons)
 
@@ -56,47 +79,52 @@ function SpikeTimeParameter(spiketimes::Vector{Vector{Float64}})
 end
 
 ## SpikeTimeStimulus
-"""
-    SpikeTimeStimulus{FT, VFT, VBT, DT, VIT} <: AbstractStimulus
+@doc raw"""
+    SpikeTimeStimulus(post::AbstractPopulation, sym::Symbol, comp = nothing;
+                      conn, param::SpikeTimeStimulusParameter, N = nothing, name = "SpikeTime")
+    Stimulus(param::SpikeTimeStimulusParameter, post, sym, comp = nothing; conn, kwargs...)
 
-A spike time stimulus structure for spiking neural networks. This stimulus type delivers spikes to postsynaptic neurons at specified times.
+Deliver a predefined list of spikes from `N` virtual input neurons to `post` through a
+sparse weight matrix.
+
+`conn` is a connectivity NamedTuple (e.g. `(p = 0.1, μ = 1.0)`, see `sparse_matrix`) or a
+weight matrix of size `post.N x N`. `N` defaults to `max_neuron(param)`, the largest input
+neuron index in `param`. For one-to-one input use [`SpikeTimeStimulusIdentity`](@ref).
+
+# Equations
+At each step, every spike ``k`` with ``t_k \le t`` that has not been delivered yet (spikes
+are consumed in order) makes its input neuron ``j = `` `neurons[k]` fire and increments
+its targets ``i``:
+```math
+g_i \leftarrow g_i + W_{ij}
+```
+Since the clock is advanced before stimuli are called, a spike at ``t_k`` is delivered in
+the first step whose end time is ``\ge t_k``; the timing resolution is `dt`.
 
 # Fields
-- `N::Int`: Number of presynaptic neurons
-- `name::String`: Name of the stimulus (default: "SpikeTime")
-- `id::String`: Unique identifier for the stimulus (default: random 12-character string)
-- `param::SpikeTimeStimulusParameter`: Parameter structure containing spike times and neuron indices
-- `rowptr::VIT`: Row pointer of sparse weight matrix
-- `colptr::VIT`: Column pointer of sparse weight matrix
-- `I::VIT`: Postsynaptic indices of weight matrix
-- `J::VIT`: Presynaptic indices of weight matrix
-- `index::VIT`: Index mapping for weight matrix
-- `W::VFT`: Synaptic weights
-- `g::VFT`: Rise conductance
-- `next_spike::VFT`: Next spike time (default: [0])
-- `next_index::VIT`: Index of next spike (default: [0])
-- `fire::VBT`: Boolean vector indicating which neurons fired (default: falses(N))
-- `records::Dict`: Dictionary for recording data
-- `targets::Dict`: Dictionary specifying stimulus targets
+- `N::Int`: number of input neurons; `name = "SpikeTime"`; `id`
+- `param::SpikeTimeStimulusParameter`
+- `rowptr`, `colptr`, `I`, `J`, `index`, `W`: sparse connectivity from `dsparse`.
+- `g::Vector{Float32}`: target variable of `post` (shared).
+- `next_spike::Vector{Float32}`: time of the next spike (`Inf` when exhausted).
+- `next_index::Vector{Int}`: index of the next spike in `param` (`-1` when exhausted).
+- `fire::Vector{Bool}`: input neurons that fired in the last step (recordable with
+  `monitor!(stim, :fire)`).
+- `records::Dict`, `targets::Dict`
 
-# Constructors
-- `SpikeTimeStimulus(post::AbstractPopulation, sym::Symbol, target; kwargs...)`: Creates a spike time stimulus with specified parameters.
-- `SpikeTimeStimulusIdentity(post::AbstractPopulation, sym::Symbol, target; kwargs...)`: Creates an identity spike time stimulus where each presynaptic neuron connects to a corresponding postsynaptic neuron.
+To reuse the stimulus with new spikes call `update_spikes!` or `shift_spikes!`, which also
+rewind `next_index`/`next_spike`.
 
-# Keyword Arguments
-- `p::Real`: Connection probability (default: 0.05)
-- `μ`: Mean of synaptic weight distribution (default: 1.0)
-- `σ`: Standard deviation of synaptic weight distribution (default: 0.0)
-- `w`: Synaptic weight matrix (default: generated based on distribution parameters)
-- `dist::Symbol`: Distribution type for synaptic weights (default: :Normal)
-- `rule::Symbol`: Connection rule (default: :Fixed)
-- `N::Int`: Number of presynaptic neurons (default: determined from parameters)
-- `param::SpikeTimeStimulusParameter`: Spike time parameters (required)
-
-# Notes
-- The stimulus delivers spikes to postsynaptic neurons at times specified in the `param` field.
-- The synaptic weight matrix can be specified directly or generated based on distribution parameters.
-- The `SpikeTimeStimulusIdentity` constructor creates a 1-to-1 connection between presynaptic and postsynaptic neurons.
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 10)
+param = SNN.SpikeTimeParameter([10ms, 20ms, 30ms], [1, 2, 1])
+stim = SNN.SpikeTimeStimulus(E, :ge; param, conn = (p = 0.5, μ = 2.0))
+model = SNN.compose(; E, stim)
+SNN.sim!(; model, duration = 50ms)
+```
 """
 SpikeTimeStimulus
 
@@ -156,26 +184,21 @@ function SpikeTimeStimulus(
 end
 
 """
-    SpikeTimeStimulusIdentity(post::AbstractPopulation, sym::Symbol, comp::AbstractCompartment; param::SpikeTimeStimulusParameter, kwargs...)
+    SpikeTimeStimulusIdentity(post::AbstractPopulation, sym::Symbol, comp = nothing;
+                              param::SpikeTimeStimulusParameter, kwargs...)
 
-Create an identity spike time stimulus where each presynaptic neuron connects to a corresponding postsynaptic neuron.
+[`SpikeTimeStimulus`](@ref) with one input neuron per neuron of `post` and one-to-one
+connections of weight 1: input neuron `j` excites only neuron `j` of `post`, adding 1 to its
+target variable per spike. `N = post.N`; the connectivity is a sparse identity matrix
+(no dense `N x N` matrix is built). Extra keywords (e.g. `name`) are forwarded.
 
-This constructor creates a 1-to-1 connection between presynaptic and postsynaptic neurons, with each neuron in the presynaptic population connecting to the same neuron in the postsynaptic population. The synaptic weight matrix is set to an identity matrix.
-
-# Arguments
-- `post::AbstractPopulation`: The postsynaptic population to which the stimulus will be applied
-- `sym::Symbol`: The symbol representing the synaptic connection
-- `target`: The target of the stimulus (optional)
-- `param::SpikeTimeStimulusParameter`: The spike time parameters for the stimulus
-- `kwargs...`: Additional keyword arguments to pass to the `SpikeTimeStimulus` constructor
-
-# Returns
-- `SpikeTimeStimulus`: A spike time stimulus with identity connections
-
-# Notes
-- The number of presynaptic neurons (N) is set to the size of the postsynaptic population (post.N)
-- The synaptic weight matrix is set to a sparse identity matrix
-- This is useful for creating direct connections between corresponding neurons in presynaptic and postsynaptic populations
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 10)
+stim = SNN.SpikeTimeStimulusIdentity(E, :ge; param = SNN.SpikeTimeParameter([5ms, 10ms], [3, 7]))
+```
 """
 function SpikeTimeStimulusIdentity(
     post::T,
@@ -188,6 +211,12 @@ function SpikeTimeStimulusIdentity(
     return SpikeTimeStimulus(post, sym, comp; conn, N = post.N, param = param, kwargs...)
 end
 
+"""
+    Stimulus(param::SpikeTimeStimulusParameter, post::AbstractPopulation, sym::Symbol, comp = nothing; kwargs...)
+
+Build a [`SpikeTimeStimulus`](@ref); equivalent to
+`SpikeTimeStimulus(post, sym, comp; param, kwargs...)` (the keyword `conn` is required).
+"""
 function Stimulus(
     param::SpikeTimeStimulusParameter,
     post::T,
@@ -201,28 +230,9 @@ end
 """
     stimulate!(s::SpikeTimeStimulus, param::SpikeTimeStimulusParameter, time::Time, dt::Float32)
 
-Update the synaptic conductances of a `SpikeTimeStimulus` based on the current simulation time.
-
-This function processes all spikes that have occurred up to the current simulation time, updating the synaptic conductances of the postsynaptic neurons accordingly. It also advances the spike index to the next unprocessed spike.
-
-# Arguments
-- `s::SpikeTimeStimulus`: The spike time stimulus to update
-- `param::SpikeTimeStimulusParameter`: The spike time parameters containing spike times and neuron indices
-- `time::Time`: The current simulation time
-- `dt::Float32`: The time step of the simulation (unused in this function)
-
-# Details
-- The function first resets the `fire` vector to indicate no neurons have fired
-- It then processes all spikes that have occurred up to the current time:
-  - For each spike, it marks the presynaptic neuron as fired
-  - It updates the synaptic conductances of all postsynaptic neurons connected to the firing neuron
-  - It advances to the next spike in the spike train
-- If there are no more spikes, the next spike time is set to infinity and the next index is set to -1
-
-# Notes
-- The function modifies the `fire`, `g`, `next_spike`, and `next_index` fields of the stimulus
-- The synaptic conductances are updated by adding the synaptic weights of the connected neurons
-- This function is typically called during each time step of a simulation
+Clear `s.fire`, then deliver every pending spike with time `<= get_time(time)`: mark its
+input neuron in `s.fire`, add the weights of its outgoing connections to `s.g`, and advance
+`next_index`/`next_spike` (set to `-1`/`Inf` after the last spike). `dt` is unused.
 """
 function stimulate!(
     s::SpikeTimeStimulus,
@@ -251,19 +261,11 @@ end
 """
     next_neuron(p::SpikeTimeStimulus)
 
-Get the index of the next neuron that will fire in the spike time stimulus.
+Return the input neuron of the next pending spike, `param.neurons[next_index]`, if
+`next_index < length(param.spiketimes)`; otherwise return `[]`.
 
-This function returns the index of the presynaptic neuron that will fire next in the stimulus. If there are no more spikes to process, it returns an empty array.
-
-# Arguments
-- `p::SpikeTimeStimulus`: The spike time stimulus to query
-
-# Returns
-- The index of the next neuron to fire, or an empty array if there are no more spikes
-
-# Notes
-- This function does not modify the stimulus state
-- The returned neuron index corresponds to the presynaptic neuron in the stimulus
+Known limitations (SNNModels 1.8.4): when only the last spike is pending it returns `[]`,
+and after all spikes have been delivered (`next_index == -1`) it throws a `BoundsError`.
 """
 function next_neuron(p::SpikeTimeStimulus)
     @unpack next_spike, next_index, param = p
@@ -275,19 +277,9 @@ function next_neuron(p::SpikeTimeStimulus)
 end
 
 """
-    shift_spikes!(param::Vector{Float32}, delay::Number)
+    shift_spikes!(spiketimes::Vector{Float32}, delay::Number)
 
-Shift all spike times in a vector by a specified delay.
-
-This function modifies the spike times in the vector by adding the specified delay to each time. This effectively shifts all spikes forward or backward in time.
-
-# Arguments
-- `param::Vector{Float32}`: Vector of spike times to be shifted
-- `delay::Number`: The amount of time to shift each spike (can be positive or negative)
-
-# Notes
-- The function modifies the input vector in-place
-- The delay is converted to Float32 before being added to the spike times
+Add `Float32(delay)` (ms, may be negative) to every element of `spiketimes`, in place.
 """
 function shift_spikes!(param::Vector{Float32}, delay::Number)
     @. param += Float32(delay)
@@ -296,17 +288,8 @@ end
 """
     shift_spikes!(param::SpikeTimeStimulusParameter, delay::Number)
 
-Shift all spike times in a SpikeTimeStimulusParameter by a specified delay.
-
-This function modifies the spike times in the parameter structure by adding the specified delay to each time. This effectively shifts all spikes forward or backward in time.
-
-# Arguments
-- `param::SpikeTimeStimulusParameter`: The parameter structure containing spike times to be shifted
-- `delay::Number`: The amount of time to shift each spike (can be positive or negative)
-
-# Notes
-- The function modifies the spike times in the parameter structure in-place
-- The delay is converted to Float32 before being added to the spike times
+Add `delay` (ms) to all spike times of `param`, in place. The state of a stimulus that uses
+`param` is not rewound; use `shift_spikes!(stimulus, delay)` for that.
 """
 function shift_spikes!(param::SpikeTimeStimulusParameter, delay::Number)
     shift_spikes!(param.spiketimes, delay)
@@ -315,18 +298,20 @@ end
 """
     shift_spikes!(stimulus::SpikeTimeStimulus, delay::Number)
 
-Shift all spike times in a SpikeTimeStimulus by a specified delay.
+Add `delay` (ms) to all spike times of `stimulus.param` and rewind the stimulus to the first
+spike (`next_index = 1`, `next_spike = spiketimes[1]`). Spikes shifted to times earlier than
+the current simulation time are all delivered at the next step. Requires a non-empty spike
+list.
 
-This function modifies the spike times in the stimulus by adding the specified delay to each time. It also resets the stimulus to start processing spikes from the beginning of the shifted spike train.
-
-# Arguments
-- `stimulus::SpikeTimeStimulus`: The stimulus containing spike times to be shifted
-- `delay::Number`: The amount of time to shift each spike (can be positive or negative)
-
-# Notes
-- The function modifies the spike times in the stimulus in-place
-- The stimulus is reset to start processing spikes from the first spike in the shifted spike train
-- The delay is converted to Float32 before being added to the spike times
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 10)
+stim = SNN.SpikeTimeStimulusIdentity(E, :ge; param = SNN.SpikeTimeParameter([5ms, 10ms], [3, 7]))
+SNN.shift_spikes!(stim, 100ms)
+stim.param.spiketimes  # Float32[105, 110]
+```
 """
 function shift_spikes!(stimulus::SpikeTimeStimulus, delay::Number)
     shift_spikes!(stimulus.param.spiketimes, delay)
@@ -337,22 +322,22 @@ end
 """
     update_spikes!(stim, spikes, start_time = 0.0f0)
 
-Update the spike times in a stimulus with new spike data.
+Replace the spike list of a [`SpikeTimeStimulus`](@ref) with `spikes` and rewind it.
 
-This function replaces the existing spike times and neuron indices in the stimulus with new data from the provided spikes object. The new spike times are offset by the specified start time.
+`spikes` must have fields `spiketimes` and `neurons` (e.g. a `SpikeTimeStimulusParameter`).
+The new times are `spikes.spiketimes .+ start_time`; they are not sorted, so `spikes` must be
+sorted by time. `stim.next_index` is set to 1 and `stim.next_spike` to the first new spike
+time (requires at least one spike). The input-neuron count `stim.N` and the weight matrix are
+not changed, so the new neuron indices must be `<= stim.N`. Returns `stim`.
 
-# Arguments
-- `stim`: The stimulus to update (must have a `param` field with `spiketimes` and `neurons` vectors)
-- `spikes`: An object containing new spike times and neuron indices (must have `spiketimes` and `neurons` fields)
-- `start_time::Float32`: The time offset to apply to the new spike times (default: 0.0f0)
-
-# Returns
-- The updated stimulus
-
-# Notes
-- The function clears the existing spike data and replaces it with the new data
-- The stimulus is reset to start processing spikes from the first spike in the new spike train
-- The new spike times are offset by the specified start time
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 10)
+stim = SNN.SpikeTimeStimulusIdentity(E, :ge; param = SNN.SpikeTimeParameter([5ms], [1]))
+SNN.update_spikes!(stim, SNN.SpikeTimeParameter([1ms, 2ms], [4, 5]), 1000ms)
+```
 """
 function update_spikes!(stim, spikes, start_time = 0.0f0)
     empty!(stim.param.spiketimes)
@@ -367,19 +352,8 @@ end
 """
     max_neuron(param::SpikeTimeStimulusParameter)
 
-Get the maximum neuron index in a SpikeTimeStimulusParameter.
-
-This function returns the highest neuron index present in the parameter structure. If there are no neurons, it returns 0.
-
-# Arguments
-- `param::SpikeTimeStimulusParameter`: The parameter structure containing neuron indices
-
-# Returns
-- The maximum neuron index, or 0 if there are no neurons
-
-# Notes
-- This function does not modify the parameter structure
-- The maximum neuron index is determined by finding the maximum value in the `neurons` vector
+Largest input neuron index in `param.neurons`, or `0` if there are no spikes. Used as the
+default number of input neurons `N` of a `SpikeTimeStimulus`.
 """
 max_neuron(param::SpikeTimeStimulusParameter) =
     isempty(param.neurons) ? 0 : maximum(param.neurons)

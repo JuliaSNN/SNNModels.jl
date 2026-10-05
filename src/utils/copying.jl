@@ -8,26 +8,36 @@
 """
     modelcopy(x)
 
-Create a deep copy of `x`: everything is copied recursively, resulting in a fully
-independent object. For example, deep-copying an array creates deep copies of all
-the objects it contains and produces a new array with the consistent relationship
-structure (e.g., if the first two elements are the same object in the original array,
-the first two elements of the new array will also be the same `modelcopy`ed object).
-Calling `modelcopy` on an object should generally
-have the same effect as serializing and then deserializing it.
+Deep copy of a model (or of any object), adapted from `Base.deepcopy`, that does not copy recorded
+data.
 
-While it isn't normally necessary, user-defined types can override the default `modelcopy`
-behavior by defining a specialized version of the function
-`modelcopy_internal(x::T, dict::IdDict)` (which shouldn't otherwise be used),
-where `T` is the type to be specialized for, and `dict` keeps track of objects copied
-so far within the recursion. Within the definition, `modelcopy_internal` should be used
-in place of `modelcopy`, and the `dict` variable should be
-updated as appropriate before returning.
+The object graph is copied recursively as with `deepcopy` (shared references stay shared in the
+copy). The difference is in `Dict`s that hold a `:data` key, i.e. the `records` dictionaries
+filled by `monitor!`:
 
-!!! warning
-    It is better to avoid this function in favor of custom `copy` methods or use-case-specific
-    copying functions. `modelcopy` is slow and can easily copy too many objects, or generate an
-    object that violates invariants, since it does not respect abstraction boundaries.
+- the variables listed in `records[:data]` are replaced by empty buffers (`:fire` by an empty
+  spike-record dictionary with `:time`, `:neurons`, `:times_buf`, `:neurons_buf`; every other
+  variable by an empty `Vector{Float32}`), so monitors stay configured but hold no data;
+- `:start_time` and `:end_time` are replaced by empty dictionaries;
+- `:perturbation` is replaced by an empty dictionary.
+
+All other fields (state variables, weights, parameters, the `Time` clock) are copied. Used by
+`perturbation_test` to branch a model.
+
+Specialised behaviour for a type `T` can be added by defining
+`SNNModels.modelcopy_internal(x::T, dict::IdDict)`.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+@load_units
+E = SNN.IF(N = 10, name = "E")
+model = SNN.compose(; E, silent = true)
+SNN.monitor!(E, [:v])
+sim!(model, 10ms)
+model2 = SNN.modelcopy(model)
+isempty(model2.pop.E.records[:v])   # true: the copy has no recorded data
+```
 """
 function modelcopy(@nospecialize x)
     isbitstype(typeof(x)) && return x

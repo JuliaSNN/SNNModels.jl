@@ -51,23 +51,39 @@ dt = 0.125ms
 
 """
     @load_units
-    Load all the units defined in the module into the current scope.
-    This macro generates a block of expressions that assign the unit constants
-        
-    The base units in the module are:
-    - cm : centimeters
-    - ms : milliseconds
-    - kHz : kilohertz
-    - mV : millivolts
-    - pA : picoamperes
-    - pF : picofarads
-    - nS : nanosiemens
-    - GΩ : gigaohms
-    - uM : micromolar
 
-    The derived units in the module are obtained as multiple or division of the base units. 
+Define the SNNModels unit constants as local variables in the calling scope.
 
-    The standard integration time step is 0.125ms, which is used in the simulation.
+SNNModels represents physical quantities as plain `Float32` numbers in a fixed unit system; the
+constants convert a number to that system (e.g. `10ms == 10f0`, `1s == 1000f0`,
+`10Hz == 0.01f0`). The base units are
+
+| Quantity      | Base unit | Value 1 equals |
+|:------------- |:--------- |:-------------- |
+| length        | `cm`      | 1 cm (`metre = 100`, `um = 1e-4`) |
+| time          | `ms`      | 1 ms (`s = second = 1000`) |
+| frequency     | `kHz`     | 1 kHz (`Hz = 1e-3`) |
+| voltage       | `mV`      | 1 mV |
+| current       | `pA`      | 1 pA |
+| capacitance   | `pF`      | 1 pF |
+| conductance   | `nS`      | 1 nS |
+| resistance    | `GΩ`      | 1 GΩ (`MΩ = 1e-3`) |
+| concentration | `uM`      | 1 μM (`M = 1e6`, `mM = 1e3`) |
+
+Constants defined by the macro: `metre, meter, cm, mm, um, nm, cm2, m2, um2, nm2, second, s, ms,
+Hz, kHz, voltage, mV, ampere, mA, uA, μA, nA, pA, farad, uF, μF, nF, pF, ufarad, siemens, mS,
+msiemens, nS, nsiemens, Ω, MΩ, GΩ, M, mM, uM, nM`. (`mF` exists in the module but is not
+defined by the macro.)
+
+The default integration step of `sim!`/`train!` is `0.125ms`.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+@load_units
+duration = 2s      # 2000.0f0
+rate = 10Hz        # 0.01f0 (per ms)
+```
 """
 macro load_units()
     exs = map((

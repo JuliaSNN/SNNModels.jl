@@ -1,23 +1,61 @@
 abstract type AbstractReceptorParameter <: AbstractSynapseParameter end
 abstract type AbstractReceptorVariable <: AbstractSynapseVariable end
 
-"""
-    ReceptorSynapse{FT,VIT,ST,NMDAT,VFT} <: AbstractReceptorParameter
+@doc raw"""
+    ReceptorSynapse(; syn = SomaReceptors, NMDA = NMDAVoltageDependency(),
+                      glu_receptors = [1, 2], gaba_receptors = [3, 4])
+    ReceptorSynapse(syn::ReceptorArray, NMDA::NMDAVoltageDependency{Float32}; kwargs...)
 
-A synaptic parameter type that models receptor-based synaptic dynamics with NMDA voltage dependence.
+Conductance-based synapse built from an arbitrary list of receptors (`Receptor`), each with its
+own rise and decay time constants, peak conductance and reversal potential, and optional NMDA
+magnesium block. Spikes arriving on the `glu` input drive the receptors listed in
+`glu_receptors`, spikes on the `gaba` input drive those in `gaba_receptors`.
+
+# Equations
+Each receptor ``r`` (an entry of `syn`, see `Receptor`) has a conductance ``g_r`` and an
+auxiliary rise variable ``h_r``. A spike of weight ``w`` arriving on the receptor group of
+``r`` increments ``h_r`` by ``\alpha_r w`` with ``\alpha_r = 1/\tau_{r} - 1/\tau_{d}``:
+```math
+\frac{dh_r}{dt} = -\frac{h_r}{\tau_{r}} + \alpha_r \sum_k w_k\,\delta(t - t_k), \qquad
+\frac{dg_r}{dt} = -\frac{g_r}{\tau_{d}} + h_r
+```
+With this choice a unit weight gives ``g_r(t) = e^{-t/\tau_d} - e^{-t/\tau_r}``, whose peak is
+``1/\mathrm{norm\_synapse}(\tau_r, \tau_d)``; since ``g_{syn} = g_0\,\mathrm{norm\_synapse}(\tau_r,\tau_d)``
+the peak conductance of a unit weight is ``g_0`` (nS). The synaptic current is
+```math
+I_{syn} = \sum_r g_{syn,r}\, g_r\,(V - E_{rev,r})\, B_r(V), \qquad
+B_r(V) = \begin{cases} 1 & \text{if } nmda_r = 0 \\
+\left(1 + \frac{[\mathrm{Mg}]}{b}\, e^{k V}\right)^{-1} & \text{otherwise}\end{cases}
+```
+where ``b``, ``k`` and ``[\mathrm{Mg}]`` are the fields of the `NMDAVoltageDependency` stored in `NMDA`.
+
+# Integration
+Exact exponential decay over one step (exponential Euler), receptor by receptor:
+`h += α w`; `g = exp(-dt/τd) (g + dt h)`; `h = exp(-dt/τr) h`. The receptor buffers are then
+zeroed. The current is computed with the membrane potential at the beginning of the step.
 
 # Fields
-- `NMDA::NMDAT`: Parameters for NMDA voltage dependence (default: `NMDAVoltageDependency()`)
-- `glu_receptors::VIT`: Indices of glutamate receptors (default: `[1, 2]`)
-- `gaba_receptors::VIT`: Indices of GABA receptors (default: `[3, 4]`)
-- `syn::ST`: Array of receptor parameters (default: `SomaReceptors`)
+- `syn::ST = SomaReceptors`: vector of `Receptor` (a `ReceptorArray`); the default is the
+  somatic AMPA, NMDA, GABAa, GABAb set `SomaReceptors`.
+- `NMDA::NMDAT = NMDAVoltageDependency()`: parameters of the magnesium block (``b = 3.36``,
+  ``k = -0.077`` 1/mV, ``[\mathrm{Mg}] = 1`` mM).
+- `glu_receptors::VIT = [1, 2]`: indices in `syn` driven by the `glu` input.
+- `gaba_receptors::VIT = [3, 4]`: indices in `syn` driven by the `gaba` input.
 
-# Type Parameters
-- `VIT`: Vector of integers type (default: `Vector{Int}`)
-- `ST`: Receptor array type (default: `ReceptorArray`)
-- `NMDAT`: NMDA voltage dependency type (default: `NMDAVoltageDependency{Float32}`)
+Type parameters: `VIT = Vector{Int}`, `ST = Vector{Receptor{Float32}}`,
+`NMDAT = NMDAVoltageDependency{Float32}`. State variables: `ReceptorSynapseVars`. Input
+buffers: `(glu, gaba)`, so connections target `:glu`/`:ge`/`:he` or `:gaba`/`:gi`/`:hi`.
 
-This type implements conductance-based synaptic dynamics with AMPA, NMDA, GABAa, and GABAb receptors. Synaptic currents are calculated based on receptor activation and voltage-dependent NMDA modulation.
+Predefined instances: `SomaSynapse`, `TripodSomaSynapse`, `TripodDendSynapse`.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 10, param = SNN.IFParameter(C = 281pF, gl = 40nS),
+           synapse = SNN.ReceptorSynapse())          # AMPA + NMDA + GABAa + GABAb
+syn = SNN.ReceptorSynapse(SNN.SomaReceptors, SNN.SomaNMDA; glu_receptors = [1], gaba_receptors = [3])
+```
 """
 ReceptorSynapse
 
@@ -41,23 +79,61 @@ function synaptic_receptors(synapse::ReceptorSynapse, N::Int)
 end
 
 
-"""
-    ReceptorSynapse{FT,VIT,ST,NMDAT,VFT} <: AbstractReceptorParameter
+@doc raw"""
+    MultiReceptorSynapse(; syn = SomaReceptors, NMDA = NMDAVoltageDependency())
+    MultiReceptorSynapse(syn::ReceptorArray; kwargs...)
 
-A synaptic parameter type that models receptor-based synaptic dynamics with NMDA voltage dependence.
+Receptor-based conductance synapse in which every receptor is driven by the input buffer named
+by its `target` field, instead of the fixed `glu`/`gaba` split of `ReceptorSynapse`. The
+receptors are grouped by `target` (`infer_receptors`) and the population gets one input
+buffer per distinct target, so a connection can address, for example, an `:AMPA` or a
+`:GABAb` group directly (`SpikingSynapse(pre, post, :AMPA; conn)`). All receptors must have
+`target` different from `:none`.
+
+The kinetics, the NMDA block and the integration scheme are the same as `ReceptorSynapse`:
+
+# Equations
+Each receptor ``r`` (an entry of `syn`, see `Receptor`) has a conductance ``g_r`` and an
+auxiliary rise variable ``h_r``. A spike of weight ``w`` arriving on the receptor group of
+``r`` increments ``h_r`` by ``\alpha_r w`` with ``\alpha_r = 1/\tau_{r} - 1/\tau_{d}``:
+```math
+\frac{dh_r}{dt} = -\frac{h_r}{\tau_{r}} + \alpha_r \sum_k w_k\,\delta(t - t_k), \qquad
+\frac{dg_r}{dt} = -\frac{g_r}{\tau_{d}} + h_r
+```
+With this choice a unit weight gives ``g_r(t) = e^{-t/\tau_d} - e^{-t/\tau_r}``, whose peak is
+``1/\mathrm{norm\_synapse}(\tau_r, \tau_d)``; since ``g_{syn} = g_0\,\mathrm{norm\_synapse}(\tau_r,\tau_d)``
+the peak conductance of a unit weight is ``g_0`` (nS). The synaptic current is
+```math
+I_{syn} = \sum_r g_{syn,r}\, g_r\,(V - E_{rev,r})\, B_r(V), \qquad
+B_r(V) = \begin{cases} 1 & \text{if } nmda_r = 0 \\
+\left(1 + \frac{[\mathrm{Mg}]}{b}\, e^{k V}\right)^{-1} & \text{otherwise}\end{cases}
+```
+where ``b``, ``k`` and ``[\mathrm{Mg}]`` are the fields of the `NMDAVoltageDependency` stored in `NMDA`.
+
+# Integration
+Exact exponential decay over one step (exponential Euler), receptor by receptor:
+`h += α w`; `g = exp(-dt/τd) (g + dt h)`; `h = exp(-dt/τr) h`. The receptor buffers are then
+zeroed. The current is computed with the membrane potential at the beginning of the step.
 
 # Fields
-- `NMDA::NMDAT`: Parameters for NMDA voltage dependence (default: `NMDAVoltageDependency()`)
-- `glu_receptors::VIT`: Indices of glutamate receptors (default: `[1, 2]`)
-- `gaba_receptors::VIT`: Indices of GABA receptors (default: `[3, 4]`)
-- `syn::ST`: Array of receptor parameters (default: `SomaReceptors`)
+- `syn::ST = SomaReceptors`: vector of `Receptor`.
+- `NMDA::NMDAT = NMDAVoltageDependency()`: magnesium block parameters.
+- `receptors::REC = infer_receptors(syn)`: `NamedTuple` mapping each target symbol to the
+  indices of the receptors in `syn` (computed, normally not given).
 
-# Type Parameters
-- `VIT`: Vector of integers type (default: `Vector{Int}`)
-- `ST`: Receptor array type (default: `ReceptorArray`)
-- `NMDAT`: NMDA voltage dependency type (default: `NMDAVoltageDependency{Float32}`)
+The positional form `MultiReceptorSynapse(syn; kwargs...)` is equivalent to
+`MultiReceptorSynapse(; syn, kwargs...)`. State variables: `ReceptorSynapseVars`.
 
-This type implements conductance-based synaptic dynamics with AMPA, NMDA, GABAa, and GABAb receptors. Synaptic currents are calculated based on receptor activation and voltage-dependent NMDA modulation.
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+recs = SNN.Receptors(SNN.Receptor(E_rev = 0mV, τr = 0.5ms, τd = 3ms, g0 = 1nS, target = :AMPA),
+                     SNN.Receptor(E_rev = -70mV, τr = 0.5ms, τd = 6ms, g0 = 1nS, target = :GABA))
+syn = SNN.MultiReceptorSynapse(recs)
+P = SNN.IF(N = 10, param = SNN.IFParameter(C = 281pF, gl = 40nS), synapse = syn)
+keys(P.receptors)   # (:GABA, :AMPA)
+```
 """
 MultiReceptorSynapse
 
@@ -85,11 +161,14 @@ end
 
 """
     ReceptorSynapseVars{MFT} <: AbstractReceptorVariable
-A synaptic variable type that stores the state variables for receptor-based synaptic dynamics.
+
+State variables of `ReceptorSynapse` and `MultiReceptorSynapse`, created by
+`synaptic_variables(synapse, N)` with one column per receptor of `synapse.syn`.
+
 # Fields
-- `N::Int`: Number of synapses
-- `g::MFT`: Matrix of conductances for each receptor type
-- `h::MFT`: Matrix of auxiliary variables for each receptor type
+- `N::Int = 100`: number of neurons.
+- `g::MFT = zeros(Float32, N, 4)`: conductances (before scaling by `gsyn`), `N x n_receptors`.
+- `h::MFT = zeros(Float32, N, 4)`: auxiliary rise variables, `N x n_receptors`.
 """
 ReceptorSynapseVars
 @snn_kw struct ReceptorSynapseVars{MFT = Matrix{Float32}} <: AbstractReceptorVariable

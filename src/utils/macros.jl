@@ -11,9 +11,10 @@ Create a `Dict{Symbol,Any}` from variable names.
 
 # Example
 ```julia
+using SpikingNeuralNetworks
 a = 1
 b = 2
-d = @symdict(a, b)  # Dict(:a => 1, :b => 2)
+d = SNNModels.@symdict(a, b)  # Dict{Symbol,Any}(:a => 1, :b => 2)
 ```
 """
 macro symdict(x...)
@@ -212,22 +213,39 @@ end
 
 
 """
-    @snn_kw
+    @snn_kw struct Name{T1 = Default1, T2 <: Bound, ...} <: Super
+        field::T1 = default
+        ...
+    end
 
-A minimal implementation of `Base.@kwdef` with default type parameter support.
-Generates keyword constructors for structs with automatic type parameter inference.
+Variant of `Base.@kwdef` that also accepts default values for the type parameters.
 
-# Usage
+The macro defines the struct (with the defaults stripped) and one keyword constructor
+`Name(; field1 = default1, ..., T1 = Default1, T2 = ...)`. Field defaults may refer to earlier
+fields. Type parameters are keyword arguments of the constructor:
+
+- a type parameter with a default (`FT = Float32`) takes that default unless passed explicitly;
+- a type parameter without a default is inferred as `typeof(field)` of the first field with a
+  default value that is annotated with that parameter (internally tracked by the sentinel
+  `SNNModels.KwStrSentinel`); every such parameter must be used by at least one field.
+
+All population, synapse, stimulus and parameter types of SNNModels are defined with this macro.
+
+The generated constructor refers to `KwStrSentinel` unqualified, so when the macro is used
+outside SNNModels on a struct with type parameters, `KwStrSentinel` must be in scope
+(`using SNNModels: KwStrSentinel`).
+
+# Example
 ```julia
+using SpikingNeuralNetworks
+using SNNModels: @snn_kw, KwStrSentinel
 @snn_kw struct MyStruct{FT = Float32}
     x::FT = 1.0
     y::FT = 2.0
 end
-
-# Can now create with:
-MyStruct()              # Uses Float32 (default)
-MyStruct(FT=Float64)    # Uses Float64
-MyStruct(x=3.0)         # Uses Float32, x=3.0
+MyStruct()              # MyStruct{Float32}(1.0f0, 2.0f0)
+MyStruct(FT = Float64)  # MyStruct{Float64}(1.0, 2.0)
+MyStruct(x = 3.0)       # MyStruct{Float32}(3.0f0, 2.0f0)
 ```
 """
 macro snn_kw(str)
@@ -316,27 +334,29 @@ end
 export @symdict, @snn_kw
 
 """
-    @update
+    @update base begin
+        path.to.field = value
+        ...
+    end
 
-Macro to update fields in a named tuple configuration immutably.
+Return a copy of the nested configuration `base` (a `NamedTuple`, possibly containing structs)
+with the listed fields replaced. `base` itself is not modified. Each assignment is applied with
+`update_with_merge`; missing intermediate keys are created (with a warning), structs on the path
+are rebuilt through their keyword constructor.
 
-# Usage
+Only the `begin ... end` block form works in SNNModels 1.8.4: the single-assignment form
+`@update base a.b = v` throws `UndefVarError: current_config` at macro expansion.
+
+# Example
 ```julia
+using SpikingNeuralNetworks
 config = (a = 1, b = (c = 2, d = 3))
-new_config = @update config b.c = 5
-# or with multiple updates:
 new_config = @update config begin
     b.c = 5
     b.d = 6
 end
+# new_config == (a = 1, b = (c = 5, d = 6)); config is unchanged
 ```
-
-# Arguments
-- `base`: Base configuration (NamedTuple or struct)
-- `update_expr`: Field assignment(s) to apply
-
-# Returns
-- New configuration with updated fields
 """
 macro update(base, update_expr)
     # Verify if the expr is a block or a line
@@ -406,9 +426,16 @@ macro update(base, update_expr)
 end
 
 """
-    update_with_merge(base_config::NamedTuple, path::Vector{Symbol}, value, full_path=nothing)
+    update_with_merge(base_config::NamedTuple, path::Vector{Symbol}, value, full_path = nothing)
+    update_with_merge(base_config, path::Vector{Symbol}, value, full_path = nothing)
 
-Recursively update a nested field in a NamedTuple.
+Return a copy of `base_config` with the nested field at `path` set to `value` (the function
+behind `@update` and `@update!`).
+
+A missing final key is added with a warning; a missing intermediate key is created as an empty
+`NamedTuple` with a warning. If an element on the path is a struct with fields, it is converted to
+a `NamedTuple`, updated, and rebuilt with its keyword constructor `T(; fields...)`. Any other
+type throws a `TypeError`.
 
 # Arguments
 - `base_config::NamedTuple`: The configuration to update
@@ -482,7 +509,27 @@ function update_with_merge(
     end
 end
 
+"""
+    @update! base begin
+        path.to.field = value
+        ...
+    end
 
+In-place counterpart of `@update`: computes the updated configuration and rebinds the variable
+`base` to it (`base = update_with_merge(...)`). As for `@update`, use the `begin ... end` form:
+the single-assignment form `@update! base a.b = v` does not escape `base` and fails with an
+`UndefVarError` in SNNModels 1.8.4.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+config = (a = 1, b = (c = 2, d = 3))
+@update! config begin
+    b.c = 7
+end
+config.b.c  # 7
+```
+"""
 macro update!(base, update_expr)
     if update_expr.head == :block
         updates = update_expr.args
@@ -517,8 +564,12 @@ macro update!(base, update_expr)
     return Expr(:(=), esc(base), :($current_config))
 end
 
-#
+"""
+    pretty_nt_print(value, indent = 0)
 
+Print a (nested) `NamedTuple` as an indented tree `field := value`, one field per line.
+Non-`NamedTuple` values are printed with `println`.
+"""
 function pretty_nt_print(value, indent = 0)
     if isa(value, NamedTuple)
         println("{")

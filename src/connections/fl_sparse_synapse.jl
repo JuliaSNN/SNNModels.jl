@@ -1,3 +1,9 @@
+"""
+    FLSparseSynapseParameter()
+
+Parameter of the non-exported `FLSparseSynapse` (no fields; not a subtype of
+`AbstractConnectionParameter`).
+"""
 struct FLSparseSynapseParameter end
 
 @snn_kw mutable struct FLSparseSynapse{VFT = Vector{Float32},FT = Float32} <:
@@ -21,8 +27,22 @@ struct FLSparseSynapseParameter end
     records::Dict = Dict()
 end
 
-"""
-[Force Learning Sparse Receptors](http://www.theswartzfoundation.org/docs/Sussillo-Abbott-Coherent-Patterns-August-2009.pdf)
+@doc raw"""
+    FLSparseSynapse(pre, post; μ = 1.5, p = 0.0, α = 1, kwargs...)
+
+Sparse variant of `FLSynapse` (FORCE learning), not exported. Recurrent weights
+``W = \mu X / \sqrt{p N_{pre}}`` with ``X`` = `sprandn(N_post, N_pre, p)`; ``P`` is stored
+only on the sparsity pattern of ``W`` and initialised to ``\alpha`` on the diagonal entries.
+
+Intended update: as `FLSynapse`, with ``q`` and ``P`` restricted to the stored synapses.
+
+# Status in SNNModels 1.8.4
+Not usable: the constructor fails (`2rand(post.N) - 1` subtracts a scalar from a vector), and
+`forward!`/`plasticity!` use `colptr` without unpacking it. `FLSparseSynapseParameter` is
+not a subtype of `AbstractConnectionParameter`.
+
+# References
+Sussillo D, Abbott LF (2009). Neuron 63:544-557 (linked in the code).
 """
 FLSparseSynapse
 

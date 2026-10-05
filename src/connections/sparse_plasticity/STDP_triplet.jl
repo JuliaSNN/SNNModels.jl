@@ -1,5 +1,7 @@
 @doc """
-    STDPTriplet{FT = Float32}
+    STDPTriplet(; A2_plus = 5.3e-3, A3_plus = 8e-3, A2_minus = 3.5e-3, A3_minus = 0,
+                  τ_plus = 16.8ms, τ_minus = 33.7ms, τ_x = 946ms, τ_y = 40ms,
+                  Wmax = 30pF, Wmin = 0pF)
 
 Triplet STDP, all-to-all interaction, event-driven
 (Pfister, J.-P., & Gerstner, W. (2006). Triplets of spikes in a model of spike
@@ -33,8 +35,13 @@ do not interact), serial, applied only under `train!`.
 
 # Example
 ```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+pre = SNN.Poisson(N = 100, param = SNN.PoissonParameter(10Hz))
+post = SNN.IF(N = 10)
 rule = SNN.STDPTriplet(A2_plus = 5.3e-3 * 10, A3_plus = 8e-3 * 10, A2_minus = 3.5e-3 * 10)
 syn = SNN.SpikingSynapse(pre, post, :ge; conn = (p = 0.1, μ = 10.0), LTPParam = rule)
+SNN.train!(model = SNN.compose(; pre, post, syn), duration = 500ms)
 ```
 """
 STDPTriplet
@@ -53,11 +60,14 @@ STDPTriplet
 end
 
 @doc """
-    STDPTripletVariables
+    STDPTripletVariables(; Npre, Npost, r1 = zeros(Npre), r2 = zeros(Npre), o1 = zeros(Npost),
+                         o2 = zeros(Npost), last_pre = zeros(Npre), last_post = zeros(Npost),
+                         initialized = [false], active = [true])
 
 Traces of `STDPTriplet`: `r1`, `r2` (presynaptic, length Npre), `o1`, `o2`
 (postsynaptic, length Npost), decayed by `exp(-dt/τ)` every step; last spike times
-`last_pre`, `last_post` (informational); `initialized` (one-off clamp done).
+`last_pre`, `last_post` (informational); `initialized` (one-off clamp done); `active`
+(the rule runs only if `any(active)`). Created by `plasticityvariables(::STDPTriplet, Npre, Npost)`.
 """
 STDPTripletVariables
 

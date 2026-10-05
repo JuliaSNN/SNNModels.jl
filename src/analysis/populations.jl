@@ -1,14 +1,18 @@
 """
-    population_indices(P, type = "ˆ")
+    population_indices(P)
 
-Given a dictionary `P` containing population names as keys and population objects as values, this function returns a named tuple `indices` that maps each population name to a range of indices. The range represents the indices of the neurons belonging to that population.
-
-# Arguments
-- `P`: A dictionary containing population names as keys and population objects as values.
-- `type`: A string specifying the type of population to consider. Only population names that contain the specified type will be included in the output. Defaults to "ˆ".
+Global neuron indices of each population when the populations of `P` (a `NamedTuple`, e.g.
+`model.pop`) are concatenated in the order of `keys(P)`, as in `spiketimes(model.pop)`.
 
 # Returns
-A named tuple `indices` where each population name is mapped to a range of indices.
+A `NamedTuple` (sorted by key) mapping each key to the `Vector{Int}` of its indices.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+pops = (E = SNN.IF(N = 4), I = SNN.IF(N = 2))
+SNN.population_indices(pops)   # (E = [1, 2, 3, 4], I = [5, 6])
+```
 """
 function population_indices(P)
     n = 1
@@ -21,24 +25,17 @@ function population_indices(P)
     return dict2ntuple(sort(indices))
 end
 
-"""
-    filter_items(P, regex)
-
-Filter populations in dictionary `P` based on a regular expression `regex`.
-Returns a named tuple of populations that match the regex.
-
-# Arguments
-- `P`: Container of items.
-- `regex`: Regular expression to match population names.
-
-# Returns
-A named tuple of populations that match the regex.
-
-# Examples
-"""
-
 no_noise(p) = !occursin(string("noise"), string(p.name))
 
+"""
+    filter_items(P; condition::Function = no_noise)
+
+Keep the items of `P` (a `NamedTuple` of components) that have a `name` field and for which
+`condition(item)` is true. The default condition drops items whose name contains `"noise"`.
+
+# Returns
+A `NamedTuple` of the selected items, sorted by their `name`.
+"""
 function filter_items(P; condition::Function = no_noise)
     populations = Dict{Symbol,Any}()
     for k in keys(P)
@@ -54,18 +51,17 @@ end
 
 
 """
-    subpopulations(stim)
+    subpopulations(stim, subset = nothing)
 
-Extracts the names and the neuron ids projected from a given set of stimuli.
+Neurons targeted by each stimulus of `stim` (a `NamedTuple` of stimuli, e.g. `model.stim`).
 
 # Arguments
-- `stim`: A dictionary containing stimulus information.
+- `stim`: `NamedTuple` of stimuli; `neurons(s)` gives the target neurons of each.
+- `subset`: optional collection of stimulus names (strings); other stimuli are skipped.
 
 # Returns
-- `names`: A vector of strings representing the names of the subpopulations.
-- `pops`: A vector of arrays representing the populations of the subpopulations.
-
-# Example
+- A `NamedTuple`, sorted by name, mapping each stimulus `name` to the unique ids of the neurons
+  it targets.
 """
 function subpopulations(stim, subset=nothing)
     populations = Dict{String,Vector{Int}}()
@@ -78,6 +74,12 @@ function subpopulations(stim, subset=nothing)
     return dict2ntuple(sort(populations))
 end
 
+"""
+    target_neurons(stim, targets)
+
+For each key in `targets` (strings or symbols), the unique neuron ids targeted by
+`stim[key]` (see `neurons`). Throws if a key is not in `stim`. Returns a `Vector{Vector{Int}}`.
+"""
 function target_neurons(stim, targets=nothing)
     t_neurons = Vector{Int}[]
     for key in targets
@@ -88,6 +90,13 @@ function target_neurons(stim, targets=nothing)
     return t_neurons
 end
 
+"""
+    average_conn_strength(M::AbstractMatrix, pops::Vector{Vector{Int}}, sparsity = 0.2)
+
+Matrix of mean connection strengths between groups of neurons: entry `(i, j)` is
+`mean(M[pops[i], pops[j]]) / sparsity` (post group `i`, pre group `j`), i.e. the mean weight of
+the existing synapses if `M` has connection density `sparsity`.
+"""
 function average_conn_strength(M::T, pops::Vector{Vector{Int}}, sparsity=0.2) where {T<:AbstractMatrix}
     pre = pops
     post = pops

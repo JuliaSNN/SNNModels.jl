@@ -4,16 +4,25 @@ using Parameters
 using SpecialFunctions
 
 """
-    place_populations(config)
+    place_populations(Npop, grid_size)
 
-Create a 2D spatial structure and dispose N points for each population.
+Place the neurons of each population uniformly at random in a box of size `grid_size`.
 
 # Arguments
-- `Npop::NamedTuple`: A named tuple containing the number of neurons for each population.
-- `grid_size::Vector{Float64}`: A vector specifying the size of the grid in each dimension.
+- `Npop`: `NamedTuple` (or `Dict`) of population sizes; only entries of type `Int64` are used,
+  the others are skipped.
+- `grid_size`: vector with the box size in each dimension (any number of dimensions).
 
 # Returns
-- `Pops::NamedTuple`: A named tuple containing the spatial points for each population.
+- `NamedTuple` with, for each population, a `Vector` of `N` points, each point a
+  `Vector{Float32}` with coordinates in `[0, grid_size[d])`.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+points = SNN.place_populations((E = 80, I = 20), [1.0f0, 1.0f0])
+length(points.E)   # 80
+```
 """
 function place_populations(Npop, grid_size)
     Pops = Dict{Symbol,Vector}()
@@ -25,18 +34,25 @@ function place_populations(Npop, grid_size)
     return Pops |> dict2ntuple
 end
 
-"""
-    periodic_distance(point1, point2, grid_size)
+@doc raw"""
+    periodic_distance(x1::Float32, x2::Float32, grid_size::Float32)
+    periodic_distance(point1::Vector{Float32}, point2::Vector{Float32}, grid_size::Real)
+    periodic_distance(point1::Vector{Float32}, point2::Vector{Float32}, grid_size::Vector)
 
-Calculate the periodic distance between two points in a 2D grid.
+Distance on a torus (periodic boundary conditions).
 
-# Arguments
-- `point1::Vector{Float64}`: The coordinates of the first point.
-- `point2::Vector{Float64}`: The coordinates of the second point.
-- `grid_size::Float64`: The size of the grid.
+- Scalars: ``d = \min(|x_1 - x_2|,\ L - |x_1 - x_2|)``.
+- Points with a scalar `grid_size` ``L`` (same size in every dimension): Euclidean periodic
+  distance ``\sqrt{\sum_n d_n^2}``.
+- Points with a vector `grid_size` ``(L_1, L_2, \dots)``: the code computes
+  ``\sqrt{(\sum_n d_n)^2} = \sum_n d_n``, i.e. the periodic L1 (Manhattan) distance, not the
+  Euclidean one.
 
-# Returns
-- `distance::Float64`: The periodic distance between the two points.
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.periodic_distance([0.05f0, 0.0f0], [0.95f0, 0.0f0], 1.0f0)   # 0.1
+```
 """
 function periodic_distance(point1::Float32, point2::Float32, grid_size::Float32)
     abs(min(abs(point1 - point2), grid_size - abs(point1 - point2)))
@@ -69,16 +85,16 @@ end
 """
     neurons_within_circle(points, center, distance, grid_size)
 
-Find the indices of neurons within a specified area around a center point.
+Boolean mask of the neurons whose `periodic_distance` from `center` is `<= distance`.
 
 # Arguments
-- `points::Vector{Vector{Float64}}`: The coordinates of the neurons.
-- `center::Vector{Float64}`: The coordinates of the center point.
-- `distance::Float64`: The maximum distance from the center point.
-- `grid_size::Float64`: The size of the grid.
+- `points::Vector{Vector{Float32}}`: The coordinates of the neurons.
+- `center::Vector{Float32}`: The coordinates of the center point.
+- `distance`: The maximum distance from the center point.
+- `grid_size`: The size of the grid (scalar or vector, see `periodic_distance`).
 
 # Returns
-- `indices::Vector{Int}`: The indices of neurons within the specified area.
+- `Vector{Bool}` with one entry per point (use `findall` to get indices).
 """
 function neurons_within_circle(points, center, distance, grid_size)
     map(x->periodic_distance(x, center, grid_size) <= distance, points)
@@ -92,13 +108,13 @@ function neurons_within(func::Function, kwargs...) end
 Find the indices of neurons outside a specified area around a center point.
 
 # Arguments
-- `points::Vector{Vector{Float64}}`: The coordinates of the neurons.
-- `center::Vector{Float64}`: The coordinates of the center point.
-- `distance::Float64`: The minimum distance from the center point.
-- `grid_size::Float64`: The size of the grid.
+- `points::Vector{Vector{Float32}}`: The coordinates of the neurons.
+- `center::Vector{Float32}`: The coordinates of the center point.
+- `distance`: The minimum distance from the center point.
+- `grid_size`: The size of the grid (scalar or vector, see `periodic_distance`).
 
 # Returns
-- `indices::Vector{Int}`: The indices of neurons outside the specified area.
+- `Vector{Int}`: indices of the neurons with `periodic_distance > distance`.
 """
 function neurons_outside_area(points, center, distance, grid_size)
     return [
@@ -108,9 +124,12 @@ function neurons_outside_area(points, center, distance, grid_size)
 end
 
 
-"""
-    gaussian_weight(pre, post; σx, σy, grid_size)
-Compute the Gaussian weight between pre- and post-synaptic neurons based on their spatial coordinates.
+@doc raw"""
+    gaussian_weight(pre::Vector{Float32}, post::Vector{Float32} = [0, 0]; σx, σy, grid_size::Vector{Float32})
+
+Gaussian profile ``\exp(-(d_x/\sigma_x)^2 - (d_y/\sigma_y)^2)`` of the periodic distances
+``d_x, d_y`` between two 2D points (computed with `exp64`; note there is no factor 1/2 in the
+exponent).
 # Arguments
 - `pre::Vector{Float32}`: The coordinates of the pre-synaptic neuron.
 - `post::Vector{Float32}`: The coordinates of the post-synaptic neuron.
@@ -136,26 +155,42 @@ function gaussian_weight(
 end
 
 
-"""
-    compute_long_short_connections(pre::Symbol, post::Symbol, points; dc, pl, ϵ, grid_size, conn)
+@doc raw"""
+    compute_connections(pre::Symbol, post::Symbol, points; conn::NamedTuple, spatial::NamedTuple, dist::Sampleable)
 
-Compute the connections between two populations of neurons based on their spatial distance. This function will assign connections with probability `p_short` for short-range connections and `p_long` for long-range connections. The weights of the connections are determined by the `μ` parameter in the `conn` named tuple. 
-The function uses a periodic boundary condition to calculate distances in a 2D grid.
-The total number of connections per the post-synaptic neuron is: ϵ * N_pre * p_short + (1 - ϵ) * N_pre * p_long.
+Draw a distance-dependent connectivity from the population `pre` to `post` on a 2D torus.
 
-# Arguments
-- `pre::Symbol`: The symbol representing the pre-synaptic population.
-- `post::Symbol`: The symbol representing the post-synaptic population.
-- `points::NamedTuple`: A named tuple containing the spatial points for each population.
-- `dc::Float64`: The critical distance for short-range connections.
-- `pl::Float64`: The probability of long-range connections.
-- `ϵ::Float64`: The scaling factor for connection probabilities.
-- `grid_size::Float64`: The size of the grid.
-- `conn::NamedTuple`: A named tuple containing connection parameters, including `p` and `μ`.
+`points` is the output of `place_populations`; `points.pre` and `points.post` are used.
+Connection weights are drawn from the distribution `dist`. Periodic distances are computed
+with `periodic_distance`. `spatial.grid_size` must have length 2. Two rules are available,
+selected by `spatial.type`:
+
+- `:critical_distance` (fields `dc`, `ϵ`, `grid_size`, `p_long`): with
+  ``A = L_x L_y``, ``p_l = `` `spatial.p_long[pre]`, ``\gamma_s = A / (\pi d_c^2)``,
+  ``\gamma_l = A / (A - \pi d_c^2)``, a pair closer than ``d_c`` is connected with probability
+  ``p_{short} = (1 - p_l)\,\gamma_s\,\epsilon\,p`` and a farther pair with
+  ``p_{long} = p_l\,\gamma_l\,\epsilon\,p``, where ``p`` = `conn.p`. Autapses are excluded
+  when `pre == post`. The returned `P` is all zeros.
+- `:gaussian` (fields `σs`, `grid_size`, `ϵ`): ``(\sigma_x, \sigma_y)`` = `spatial.σs[pre]`;
+  the pair ``(i, j)`` is connected with probability ``P_{ij} = \gamma\,\epsilon\,p\,g_{ij}``,
+  with ``g_{ij}`` = `gaussian_weight(pre_j, post_i)` and ``\gamma`` the inverse of the mean of
+  the Gaussian profile over a 200x200 grid, so that the mean probability is ``\epsilon p``.
+  Pairs with `i == j` are excluded (also when `pre != post`).
+
+Any other `spatial.type` returns `nothing`.
 
 # Returns
-- `P::Matrix{Bool}`: A matrix indicating the presence of connections.
-- `W::Matrix{Float32}`: A matrix containing the weights of the connections.
+- `L::BitMatrix` (`N_post x N_pre`): connection mask.
+- `W::Matrix{Float32}`: weights (`rand(dist)` where `L` is true, 0 elsewhere).
+- `P::Matrix{Float32}`: connection probabilities (`:gaussian` only).
+
+# Example
+```julia
+using SpikingNeuralNetworks, Distributions
+points = SNN.place_populations((E = 100,), [1.0f0, 1.0f0])
+spatial = (type = :gaussian, σs = (E = (0.1f0, 0.1f0),), grid_size = [1.0f0, 1.0f0], ϵ = 1.0f0)
+L, W, P = SNN.compute_connections(:E, :E, points; conn = (p = 0.1,), spatial, dist = Normal(1, 0.1))
+```
 """
 function compute_connections(pre::Symbol, post::Symbol, points; conn::NamedTuple, spatial::NamedTuple, dist::Sampleable)
     @unpack grid_size = spatial
@@ -238,18 +273,24 @@ function compute_connections(pre::Symbol, post::Symbol, points; conn::NamedTuple
     end
 end
 
-"""
-    linear_network(N, σ_w=0.38, w_max=2.0)
+@doc raw"""
+    linear_network(N; σ_w = 0.38, w_max = 2.0, kwargs...)
 
-Create a linear network with Gaussian-shaped connections.
+Weight matrix of a ring network: `N` neurons at angles ``\theta_i = 2\pi i / N`` with
+```math
+W_{ij} = w_0 + (w_{max} - w_0)\,\exp\!\left(-\frac{d(\theta_i, \theta_j)^2}{2\sigma_w^2}
+ight),
+\qquad d = \min(|\theta_i - \theta_j|,\ 2\pi - |\theta_i - \theta_j|),
+```
+where the baseline
+``w_0 = w_{max}\,\sigma_w\,(\mathrm{erf}(\pi/(\sqrt{2}\sigma_w)) - \sqrt{2\pi}) /
+(\sigma_w\,\mathrm{erf}(\pi/(\sqrt{2}\sigma_w)) - \sqrt{2\pi})`` is computed by the function.
+The diagonal is set to zero. `kwargs` are ignored.
 
-# Arguments
-- `N::Int`: The number of neurons.
-- `σ_w::Float64`: The standard deviation of the Gaussian distribution.
-- `w_max::Float64`: The maximum weight.
+Reference not given in the code.
 
 # Returns
-- `W::Matrix{Float32}`: A matrix containing the weights of the connections.
+- `W::Matrix{Float64}` (`N x N`).
 """
 function linear_network(N; σ_w = 0.38, w_max = 2.0, kwargs...)
     # Function to calculate wθ^sE
@@ -278,36 +319,35 @@ function linear_network(N; σ_w = 0.38, w_max = 2.0, kwargs...)
 end
 
 """
-    spatial_activity(points, activity; N, L, grid_size=(x=0.1, y=0.1))
+    spatial_activity(points, activity; T, L = nothing, N = nothing, grid_size = (x = [0, 0.1], y = [0, 0.1]))
 
-Compute the spatial average of activity data over a grid.
+Average `activity` over the cells of a regular 2D grid and over time windows.
 
 # Arguments
-- `points::Tuple{Vector{Float64}, Vector{Float64}}`: A tuple containing two vectors `xs` and `ys`, which represent the x and y coordinates of the points.
-- `activity::Matrix{Float64}`: A matrix where rows correspond to points and columns correspond to activity values over time.
-- `N::Int`: The number of time steps to group together for averaging.
-- `L::Float64`: The size of each grid cell in both x and y directions.
-- `grid_size::NamedTuple{(:x, :y), Tuple{Float64, Float64}}` (optional): The total size of the grid in the x and y directions. Defaults to `(x=0.1, y=0.1)`.
+- `points`: tuple `(xs, ys)` of the neuron coordinates.
+- `activity::Matrix`: `N_neurons x N_timepoints`.
+- `T`: time windows. A number `T` gives the windows `(1+(t-1)T):(tT-1)` for
+  `t = 1:(N_timepoints ÷ T)` (note: the last column of each window is excluded); a vector gives
+  the windows explicitly (each element a range of column indices).
+- `L` or `N` (exactly one must be given): cell side (number, or `(x = Lx, y = Ly)`), or number of
+  cells per dimension (number, or `(x = Nx, y = Ny)`).
+- `grid_size = (x = [x0, x1], y = [y0, y1])`: extent of the grid.
 
 # Returns
-- `spatial_avg::Array{Float64, 3}`: A 3D array where the first two dimensions correspond to the grid cells in the x and y directions, and the third dimension corresponds to the time groups. Each element contains the average activity for the points within the corresponding grid cell and time group.
-- `x_range::Vector{Float64}`: A vector representing the range of x coordinates for the grid cells.
-- `y_range::Vector{Float64}`: A vector representing the range of y coordinates for the grid cells.
-
-# Details
-The function divides the spatial domain into a grid based on the `grid_size` and `L` parameters. For each grid cell, it computes the average activity of the points that fall within the cell over time groups defined by `N`. If no points are found in a grid cell, the average for that cell is skipped.
+- `spatial_avg::Array{Any,3}`: `nx x ny x n_windows`, mean activity of the neurons in each cell
+  and window (0 for empty cells).
+- `x_range`, `y_range`: ranges spanning `grid_size.x` and `grid_size.y` with
+  `max(nx, 2)` and `max(ny, 2)` points.
 
 # Example
 ```julia
+using SpikingNeuralNetworks
 xs = [0.05, 0.15, 0.25, 0.35]
 ys = [0.05, 0.15, 0.25, 0.35]
-points = (xs, ys)
-activity = rand(4, 100)  # Random activity data for 4 points over 100 time steps
-N = 10
-L = 0.1
-grid_size = (x=0.4, y=0.4)
-
-spatial_avg, x_range, y_range = spatial_activity(points, activity; N, L, grid_size)
+activity = rand(4, 100)          # 4 neurons, 100 time points
+avg, xr, yr = SNN.spatial_activity((xs, ys), activity; T = 10, L = 0.1,
+                                   grid_size = (x = [0, 0.4], y = [0, 0.4]))
+size(avg)   # (4, 4, 10)
 ```
 """
 function spatial_activity(points, activity; T, L=nothing, N=nothing, grid_size = (x = [0, 0.1], y = [0, 0.1]))

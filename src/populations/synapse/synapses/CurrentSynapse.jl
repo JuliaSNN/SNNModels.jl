@@ -1,20 +1,43 @@
 abstract type AbstractCurrentParameter <: AbstractSynapseParameter end
 
-"""
-    CurrentSynapse{FT} <: AbstractCurrentParameter
+@doc raw"""
+    CurrentSynapse(; τe = 6ms, τi = 2ms)
 
-A synaptic parameter type that models current-based synaptic dynamics.
+Current-based synapse with single-exponential kinetics for the excitatory (`glu`) and the
+inhibitory (`gaba`) inputs.
+
+The weights of the presynaptic spikes are added instantaneously to the synaptic variables
+``g_e`` and ``g_i``, which then decay exponentially. They are currents (pA), not conductances:
+the synaptic current does not depend on the membrane potential.
+
+# Equations
+```math
+\frac{dg_e}{dt} = -\frac{g_e}{\tau_e} + \sum_k w_k\,\delta(t - t_k), \qquad
+\frac{dg_i}{dt} = -\frac{g_i}{\tau_i} + \sum_k w_k\,\delta(t - t_k)
+```
+```math
+I_{syn} = -(g_e - g_i)
+```
+so that with the neuron convention ``C\,dV/dt = \ldots - I_{syn}`` excitation depolarises and
+inhibition hyperpolarises (inhibitory weights are positive).
+
+# Integration
+At each step the accumulated input is added (`ge += glu`, `gi += gaba`), then one forward
+Euler step of the decay is applied (`ge += -dt ge / τe`). The receptor buffers are then zeroed.
 
 # Fields
-- `τe::FT`: Decay time constant for excitatory synapses (default: 6ms)
-- `τi::FT`: Decay time constant for inhibitory synapses (default: 2ms)
-- `E_i::FT`: Reversal potential for inhibitory synapses (default: -75mV)
-- `E_e::FT`: Reversal potential for excitatory synapses (default: 0mV)
+- `τe::FT = 6ms`: decay time constant of the excitatory current (ms).
+- `τi::FT = 2ms`: decay time constant of the inhibitory current (ms).
 
-# Type Parameters
-- `FT`: Floating point type (default: `Float32`)
+`FT` defaults to `Float32`. State variables: `CurrentSynapseVars`.
 
-This type implements current-based synaptic dynamics, where synaptic currents are calculated using separate time constants for both excitatory and inhibitory synapses.
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 10, param = SNN.IFParameter(C = 281pF, gl = 40nS),
+           synapse = SNN.CurrentSynapse(τe = 5ms, τi = 10ms))
+```
 """
 CurrentSynapse
 
@@ -25,11 +48,13 @@ end
 
 """
     CurrentSynapseVars{VFT} <: AbstractSynapseVariable
-A synaptic variable type that stores the state variables for current-based synaptic dynamics.
+
+State variables of `CurrentSynapse`, created by `synaptic_variables(::CurrentSynapse, N)`.
+
 # Fields
-- `N::Int`: Number of synapses
-- `ge::VFT`: Vector of excitatory conductances
-- `gi::VFT`: Vector of inhibitory conductances
+- `N::Int = 100`: number of neurons.
+- `ge::VFT`: excitatory synaptic current (pA), one entry per neuron.
+- `gi::VFT`: inhibitory synaptic current (pA), one entry per neuron.
 """
 CurrentSynapseVars
 @snn_kw struct CurrentSynapseVars{VFT = Vector{Float32}} <: AbstractSynapseVariable

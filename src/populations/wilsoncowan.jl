@@ -1,4 +1,46 @@
+"""
+    WCParameter <: AbstractPopulationParameter
+
+Parameter type of `WilsonCowan`; it has no fields. Not exported (`SNNModels.WCParameter`).
+"""
 struct WCParameter <: AbstractPopulationParameter end
+
+@doc raw"""
+    WilsonCowan(; N = 100, name = "WilsonCowan", kwargs...)
+
+Population of rate units named after the Wilson-Cowan model. In SNNModels 1.8.4 its dynamics
+are identical to `Rate`: a single variable per unit with unit time constant and `tanh`
+transfer function. It does not implement the coupled excitatory/inhibitory Wilson-Cowan
+equations (no separate E and I variables, no refractory term, no sigmoid parameters).
+
+# Equations
+```math
+\frac{dx}{dt} = -x + g + I, \qquad r = \tanh(x)
+```
+(``t`` in ms), integrated with forward Euler.
+
+# Fields
+- `id::String = randstring(12)`, `name::String = "WilsonCowan"`, `param::WCParameter`.
+- `N::Int32 = 100`; `x = 0.5randn(N)`; `r = tanh.(x)`; `g`, `I`: inputs, zeros; `records::Dict`.
+
+No `synaptic_target` method is defined for `WilsonCowan`, so `RateSynapse` cannot target it in
+SNNModels 1.8.4; `g` and `I` can be written directly.
+
+# References
+The canonical model is Wilson H. R., Cowan J. D. (1972). Excitatory and inhibitory interactions
+in localized populations of model neurons. Biophys. J. 12:1-24. The code does not cite it and
+does not implement it in full (see above).
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+W = SNN.WilsonCowan(N = 10)
+SNN.monitor!(W, [:r])
+SNN.sim!([W]; duration = 20ms)
+```
+"""
+WilsonCowan
 
 @snn_kw mutable struct WilsonCowan{VFT = Vector{Float32}} <: AbstractPopulation
     id::String = randstring(12)

@@ -19,8 +19,21 @@
     records::Dict = Dict()
 end
 
-"""
-[Rate Receptors](https://brian2.readthedocs.io/en/2.0b4/resources/tutorials/2-intro-to-brian-synapses.html)
+@doc raw"""
+    SpikeRateSynapse(pre, post; μ = 0.0, p = 0.0, kwargs...)
+
+Sparse connection from a spiking population to a rate population (not exported).
+``W = \mu X/\sqrt{p N_{pre}}`` with ``X`` = `sprandn(N_post, N_pre, p)`; the target is
+`post.g` and `post.r` is read as the postsynaptic rate.
+
+`forward!(c, param::RateSynapseParameter)`: for every presynaptic neuron ``j`` that fired,
+``g_i \leftarrow g_i + W_{ij}``.
+
+# Status in SNNModels 1.8.4
+- `plasticity!` unpacks a field `rJ` that the struct does not have, so `train!` fails with
+  this connection; `sim!` works.
+- The struct has no `name` field and the constructor does not fill `targets`.
+- The fields `Apre`, `tpre` (presynaptic trace and spike times) are allocated but unused.
 """
 SpikeRateSynapse
 
@@ -31,6 +44,11 @@ function SpikeRateSynapse(pre, post; μ = 0.0, p = 0.0, kwargs...)
     SpikeRateSynapse(; @symdict(colptr, I, W, rI, fireJ, g)..., kwargs...)
 end
 
+@doc raw"""
+    forward!(c::SpikeRateSynapse, param::RateSynapseParameter)
+
+For each presynaptic spike add ``W_{ij}`` to `c.g[i]`.
+"""
 function forward!(c::SpikeRateSynapse, param::RateSynapseParameter)
     @unpack colptr, I, W, rI, fireJ, g = c
     @unpack lr = param

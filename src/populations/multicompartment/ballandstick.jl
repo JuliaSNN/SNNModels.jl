@@ -1,66 +1,85 @@
 # BallAndStick
-"""
-    BallAndStick{
-    VFT = Vector{Float32},
-    MFT = Matrix{Float32},
-    VDT = Dendrite{Vector{Float32}},
-    SYND <: AbstractSynapseParameter,
-    SYNS <: AbstractSynapseParameter,
-    SYNDV <: AbstractSynapseVariable,
-    SYNSV <: AbstractSynapseVariable,
-    SOMAT <: AbstractGeneralizedIFParameter,
-    PST <: AbstractSpikeParameter,
-    IT = Int32,
-    } <: AbstractDendriteIF
+@doc raw"""
+    BallAndStick(; N = 100, param = BallAndStickParameter(), adex = AdExParameter(),
+                   soma_syn = TripodSomaSynapse, dend_syn = TripodDendSynapse, spike = PostSpike(), ...)
 
-A ball-and-stick neuron model with dendritic and somatic compartments.
-The model incorporates adaptive exponential integrate-and-fire dynamics
-with synaptic inputs to both the soma and dendrites. The soma includes adaptation currents and dynamic thresholds for spike generation.
-The dendrite is modeled with separate passive compartments, and the soma integrates input currents from both dendrites. The current flows between the soma and the dendrite is governed by axial conductances, defined in the dendrite parameters. The dendrite parameters are computed based on passive membrane properties and geometrical properties, defined in the `DendNeuronParameter`.
-The model accepts any synaptic model for both soma and dendrites
+Population of two-compartment neurons: an AdEx-like soma coupled to one passive dendrite
+(`d`) through an axial conductance. Same equations and integration scheme as `Tripod`, with a
+single dendrite. Connections select the compartment with the fourth argument of
+`SpikingSynapse`: targets `:s` and `:d`.
 
+# Equations
+Soma (AdEx-like, parameters from `adex`, an `AdExParameter`), with one dendrite (``k = 1``):
+```math
+\begin{aligned}
+C \frac{dV_s}{dt} &= g_L (E_L - V_s) + \Delta_T\, e^{(V_s - \theta)/\Delta_T} - w_s
+    - I_{syn,s} - \sum_k g_{ax,k}\,(V_s - V_{d,k}) \\
+C_{d,k} \frac{dV_{d,k}}{dt} &= g_{m,k} (E_L - V_{d,k}) - I_{syn,d,k}
+    + g_{ax,k}\,(V_s - V_{d,k}) \\
+\tau_w \frac{dw_s}{dt} &= a (V_s - E_L) - w_s \\
+\tau_A \frac{d\theta}{dt} &= V_t - \theta
+\end{aligned}
+```
+``I_{syn,s}`` and ``I_{syn,d,k}`` are computed by `synaptic_current!` of `soma_syn` and
+`dend_syn` with the compartment potentials at the beginning of the step, and are clamped to
+``\pm 1500`` pA (`Tripod`) or ``\pm 1000`` pA (`BallAndStick`). ``C_{d,k}``, ``g_{m,k}``,
+``g_{ax,k}`` come from the `Dendrite` structs (see `create_dendrite`). The dendritic leak
+reversal is the somatic ``E_L`` (`adex.El`). Note that, as implemented, the exponential term is
+not multiplied by ``g_L`` (standard AdEx uses ``g_L \Delta_T e^{(V-\theta)/\Delta_T}``).
+
+Spike: when the predicted somatic potential ``V_s + dt\,\dot V_s`` reaches ``-10`` mV
+(hard-coded, not `adex.Vt`), the neuron fires: ``V_s \leftarrow`` `AP_membrane`,
+``w_s \leftarrow w_s + b``, ``\theta \leftarrow \theta + A_t``, and the refractory counter is set
+to `round((up + τabs)/dt)` steps. During the first `up` the soma is clamped at `AP_membrane`
+(back-propagation period), during the following `τabs` at `adex.Vr`; in both periods the
+dendrites only relax towards the soma through the axial term (forward Euler) and `w_s` is not
+integrated. ``\theta`` relaxes to `adex.Vt` at every step (forward Euler).
+
+# Integration
+Heun (explicit trapezoidal) method on ``(V_s, V_{d,k}, w_s)``: the derivatives are evaluated
+at the current state (`Δv_temp`) and at the Euler-predicted state (`Δv`), and the state is
+advanced by ``\frac{dt}{2}(\Delta v_{temp} + \Delta v)``. In the predicted adaptation
+derivative the code uses `v_s + Δv` and `w_s + Δv` (without the factor `dt`) where the
+voltage equations use `v + Δv dt`. Synaptic conductances are advanced first, once per step, by
+`update_synapses!`.
+
+The fields `Is` and `Id` (external currents) exist but are not used by the equations in the
+current implementation.
 
 # Fields
+## Population info
+- `name::String = "BallAndStick"`, `id::String = randstring(12)`, `N::IT = 100`, `records::Dict`.
 
-## Population Info
-- `name::String`: Name of the neuron model ("BallAndStick" by default)
-- `id::String`: Unique identifier for the neuron model
-- `N::IT`: Number of neurons in the population (default: 100)
-- `records::Dict`: Dictionary for storing simulation records
+## Parameters
+- `param::DendNeuronParameter = BallAndStickParameter()`: morphology.
+- `adex::SOMAT = AdExParameter()`: somatic parameters (see `Tripod`).
+- `dend_syn::SYND = TripodDendSynapse`, `soma_syn::SYNS = TripodSomaSynapse`: synapse models.
+- `spike::PST = PostSpike()`: spike shape and refractoriness.
+- `d::VDT`: `Dendrite` built with `create_dendrite(N, param.ds[1])`.
 
-## Model Parameters
-- `param::DendNeuronParameter`: Parameters specific to the dendrite-neuron model
-- `adex::SOMAT`: Adaptive Exponential Integrate-and-Fire (AdEx) parameters
-- `dend_syn::SYND`: Dendritic synapse parameters (default: TripodDendSynapse)
-- `soma_syn::SYNS`: Somatic synapse parameters (default: TripodSomaSynapse)
-- `spike::PST`: Post-spike parameters (default: PostSpike)
-- `d::VDT`: Dendrite properties
+## State variables
+- `v_s`, `v_d::VFT`: somatic and dendritic potentials (mV), initialised uniformly in `[Vr, Vt]`.
+- `w_s::VFT`: somatic adaptation current (pA).
+- `Is`, `Id::VFT`: external currents (pA), currently unused.
+- `fire::VBT`, `tabs::VFT`, `θ::VFT`: spike flags, refractory counters (steps), dynamic threshold (mV).
 
-## Model Variables
-- `v_s::VFT`: Somatic membrane potential
-- `w_s::VFT`: Somatic adaptation current
-- `v_d::VFT`: Dendritic membrane potential
-- `synvars_s::SYNSV`: Somatic synaptic variables
-- `synvars_d::SYNDV`: Dendritic synaptic variables
-- `Is::VFT`: Somatic external input current
-- `Id::VFT`: Dendritic external input current
-- `gaba_d::VFT`: GABA receptor conductance in dendrite
-- `glu_d::VFT`: Glutamate receptor conductance in dendrite
-- `gaba_s::VFT`: GABA receptor conductance in soma
-- `glu_s::VFT`: Glutamate receptor conductance in soma
-- `fire::VBT`: Boolean array indicating which neurons fired
-- `tabs::VFT`: Absolute refractory period counters
-- `θ::VFT`: Dynamic threshold for spike initiation
+## Synapses
+- `synvars_s`, `synvars_d`: synaptic state variables; `receptors_s`, `receptors_d::NamedTuple`: input buffers.
 
-## Temporary Variables for Integration
-- `Δv::MFT`: Temporary variable for voltage changes during integration
-- `Δv_temp::MFT`: Temporary variable for voltage changes during integration
-- `is::MFT`: Synaptic input currents
-- `ic::VFT`: Axial current between compartments
+## Work arrays
+- `Δv`, `Δv_temp::MFT` (`N x 3`): derivatives of `(v_s, v_d, w_s)`; `is::MFT` (`N x 2`);
+  `ic::VFT` (length 1).
 
-This model implements a ball-and-stick neuron with separate somatic and dendritic compartments,
-using adaptive exponential integrate-and-fire dynamics with synaptic inputs to both compartments.
-The model supports Heun integration for numerical stability.
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+B = SNN.BallAndStick(N = 10)
+E = SNN.Poisson(N = 50, param = SNN.PoissonParameter(20Hz))
+syn = SNN.SpikingSynapse(E, B, :glu, :d; conn = (p = 0.2, μ = 2.0))
+model = SNN.compose(; E, B, syn)
+SNN.sim!(; model, duration = 200ms)
+```
 """
 BallAndStick
 @snn_kw struct BallAndStick{
@@ -117,6 +136,12 @@ BallAndStick
     ic::VFT = zeros(1)
 end
 
+"""
+    integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
+
+Advance a `BallAndStick` population by `dt` (synapses, Heun step of soma and dendrite, spikes
+and refractoriness; see `BallAndStick`).
+"""
 function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
     @unpack N, v_s, w_s, v_d = p
     @unpack fire, θ, tabs = p

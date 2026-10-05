@@ -1,13 +1,30 @@
 """
-    Abstract type for normalization parameters.
+    NormParam <: MetaPlasticityParameter
+
+Abstract type of the normalization parameters: `MultiplicativeNorm`, `AdditiveNorm`
+(used by `SynapseNormalization`) and `AggregateScalingParameter` (used by
+`AggregateScaling`).
 """
 abstract type NormParam <: MetaPlasticityParameter end
 
 """
-    MultiplicativeNorm{FT = Int32} <: NormParam
+    MultiplicativeNorm(; τ, operator = *)
 
-This struct holds the parameters for multiplicative normalization. 
-It includes a timescale τ (default 0.0) and an operator (default multiplication).
+Multiplicative synaptic normalization, to be passed to `SynapseNormalization` (or
+`MetaPlasticity`). Every `τ`, the incoming weights of each postsynaptic neuron are scaled by a
+common factor so that their sum returns to its value at construction time (see
+`SynapseNormalization`).
+
+# Fields
+- `τ::Float32`: interval between two normalizations (ms). Required, no default.
+- `operator::Function = *`: combination operator; do not change.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+norm = SNN.MultiplicativeNorm(τ = 20ms)
+```
 """
 MultiplicativeNorm
 
@@ -17,10 +34,16 @@ MultiplicativeNorm
 end
 
 """
-    AdditiveNorm{FT = Float32} <: NormParam
+    AdditiveNorm(; τ, operator = +)
 
-This struct holds the parameters for additive normalization. 
-It includes a timescale τ (default 0.0) and an operator (default addition).
+Additive synaptic normalization, to be passed to `SynapseNormalization` (or
+`MetaPlasticity`). Every `τ`, a common offset is added to the incoming weights of each
+postsynaptic neuron (see `SynapseNormalization` for the exact update, which does not
+restore the initial sum exactly).
+
+# Fields
+- `τ::Float32`: interval between two normalizations (ms). Required, no default.
+- `operator::Function = +`: combination operator; do not change.
 """
 AdditiveNorm
 
@@ -29,16 +52,40 @@ AdditiveNorm
     operator::Function = +
 end
 
-"""
-    SynapseNormalization{VFT = Vector{Float32}, VIT = Vector{Int32}, MFT = Matrix{Float32}}
+@doc raw"""
+    SynapseNormalization{VFT, VIT, VST} <: AbstractNormalization
 
-A struct that holds parameters for synapse normalization, including:
-- param: Normalization parameter, can be either MultiplicativeNorm or AdditiveNorm.
-- t: A vector of integer values representing time points.
-- W0: A vector of initial weights before simulation.
-- W1: A vector of weights during the simulation.
-- μ: A vector of mean synaptic weights.
-- records: A dictionary for storing additional data.
+Metaplasticity object that keeps the total excitatory input weight of each postsynaptic
+neuron close to its initial value. It acts on one or more sparse synapses (`synapses`) that
+share the same postsynaptic population, and is added to the model as a connection (it
+transmits nothing: its `forward!` is a no-op).
+
+# Update
+At construction ``W^0_i = \sum_{s \in \text{in}(i)} W_s`` (sum over all synapses of all
+`synapses` onto neuron ``i``). Under `train!` only, when the step counter is a multiple of
+`round(Int, τ / dt)`, with ``W^1_i`` the current sum:
+- `MultiplicativeNorm`: ``\mu_i = W^0_i / W^1_i`` and ``W_s \leftarrow W_s\,\mu_i``, which
+  restores ``\sum_s W_s = W^0_i`` exactly.
+- `AdditiveNorm`: ``\mu_i = (W^0_i - W^1_i)/W^1_i`` and ``W_s \leftarrow W_s + \mu_i``. The
+  offset is not divided by the number of inputs, so the sum becomes
+  ``W^1_i + n_i (W^0_i - W^1_i)/W^1_i`` (``n_i`` inputs of neuron ``i``), which equals
+  ``W^0_i`` only if ``n_i = W^1_i``.
+
+The normalization runs at its position in the connection list, after the `forward!` and
+`plasticity!` of the connections listed before it.
+
+# Fields
+- `param::NormParam`: `MultiplicativeNorm` or `AdditiveNorm`.
+- `synapses::Vector{<:AbstractSparseSynapse}`: normalized connections.
+- `W0::Vector{Float32}`: initial summed input weight per postsynaptic neuron.
+- `W1::Vector{Float32}`: summed input weight at the last normalization.
+- `μ::Vector{Float32}`: last normalization factor/offset per neuron.
+- `t::Vector{Int32} = [0, 1]`: unused.
+- `id`, `name = "SynapseNormalization"`, `targets` (`:post` id and `:synapses` ids),
+  `records`.
+
+# References
+Reference not given in the code.
 """
 SynapseNormalization
 
@@ -60,12 +107,22 @@ SynapseNormalization
 end
 
 """
-    SynapseNormalization(synapses; param, kwargs...)
+    SynapseNormalization(synapses; param::NormParam, kwargs...)
 
-Constructor function for the SynapseNormalization struct.
-- param: Normalization parameter, can be either MultiplicativeNorm or AdditiveNorm.
-- kwargs: Other optional parameters.
-Returns a SynapseNormalization object with the specified parameters.
+Build a `SynapseNormalization` acting on the vector `synapses` (all `AbstractSparseSynapse`
+with the same postsynaptic population; asserted). Computes `W0` from the current weights.
+`kwargs...` are forwarded to the struct (e.g. `name`).
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 100)
+EE = SNN.SpikingSynapse(E, E, :ge; conn = (p = 0.2, μ = 2.0), LTPParam = SNN.STDPGerstner())
+norm = SNN.SynapseNormalization([EE]; param = SNN.MultiplicativeNorm(τ = 20ms))
+model = SNN.compose(; E, EE, norm)
+SNN.train!(model; duration = 100ms)
+```
 """
 function SynapseNormalization(synapses; param::NormParam, kwargs...)
     @assert length(synapses) > 0
@@ -101,6 +158,11 @@ function SynapseNormalization(synapses; param::NormParam, kwargs...)
     SynapseNormalization(; @symdict(param, W0, W1, μ, synapses)..., targets, kwargs...)
 end
 
+"""
+    MetaPlasticity(param::NormParam, synapses; kwargs...)
+
+Same as `SynapseNormalization(synapses; param, kwargs...)`.
+"""
 function MetaPlasticity(param::NormParam, synapses; kwargs...)
     SynapseNormalization(synapses; param, kwargs...)
 end
@@ -110,16 +172,10 @@ end
 function forward!(c::SynapseNormalization, param::NormParam) end
 
 """
-    plasticity!(c::SynapseNormalization, param::AdditiveNorm, dt::Float32)
+    plasticity!(c::SynapseNormalization, param::NormParam, dt::Float32, T::Time)
 
-Updates the synaptic weights using additive or multiplicative normalization (operator). This function calculates 
-the rate of change `μ` as the difference between initial weight `W0` and the current weight `W1`, 
-normalized by `W1`. The weights are updated at intervals specified by time constant `τ`.
-
-# Arguments
-- `c`: An instance of SynapseNormalization.
-- `param`: An instance of AdditiveNorm.
-- `dt`: Simulation time step.
+Apply the normalization (see `SynapseNormalization`) when `get_step(T)` is a multiple of
+`round(Int, param.τ / dt)`; otherwise do nothing. Called only by `train!`.
 """
 function plasticity!(c::SynapseNormalization, param::NormParam, dt::Float32, T::Time)
     tt = get_step(T)
@@ -129,6 +185,12 @@ function plasticity!(c::SynapseNormalization, param::NormParam, dt::Float32, T::
     end
 end
 
+"""
+    plasticity!(c::SynapseNormalization, param::NormParam)
+
+Apply one normalization step immediately: recompute `W1`, the factors/offsets `μ`, and
+update the weights of all `c.synapses`.
+"""
 function plasticity!(c::SynapseNormalization, param::NormParam)
     @unpack W1, W0, μ, synapses = c
     @unpack operator = param

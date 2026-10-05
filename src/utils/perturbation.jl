@@ -1,28 +1,33 @@
 """
-    perturbation_test(model, simtime, condition!; from_state, add_records, train, kwargs...)
+    perturbation_test(model, simtime; trigger! = (m -> nothing), perturbation! = nothing,
+                      from_state = nothing, add_records = nothing, train = true, kwargs...)
 
-Run a perturbed copy of `model` for `simtime` ms and return or archive results.
+Run a perturbed copy of `model` for `simtime` ms and return it, or archive its recordings in
+`model`.
 
-The copy is created with `modelcopy` (deep copy with empty record buffers), `condition!` is
-applied in-place, then the simulation is run. The original `model` is never mutated.
+The copy is created with `modelcopy` (deep copy with empty record buffers), `trigger!` is
+applied to it once, then the copy is simulated with `train!` or `sim!`. The original `model` is
+modified only when `add_records` is given (its `records[:perturbation]` entries are filled).
 
 # Arguments
-- `model`: source model (archive). Never modified.
+- `model`: source model.
 - `simtime`: duration in ms, e.g. `500ms`.
-- `condition!`: `(pert_model) -> nothing` applied to the copy before sim. Examples:
-  ```julia
-  m -> set_active!(m.stim.noise, false)   # silence a stimulus
-  m -> (m.pop.pv.I .= 200f0pA)           # inject current
-  m -> set_LTP!(m.syn.exc_exc, false)     # freeze plasticity
-  ```
 
 # Keyword arguments
+- `trigger!` (no-op): `(pert_model) -> nothing`, applied once to the copy before the run, e.g.
+  ```julia
+  m -> SNN.set_active!(m.stim.noise, false)   # silence a stimulus
+  m -> (m.pop.pv.I .= 200pA)                  # inject current
+  m -> SNN.set_LTP!(m.syn.exc_exc, false)     # freeze plasticity
+  ```
+- `perturbation!` (`nothing`): forwarded to `train!`/`sim!`, which call
+  `perturbation!(; P, C, S, t, dt, start_time)` at every time step.
 - `from_state` (`nothing`): pre-built model to use instead of `modelcopy(model)`.
   The caller is responsible for empty records and correct starting state.
 - `add_records` (`nothing`): if `nothing`, returns the perturbed model.
-  If a `String`/`Symbol`, flushes all monitored variables into
+  If a `String`/`Symbol`, copies all monitored variables of the perturbed model into
   `model.<component>.records[:perturbation][variable][condition][n]`
-  (n auto-increments) and returns `nothing`.
+  (`n` auto-increments) and returns `nothing`.
 - `train` (`true`): if `true` runs `train!` (plasticity active); if `false` runs `sim!`.
 - Remaining `kwargs` forwarded to `train!`/`sim!`.
 
@@ -39,18 +44,16 @@ Retrieve with `perturbation_record(obj, variable, condition, interval)`.
 
 # Example
 ```julia
-monitor!(model.pop.exc, [:v_s, :fire]; sr = 1kHz)
-
-ck = modelcopy(model)   # deep copy: same state, empty record buffers
-
-perturbation_test(ck, 500ms,
-    m -> set_active!(m.stim.noise, false); add_records = "no_noise")
-perturbation_test(ck, 500ms,
-    m -> set_active!(m.stim.noise, false); add_records = "no_noise") # n=2
-
-sim!(ck, 500ms)   # baseline over same window
-
-v_patched, r = perturbation_record(ck.pop.exc, :v_s, "no_noise", 0:1ms:500ms)
+using SpikingNeuralNetworks
+@load_units
+E = SNN.IF(N = 20, name = "E")
+noise = SNN.CurrentStimulus(E, :I, param = SNN.CurrentNoise(E; I_base = 300pA))
+model = SNN.compose(; E, noise, silent = true)
+SNN.monitor!(E, [:v, :fire]; sr = 1kHz)
+sim!(model, 100ms)                               # baseline
+SNN.perturbation_test(model, 50ms; trigger! = m -> (m.pop.E.I .+= 100pA),
+                      add_records = "kick", train = false)
+v, r = SNN.perturbation_record(E, :v, "kick", 0:1ms:150ms)
 ```
 """
 function perturbation_test(
@@ -240,7 +243,8 @@ end
 
 Delete stored perturbation data from `obj`.
 
-- No `condition`: removes **all** perturbation data (all variables, all conditions).
+- No `condition`: removes **all** perturbation data (all variables, all conditions); `n` is
+  ignored.
 - With `condition`: removes all entries for that condition across all variables.
 - With `variable` kwarg: restricts deletion to that variable only.
 - With both `condition` and `n` kwarg: removes only the `n`-th recording for that

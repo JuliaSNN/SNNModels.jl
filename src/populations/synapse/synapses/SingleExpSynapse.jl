@@ -1,22 +1,41 @@
 abstract type AbstractSinExpParameter <: AbstractSynapseParameter end
 
-"""
-    SingleExpSynapse{FT} <: AbstractSinExpParameter
+@doc raw"""
+    SingleExpSynapse(; τe = 6ms, τi = 0.5ms, E_i = -75mV, E_e = 0mV, gsyn_e = 1, gsyn_i = 1)
 
-A synaptic parameter type that models single exponential synaptic dynamics.
+Conductance-based synapse with single-exponential kinetics, one excitatory and one inhibitory
+conductance per neuron.
+
+# Equations
+```math
+\frac{dg_e}{dt} = -\frac{g_e}{\tau_e} + \sum_k w_k\,\delta(t - t_k), \qquad
+\frac{dg_i}{dt} = -\frac{g_i}{\tau_i} + \sum_k w_k\,\delta(t - t_k)
+```
+```math
+I_{syn} = g_{syn,e}\, g_e\,(V - E_e) + g_{syn,i}\, g_i\,(V - E_i)
+```
+
+# Integration
+The accumulated input is added to `ge`/`gi`, then one forward Euler step of the decay is
+applied (`ge += -dt ge / τe`, `gi += -dt gi / τi`). The receptor buffers are then zeroed.
 
 # Fields
-- `τe::FT`: Decay time constant for excitatory synapses (default: 6ms)
-- `τi::FT`: Rise time constant for inhibitory synapses (default: 0.5ms)
-- `E_i::FT`: Reversal potential for inhibitory synapses (default: -75mV)
-- `E_e::FT`: Reversal potential for excitatory synapses (default: 0mV)
-- `gsyn_e::FT`: Synaptic conductance for excitatory synapses (default: 1.0f0)
-- `gsyn_i::FT`: Synaptic conductance for inhibitory synapses (default: 1.0f0)
+- `τe::FT = 6ms`: decay time constant of the excitatory conductance (ms).
+- `τi::FT = 0.5ms`: decay time constant of the inhibitory conductance (ms).
+- `E_i::FT = -75mV`: inhibitory reversal potential (mV).
+- `E_e::FT = 0mV`: excitatory reversal potential (mV).
+- `gsyn_e::FT = 1.0`: scaling of the excitatory conductance (dimensionless; weights are in nS).
+- `gsyn_i::FT = 1.0`: scaling of the inhibitory conductance (dimensionless).
 
-# Type Parameters
-- `FT`: Floating point type (default: `Float32`)
+`FT` defaults to `Float32`. State variables: `SingleExpSynapseVars`.
 
-This type implements single exponential synaptic dynamics, where synaptic currents are calculated using separate time constants for both excitatory and inhibitory synapses.
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 10, param = SNN.IFParameter(C = 281pF, gl = 40nS),
+           synapse = SNN.SingleExpSynapse(τe = 5ms, τi = 10ms))
+```
 """
 SingleExpSynapse
 
@@ -33,12 +52,12 @@ end
 """
     SingleExpSynapseVars{VFT} <: AbstractSynapseVariable
 
-A synaptic variable type that stores the state variables for single exponential synaptic dynamics.
+State variables of `SingleExpSynapse`, created by `synaptic_variables(::SingleExpSynapse, N)`.
 
 # Fields
-- `N::Int`: Number of synapses
-- `ge::VFT`: Vector of excitatory conductances
-- `gi::VFT`: Vector of inhibitory conductances
+- `N::Int = 100`: number of neurons.
+- `ge::VFT`: excitatory conductance (nS).
+- `gi::VFT`: inhibitory conductance (nS).
 """
 SingleExpSynapseVars
 
