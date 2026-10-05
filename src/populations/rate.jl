@@ -24,10 +24,13 @@ with ``t`` in ms, i.e. the time constant is fixed to 1 ms. ``g`` is the input wr
 Forward Euler, `x += dt * (-x + g + I)`, then `r = tanh(x)`, then `g` is set to zero: ``g`` is
 the synaptic input of one step, written by the connections after the population update
 (`RateSynapse` adds ``W r``, the FORCE connections overwrite it). Use `I` for a constant input.
+Since populations are recorded right after their update, a recorded `:g` is zero: record `:x`
+or `:r` instead.
 Up to SNNModels 1.8.4 `g` was never reset, so with a `RateSynapse` it was the running sum of all
 past inputs.
 
-The population has no `fire` field, so only `:x`, `:r`, `:g` can be recorded.
+The population has no `fire` field, so only `:x`, `:r`, `:g` can be recorded (`:g` is zero when
+recorded, see above).
 
 # Fields
 - `id::String = randstring(12)`, `name::String = "Rate"`, `param::RateParameter = RateParameter()`.
