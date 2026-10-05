@@ -359,3 +359,26 @@ end
     f = _SnnKwOutside.Foo()
     @test f.x isa Float32 && f.v == [1, 2]
 end
+
+@testset "IO, graph and spatial helpers" begin
+    E = IF(N = 10, name = "E")
+    model = compose(; E, silent = true)
+    dir = mktempdir()
+    info = (seed = 1,)
+    calls = Ref(0)
+    f(info) = (calls[] += 1; model)
+    m1 = load_or_run(f; path = dir, name = "toy", info = info)
+    m2 = load_or_run(f; path = dir, name = "toy", info = info)
+    @test calls[] == 1                       # second call loads the saved model
+    @test SNNModels.load_data(dir, "toy", info) !== nothing
+    @test SNNModels.load_data(dir, "toy", info; count = 0) !== nothing
+    @test SNNload(dir, "toy", info; type = :data) !== nothing
+    @test !isempty(read_folder(SNNfolder(dir, "toy", info)))
+    @test SNNModels.data2model(; path = dir, name = "toy", info = info) == true
+    # print_model on a model whose stimuli/synapses produce no graph edge does not throw
+    @test (print_model(model); true)
+    # Euclidean periodic distance with a vector grid
+    @test SNNModels.periodic_distance([0.1f0, 0.1f0], [0.0f0, 0.0f0], [1.0f0, 1.0f0]) ≈ sqrt(0.02f0)
+    @test SNNModels.periodic_distance([0.1f0, 0.1f0], [0.0f0, 0.0f0], [1.0f0, 1.0f0]) ≈
+          SNNModels.periodic_distance([0.1f0, 0.1f0], [0.0f0, 0.0f0], 1.0f0)
+end

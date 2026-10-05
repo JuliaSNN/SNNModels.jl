@@ -122,8 +122,8 @@ function SNNload(;
     return dict2ntuple(DATA)
 end
 
-SNNload(path::String, name::String = "", info = nothing, kwargs...) =
-    SNNload(; path = path, name = name, info = info, kwargs..., type = :model)
+SNNload(path::String, name::String = "", info = nothing; kwargs...) =
+    SNNload(; path = path, name = name, info = info, type = :model, kwargs...)
 
 """
     load_model(path, name, info; kwargs...)
@@ -160,7 +160,7 @@ Load the `:data` file (model with its records) stored by `SNNsave`; same as
 """
 load_data(path::String, name::String, info::NamedTuple; kwargs...) =
     SNNload(; path = path, name = name, info = info, kwargs..., type = :data)
-load_data(path, name, info) = SNNload(; path, name, info, type = :data, kwargs...)
+load_data(path, name, info; kwargs...) = SNNload(; path, name, info, kwargs..., type = :data)
 
 """
     load_or_run(f; path, name, info, exp_config...)
@@ -168,8 +168,9 @@ load_data(path, name, info) = SNNload(; path, name, info, type = :data, kwargs..
 Return `load_model(path, name, info)` if that file exists; otherwise call `f(info)`, save the
 result with `save_model` and return it.
 
-Note: before saving, `name` is replaced by `savename(name, info, connector = "-")`, so the file is
-written to a different folder from the one `load_model(path, name, info)` looks in.
+The model is saved in the folder that `load_model(path, name, info)` reads, so a second call
+loads it. (Up to SNNModels 1.8.4 `name` was replaced by `savename(name, info)` before saving,
+so the model was written to another folder and never found.)
 
 # Arguments
 - `f::Function`: Function to run if model doesn't exist (receives `info` as argument)
@@ -184,8 +185,7 @@ written to a different folder from the one `load_model(path, name, info)` looks 
 function load_or_run(f::Function; path, name, info, exp_config...)
     loaded = load_model(path, name, info)
     if isnothing(loaded)
-        name = savename(name, info, connector = "-")
-        @info "Running simulation for: $name"
+        @info "Running simulation for: $(savename(name, info, connector = "-"))"
         produced = f(info)
         save_model(model = produced, path = path, name = name, info = info, exp_config...)
         return produced
@@ -305,13 +305,12 @@ save_model(; model, path, name, info, config = nothing, kwargs...) = SNNsave(
 save_model
 
 """
-    data2model(; path, name=randstring(10), info=nothing, kwargs...)
+    data2model(; path, name=randstring(10), info=nothing, count = 0, suffix = "", kwargs...)
 
-Create the `:model` file (records cleared) from an existing `:data` file.
-
-Note: the paths it checks, `joinpath(path, savename(name, info, "data.jld2"))` and
-`... "model.jld2"`, do not follow the folder layout written by `SNNsave`
-(`SNNfolder(path, name, info)/data-.jld2`).
+Create the `:model` file (records cleared) from an existing `:data` file, using the layout of
+`SNNsave`: `SNNfolder(path, name, info)/SNNfile(:data, count, suffix)` and
+`.../SNNfile(:model, count, suffix)`. (Up to SNNModels 1.8.4 it checked
+`joinpath(path, savename(name, info, "data.jld2"))`, which `SNNsave` never writes.)
 
 # Arguments
 - `path`: Directory path
@@ -321,16 +320,16 @@ Note: the paths it checks, `joinpath(path, savename(name, info, "data.jld2"))` a
 # Returns
 - `true` if model file exists or was created, `false` if data file doesn't exist
 """
-function data2model(; path, name = randstring(10), info = nothing, kwargs...)
+function data2model(; path, name = randstring(10), info = nothing, count = 0, suffix = "", kwargs...)
+    root = SNNfolder(path, name, info)
     # Does data file exist? If no return false
-    data_path = joinpath(path, savename(name, info, "data.jld2", connector = "-"))
+    data_path = joinpath(root, SNNfile(:data, count, suffix))
     !isfile(data_path) && return false
     # Does model file exist? If yes return true
-    data = load_data(path, name, info)
-    clear_records!(data.model)
-
-    model_path = joinpath(path, savename(name, info, "model.jld2", connector = "-"))
+    model_path = joinpath(root, SNNfile(:model, count, suffix))
     isfile(model_path) && return true
+    data = load_data(path, name, info; count, suffix)
+    clear_records!(data.model)
     # If model file does not exist, save model file
     # Logging.LogLevel(0) == Logging.Error
     @time DrWatson.save(model_path, ntuple2dict(data))
@@ -489,9 +488,8 @@ repository).
 - The path of the written file.
 
 # Details
-- Entries named `models` are skipped. (The intended skip of `study` is not effective: because of
-  operator precedence, `String(key) == "study" || String(key) == "models" && continue` only skips
-  `models`.)
+- Entries named `study` or `models` are skipped. (Up to SNNModels 1.8.4 only `models` was
+  skipped, because of operator precedence.)
 """
 function write_config(path::String, info; config, name = "", kwargs...)
     timestamp = get_timestamp()
@@ -510,14 +508,14 @@ function write_config(path::String, info; config, name = "", kwargs...)
     println(file, "")
     println(file, "info = (")
     for (key, value) in pairs(info)
-        String(key) == "study" || String(key)=="models" && continue
+        (String(key) == "study" || String(key) == "models") && continue
         write_value(file, key, value, "    ")
     end
     println(file, ")")
     if !isnothing(config)
         println(file, "config = (")
         for (key, value) in pairs(config)
-            String(key) == "study" || String(key)=="models" && continue
+            (String(key) == "study" || String(key) == "models") && continue
             write_value(file, key, value, "    ")
         end
         println(file, ")")
@@ -553,7 +551,7 @@ end
 
 
 """
-    read_folder(path, files=nothing; my_filter=(file,_type)->endswith(file,"type.jld2"), type=:model, name=nothing)
+    read_folder(path, files=nothing; my_filter = <SNNfile names of `type`>, type=:model, name=nothing)
 
 List the files of the directory `path` for which `my_filter(file, type)` is true (logging
 each match) and append their full paths to `files`.
@@ -561,9 +559,10 @@ each match) and append their full paths to `files`.
 # Arguments
 - `path`: Directory path to read from
 - `files`: Optional vector to append results to (default: creates new vector)
-- `my_filter`: Filter function `(file, type) -> Bool`; the default matches names ending in
-  `"\$(type).jld2"`, e.g. `model.jld2` (note that `SNNsave` with the default empty suffix writes
-  `model-.jld2`, which the default filter does not match).
+- `my_filter`: Filter function `(file, type) -> Bool`; the default matches the files written by
+  `SNNsave` (`SNNfile` names `"\$(type)-....jld2"`, e.g. `model-.jld2`, `data-2-trial.jld2`) and
+  the older `"...\$(type).jld2"` names. (Up to SNNModels 1.8.4 the default matched only names
+  ending in `"\$(type).jld2"`, so it missed the files of `SNNsave`.)
 - `type`: File type to match (default: :model)
 - `name`: accepted and ignored.
 
@@ -573,7 +572,8 @@ each match) and append their full paths to `files`.
 function read_folder(
     path,
     files = nothing;
-    my_filter = (file, _type)->endswith(file, "$(_type).jld2"),
+    my_filter = (file, _type) -> endswith(file, ".jld2") &&
+        (startswith(file, "$(_type)-") || endswith(file, "$(_type).jld2")),
     type = :model,
     name = nothing,
 )

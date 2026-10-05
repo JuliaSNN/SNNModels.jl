@@ -44,9 +44,9 @@ Distance on a torus (periodic boundary conditions).
 - Scalars: ``d = \min(|x_1 - x_2|,\ L - |x_1 - x_2|)``.
 - Points with a scalar `grid_size` ``L`` (same size in every dimension): Euclidean periodic
   distance ``\sqrt{\sum_n d_n^2}``.
-- Points with a vector `grid_size` ``(L_1, L_2, \dots)``: the code computes
-  ``\sqrt{(\sum_n d_n)^2} = \sum_n d_n``, i.e. the periodic L1 (Manhattan) distance, not the
-  Euclidean one.
+- Points with a vector `grid_size` ``(L_1, L_2, \dots)``: Euclidean periodic distance
+  ``\sqrt{\sum_n d_n^2}`` with ``d_n`` computed with ``L_n``. (Up to SNNModels 1.8.4 this method
+  computed ``\sqrt{(\sum_n d_n)^2} = \sum_n d_n``, the L1 distance.)
 
 # Example
 ```julia
@@ -65,9 +65,9 @@ function periodic_distance(
     return sqrt(
         sum(
             map(eachindex(point1)) do n
-                min(abs(point1[n] - point2[n]), grid_size[n] - abs(point1[n] - point2[n]))
+                min(abs(point1[n] - point2[n]), grid_size[n] - abs(point1[n] - point2[n]))^2
             end,
-        ) .^ 2,
+        ),
     )
 end
 function periodic_distance(
@@ -175,7 +175,8 @@ selected by `spatial.type`:
   the pair ``(i, j)`` is connected with probability ``P_{ij} = \gamma\,\epsilon\,p\,g_{ij}``,
   with ``g_{ij}`` = `gaussian_weight(pre_j, post_i)` and ``\gamma`` the inverse of the mean of
   the Gaussian profile over a 200x200 grid, so that the mean probability is ``\epsilon p``.
-  Pairs with `i == j` are excluded (also when `pre != post`).
+  Pairs with `i == j` are excluded when `pre == post` (up to SNNModels 1.8.4 also when
+  `pre != post`).
 
 Any other `spatial.type` returns `nothing`.
 
@@ -243,7 +244,7 @@ function compute_connections(pre::Symbol, post::Symbol, points; conn::NamedTuple
         randcache = rand(N_post, N_pre)
         for j = 1:N_pre
             for i = 1:N_post
-                if i == j
+                if pre == post && i == j # no autapses (only within one population)
                     P[i, j] = 0.0f0
                     L[i, j] = false
                     W[i, j] = 0.0f0
@@ -326,9 +327,9 @@ Average `activity` over the cells of a regular 2D grid and over time windows.
 # Arguments
 - `points`: tuple `(xs, ys)` of the neuron coordinates.
 - `activity::Matrix`: `N_neurons x N_timepoints`.
-- `T`: time windows. A number `T` gives the windows `(1+(t-1)T):(tT-1)` for
-  `t = 1:(N_timepoints ÷ T)` (note: the last column of each window is excluded); a vector gives
-  the windows explicitly (each element a range of column indices).
+- `T`: time windows. A number `T` gives the windows `(1+(t-1)T):(tT)` for
+  `t = 1:(N_timepoints ÷ T)`; a vector gives the windows explicitly (each element a range of
+  column indices). (Up to SNNModels 1.8.4 the last column of each window was excluded.)
 - `L` or `N` (exactly one must be given): cell side (number, or `(x = Lx, y = Ly)`), or number of
   cells per dimension (number, or `(x = Nx, y = Ny)`).
 - `grid_size = (x = [x0, x1], y = [y0, y1])`: extent of the grid.
@@ -359,7 +360,7 @@ function spatial_activity(points, activity; T, L=nothing, N=nothing, grid_size =
     time_indices = Vector{}()
     if isa(T, Number)
         for t = 1:(num_values÷T)
-            push!(time_indices, (1+(t-1)*T):(t*T-1))
+            push!(time_indices, (1+(t-1)*T):(t*T))
         end
     elseif isa(T, AbstractVector)
         for t in eachindex(T)

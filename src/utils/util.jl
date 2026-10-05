@@ -186,7 +186,6 @@ function compose(args...; name = randstring(10), silent = false, time = Time(), 
     pop = DrWatson.dict2ntuple(sort(pop, by = x -> x))
     syn = DrWatson.dict2ntuple(sort(syn, by = x -> x))
     stim = DrWatson.dict2ntuple(sort(stim, by = x -> stim[x].name))
-    name = haskey(kwargs, :name) ? args.name : name
     model = (pop = pop, syn = syn, stim = stim, name = name, time = time)
     if !silent
         print_model(model)

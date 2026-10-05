@@ -140,10 +140,7 @@ function filter_edge_props(g::AbstractMetaGraph, key, value)
             end
         end
     end
-    if isempty(_edges)
-        # error("No edge matching conditions found")
-        return []
-    end
+    # empty vectors when nothing matches (callers destructure the result; it was `[]` up to 1.8.4)
     return _edges, _ids
 end
 
@@ -154,10 +151,17 @@ function find_id_vertex(g::AbstractMetaGraph, id)
 end
 
 
+# Vertex whose :key is `id`, otherwise the first edge whose :key contains `id`.
+# (Up to 1.8.4 this referred to an undefined `e` and to `insothing`.)
 function find_key_graph(g::AbstractMetaGraph, id)
-    v = filter_first_vertex(g, (g, v) -> get_prop(g, v, :key) == id)
-    isnothing(v) && isnothing(e) && error("Vertex or edge not found")
-    return insothing(v) ? e : v
+    v = filter_first_vertex(g, (g, v) -> has_prop(g, v, :key) && get_prop(g, v, :key) == id)
+    isnothing(v) || return v
+    for e in edges(g)
+        has_prop(g, e, :key) || continue
+        k = get_prop(g, e, :key)
+        (k == id || (k isa AbstractVector && id in k)) && return e
+    end
+    error("Vertex or edge not found")
 end
 
 
