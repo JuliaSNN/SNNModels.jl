@@ -87,7 +87,7 @@ This is the formulation of Mongillo, Barak & Tsodyks (2008): the utilisation jum
 the same ``u^+`` sets both the transmitted efficacy and the depletion of resources. From rest
 (``u = U``, ``x = 1``) the first spike is transmitted with ``ρ = U (2 - U)``.
 
-!!! note "Changed in SNNModels 1.8.5"
+!!! note "Changed in SNNModels 1.9.0"
     Up to 1.8.4 the efficacy used ``u^-`` (before the jump) while the depletion used ``u^+``,
     a mix of the Markram et al. (1998) and Mongillo et al. (2008) conventions that depressed
     more than either. Efficacies are now higher, e.g. ``0.51`` instead of ``0.30`` for the first
