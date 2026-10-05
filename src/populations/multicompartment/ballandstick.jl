@@ -12,7 +12,7 @@ single dendrite. Connections select the compartment with the fourth argument of
 Soma (AdEx-like, parameters from `adex`, an `AdExParameter`), with one dendrite (``k = 1``):
 ```math
 \begin{aligned}
-C \frac{dV_s}{dt} &= g_L (E_L - V_s) + \Delta_T\, e^{(V_s - \theta)/\Delta_T} - w_s
+C \frac{dV_s}{dt} &= g_L (E_L - V_s) + g_L \Delta_T\, e^{(V_s - \theta)/\Delta_T} - w_s
     - I_{syn,s} - \sum_k g_{ax,k}\,(V_s - V_{d,k}) \\
 C_{d,k} \frac{dV_{d,k}}{dt} &= g_{m,k} (E_L - V_{d,k}) - I_{syn,d,k}
     + g_{ax,k}\,(V_s - V_{d,k}) \\
@@ -24,8 +24,16 @@ C_{d,k} \frac{dV_{d,k}}{dt} &= g_{m,k} (E_L - V_{d,k}) - I_{syn,d,k}
 `dend_syn` with the compartment potentials of the Heun stage being evaluated, and are clamped to
 ``\pm 1500`` pA (`Tripod`) or ``\pm 1000`` pA (`BallAndStick`). ``C_{d,k}``, ``g_{m,k}``,
 ``g_{ax,k}`` come from the `Dendrite` structs (see `create_dendrite`). The dendritic leak
-reversal is the somatic ``E_L`` (`adex.El`). Note that, as implemented, the exponential term is
-not multiplied by ``g_L`` (standard AdEx uses ``g_L \Delta_T e^{(V-\theta)/\Delta_T}``).
+reversal is the somatic ``E_L`` (`adex.El`). The exponential term is multiplied by ``g_L``, as in
+the AdEx model (Brette and Gerstner 2005) and in the published Tripod model (Quaresima et al.
+2023, Eq. 1, where ``g_L`` multiplies both the leak and the exponential term; the published code,
+TripodNeuron.jl, computes `gl * (-v + Er + ΔT * exp((v - θ) / ΔT))`).
+
+!!! note "Changed after SNNModels 1.8.4"
+    Up to SNNModels 1.8.4 the exponential term was ``\Delta_T e^{(V_s-\theta)/\Delta_T}`` without
+    ``g_L`` (a mV-valued term in a pA-valued equation), so the spike-initiation current was
+    ``g_L / 1\,\mathrm{nS}`` times (40 times with the default `gl = 40nS`) smaller than in the
+    published model.
 
 Spike: when the predicted somatic potential ``V_s + dt\,\dot V_s`` reaches ``-10`` mV
 (hard-coded, not `adex.Vt`), the neuron fires: ``V_s \leftarrow`` `AP_membrane`,
@@ -230,7 +238,7 @@ end
         Δv[i, 1] =
             (
                 gl * (El - vs) +
-                ΔT * exp256((vs - θ[i]) / ΔT) - ws  # adaptation
+                gl * ΔT * exp256((vs - θ[i]) / ΔT) - ws  # adaptation
                 - is[i, 1]   # synapses
                 - ic[1] # axial current
                 # + I[i]  # external current
