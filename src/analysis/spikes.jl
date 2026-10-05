@@ -453,9 +453,10 @@ end
 `Spiketimes` method: per-neuron time average of the convolved rate returned by
 `firing_rate(spiketimes; interval, interpolate = false)` (Hz).
 
-The `populations` method is meant to return the histogram of all spike times over `interval`
-and the left bin edges, but it fails with an `UndefVarError` in SNNModels 1.8.4 (the local
-variable `spiketimes` shadows the function it calls).
+The `populations` method (a population, a vector or a `NamedTuple` of populations) returns
+the histogram of all spike times over the bin edges `interval` and the left bin edges
+`interval[1:end-1]`. (Up to SNNModels 1.8.4 it failed with an `UndefVarError`: a local variable
+shadowed the function `spiketimes`.)
 """
 function average_firing_rate(
     spiketimes::Spiketimes;
@@ -470,8 +471,8 @@ function average_firing_rate(
 end
 
 function average_firing_rate(populations; interval)
-    spiketimes = spiketimes(populations)
-    return sort(vcat(spiketimes...)) |> x -> fit(Histogram, x, interval).weights,
+    st = spiketimes(populations)
+    return sort(vcat(st...)) |> x -> fit(Histogram, x, interval).weights,
     interval[1:(end-1)]
 end
 
@@ -479,12 +480,14 @@ end
     compute_cross_correlogram(spike_times1::Vector{Float32}, spike_times2 = Float32[];
                               bin_width = 1ms, max_lag = 100.0, shift_predictor = false)
 
-Intended to return `(lags, corr)`: the cross-correlogram (`DSP.xcorr`) of the binned spike
-trains of two neurons (or the autocorrelogram if `spike_times2` is empty) for lags up to
-`max_lag` ms. With `shift_predictor = true` the second train is shifted by 1000 ms.
+Return `(lags, corr)`: the cross-correlogram (`DSP.xcorr`) of the spike trains of two neurons
+binned with `bin_width` on the common interval `0:bin_width:(t_last + max_lag)`, or the
+autocorrelogram if `spike_times2` is empty (with the zero-lag bin set to 0), for lags up to
+`max_lag` ms. `corr[k]` counts the pairs with `t2 - t1` in the lag bin `lags[k]`. With
+`shift_predictor = true` the second train is shifted by 1000 ms.
 
-Not functional in SNNModels 1.8.4: it calls `bin_spiketimes` without the required `interval`
-keyword, and the autocorrelation branch refers to an undefined variable `auto_corr`.
+(Up to SNNModels 1.8.4 the function always threw: `bin_spiketimes` was called without the
+required `interval` and the autocorrelation branch referred to an undefined `auto_corr`.)
 """
 function compute_cross_correlogram(
     spike_times1::Vector{Float32},
@@ -493,18 +496,13 @@ function compute_cross_correlogram(
     max_lag = 100.0,
     shift_predictor = false,
 )
-    # Create a binary spike train
-    # bin_width = 1000/sr
-
-    spike_train1, interval = bin_spiketimes(spike_times1; max_lag, bin_width)
-    if !isempty(spike_times2)
-        if shift_predictor
-            spike_times2 = spike_times2 .+ 1000.0
-        end
-        spike_train2, _ = bin_spiketimes(spike_times2;)
-    else
-        spike_train2 = spike_train1
+    auto = isempty(spike_times2)
+    if !auto && shift_predictor
+        spike_times2 = spike_times2 .+ 1000.0f0
     end
+    interval = _correlogram_interval(spike_times1, spike_times2, bin_width, max_lag)
+    spike_train1, _ = bin_spiketimes(spike_times1; interval, do_sparse = false)
+    spike_train2 = auto ? spike_train1 : first(bin_spiketimes(spike_times2; interval, do_sparse = false))
 
     # Compute the auto-correlation (cross-correlogram with itself)
     _corr = xcorr(spike_train1, spike_train2)
@@ -518,22 +516,28 @@ function compute_cross_correlogram(
     lags = lags[lag_mask]
     _corr = _corr[lag_mask]
 
-    isempty(spike_times2) && (auto_corr[length(lags)÷2+1] = 0)
+    auto && (_corr[length(lags)÷2+1] = 0)
 
     return lags, _corr
+end
+
+# Common binning interval of two spike trains for the correlogram functions.
+function _correlogram_interval(st1, st2, bin_width, max_lag)
+    tmax = maximum(vcat(Float32[0], st1, st2)) + Float32(max_lag) + Float32(bin_width)
+    return 0.0f0:Float32(bin_width):tmax
 end
 
 @doc raw"""
     compute_covariance_density(spike_times1::Vector{Float32}, spike_times2::Vector{Float32};
                                bin_width = 1ms, max_lag = 200ms)
 
-Intended to return `(lags, C)` with the covariance density
+Return `(lags, C)` with the covariance density
 ``C(\tau) = \mathrm{xcorr}(\tau) - \lambda_x \lambda_y\,\Delta\,n_{bins}`` (cross-correlogram
 minus its value for independent trains with rates ``\lambda_x, \lambda_y``; ``\Delta`` =
 `bin_width`).
 
-Not functional in SNNModels 1.8.4, because it relies on `compute_cross_correlogram` and on
-`bin_spiketimes` called without the required `interval` keyword.
+Both trains are binned on the same interval as in `compute_cross_correlogram`. (Up to
+SNNModels 1.8.4 the function always threw, see `compute_cross_correlogram`.)
 """
 function compute_covariance_density(
     spike_times1::Vector{Float32},
@@ -544,8 +548,9 @@ function compute_covariance_density(
     # Compute the cross-correlogram
     lags, cross_corr =
         compute_cross_correlogram(spike_times1, spike_times2; bin_width, max_lag)
-    spike_train1, _ = bin_spiketimes(spike_times1; max_lag, bin_width)
-    spike_train2, _ = bin_spiketimes(spike_times2; max_lag, bin_width)
+    interval = _correlogram_interval(spike_times1, spike_times2, bin_width, max_lag)
+    spike_train1, _ = bin_spiketimes(spike_times1; interval, do_sparse = false)
+    spike_train2, _ = bin_spiketimes(spike_times2; interval, do_sparse = false)
 
     # Compute mean firing rates
     λ_x = mean(spike_train1) / bin_width
@@ -920,8 +925,8 @@ Fano factor `var(counts) / mean(counts)` of the spike counts in the bins of `int
 (see `bin_spiketimes`; the bin width is `step(interval)`), 0 if undefined. The `Spiketimes` and
 population methods return one value per neuron.
 
-`interval` must be an `AbstractRange`: the default `nothing` (and the tuple built by the
-population method when `interval = nothing`) is rejected by `bin_spiketimes`.
+`interval` is a required keyword (an `AbstractRange`). (Up to SNNModels 1.8.4 it defaulted to
+`nothing`, and the population method built a tuple, both rejected by `bin_spiketimes`.)
 
 # References
 Softky, W. R., & Koch, C. (1993). The highly irregular firing of cortical cells is inconsistent
@@ -936,20 +941,19 @@ st = SNN.Spiketimes([Float32.(sort(rand(50) .* 1000))])
 SNN.FanoFactor(st; interval = 0:100ms:1s)
 ```
 """
-function FanoFactor(spiketime::Vector{Float32}; interval=nothing)
+function FanoFactor(spiketime::Vector{Float32}; interval::AbstractRange)
     bins, r = bin_spiketimes(spiketime; interval) 
     ff  = var(bins) / mean(bins)
     isnan(ff) && (ff = 0.0)
     return ff
 end
 
-function FanoFactor(spiketimes::Spiketimes; interval=nothing)
+function FanoFactor(spiketimes::Spiketimes; interval::AbstractRange)
     return FanoFactor.(spiketimes; interval)
 end
 
-function FanoFactor(pop::T; interval) where {T<:AbstractPopulation}
+function FanoFactor(pop::T; interval::AbstractRange) where {T<:AbstractPopulation}
     st = spiketimes(pop)
-    interval = isnothing(interval) ? (0.0f0, maximum(Iterators.flatten(st))) : interval
     return FanoFactor.(st; interval)
 end
 
@@ -963,8 +967,10 @@ export FanoFactor
 Indices that sort the elements of `spiketimes` (`sort(eachindex(spiketimes), by = x -> spiketimes[x])`;
 for a `Spiketimes`, trains are compared lexicographically, i.e. by first spike).
 
-The methods with `pop`/`populations` call `spike_statistics`, which is not defined in
-SNNModels 1.8.4, and therefore throw an `UndefVarError`.
+The methods with `pop`/`populations` sort the neurons of `pop` (each vector of
+`populations`) by the time of their first spike inside `intervals` (a vector of `[start, end]`
+pairs; neurons without such a spike come last) and return the sorted neuron indices. (Up to
+SNNModels 1.8.4 they called the undefined `spike_statistics` and threw an `UndefVarError`.)
 """
 function st_order(spiketimes::T) where {T<:Vector{}}
     ii = sort(eachindex(1:length(spiketimes)), by = x -> spiketimes[x])
@@ -972,8 +978,14 @@ function st_order(spiketimes::T) where {T<:Vector{}}
 end
 
 function st_order(spiketimes::Spiketimes, pop::Vector{Int}, intervals)
-    @unpack spiketime = spike_statistics(spiketimes[pop], intervals)
-    ii = sort(eachindex(pop), by = x -> spiketime[x])
+    first_spike = map(pop) do n
+        t = Inf32
+        for iv in intervals, s in spiketimes[n]
+            iv[1] <= s <= iv[end] && (t = min(t, Float32(s)))
+        end
+        t
+    end
+    ii = sortperm(first_spike)
     return pop[ii]
 end
 
@@ -1225,8 +1237,7 @@ function sample_inputs(
     @assert size(spikes, 2) == length(interval)
     for i = 1:size(spikes, 1)
         st_n = findall(spikes[i, :])
-        isnothing(st_n) && push!(inputs, Float32[])
-        push!(inputs, interval[st_n])
+        push!(inputs, Float32.(interval[st_n]))
     end
     inputs
 end

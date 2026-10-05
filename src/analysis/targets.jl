@@ -96,7 +96,7 @@ end
 # Kernel Density Estimation
 function KDE(t::Real, h::Real, ys)
     ndf(x, h) = exp(-x^2 / h)
-    1 / length(data) * 1 / h * sum(ndf.(ys .- t, h))
+    1 / length(ys) * 1 / h * sum(ndf.(ys .- t, h))
 end
 
 # Distribution

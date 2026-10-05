@@ -314,3 +314,29 @@ end
     @test all(isempty(st[i]) for i in (1, 3, 4, 6, 7, 8, 9, 10))
     @test !isempty(st[2]) && !isempty(st[5])
 end
+
+@testset "Analysis functions that used to throw" begin
+    # cross-correlogram: train 2 = train 1 shifted by +5 ms -> peak at lag +5 ms
+    t1 = Float32.(collect(50:50:2000))
+    t2 = t1 .+ 5.0f0
+    lags, c = SNNModels.compute_cross_correlogram(t1, t2; bin_width = 1ms, max_lag = 20.0)
+    @test lags[argmax(c)] ≈ 5 || lags[argmax(c)] ≈ -5
+    lags, a = SNNModels.compute_cross_correlogram(t1; bin_width = 1ms, max_lag = 100.0)
+    @test a[length(lags)÷2+1] == 0 && maximum(a) > 0
+    lags, C = SNNModels.compute_covariance_density(t1, t2; bin_width = 1ms, max_lag = 20ms)
+    @test length(C) == length(lags)
+    # FanoFactor requires an interval
+    st = Spiketimes([t1, t2])
+    @test length(SNNModels.FanoFactor(st; interval = 0:100ms:2s)) == 2
+    @test_throws UndefKeywordError SNNModels.FanoFactor(t1)
+    # st_order with populations
+    st3 = Spiketimes([Float32[30], Float32[10], Float32[], Float32[20]])
+    @test SNNModels.st_order(st3, [1, 2, 3, 4], [[0, 100]]) == [2, 4, 1, 3]
+    # average_firing_rate over populations
+    E = IF(N = 10)
+    sE = Stimulus(PoissonFixed(rate = 3kHz), E, :ge)
+    monitor!(E, [:fire])
+    sim!(compose(; E, sE, silent = true), 200ms)
+    h, edges = SNNModels.average_firing_rate([E]; interval = 0:10ms:200ms)
+    @test length(h) == 20 && sum(h) == sum(length.(spiketimes(E)))
+end
