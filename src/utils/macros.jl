@@ -132,9 +132,9 @@ Add sentinel default values to type parameters for tracking assignment.
 """
 function snn_kw_str_sentinels(x)
     if length(x) == 1
-        return (x[1], Any, :(KwStrSentinel()))
+        return (x[1], Any, :($(KwStrSentinel)()))
     elseif length(x) == 2
-        return (x[1], Any, :(KwStrSentinel()))
+        return (x[1], Any, :($(KwStrSentinel)()))
     else
         return x
     end
@@ -151,7 +151,7 @@ Generate code to check if type parameter was assigned or use default.
 - Expression checking for sentinel value
 """
 snn_kw_str_sentinel_check(x) = :(
-    if $(x[1]) isa KwStrSentinel
+    if $(x[1]) isa $(KwStrSentinel)
         $(x[1]) = $(length(x) > 1 ? x[2] : Any)
     end
 )
@@ -173,7 +173,7 @@ function snn_kw_str_sentinel_check_concrete(x; dict)
     # @show x[1]
     @assert haskey(dict, x[1]) "Type parameter $(x[1]) defined in the struct is not used in any field"
     return :(
-        if $(x[1]) isa KwStrSentinel
+        if $(x[1]) isa $(KwStrSentinel)
             ## if it is longer than 1, set it to Any
             ## otherwise, x[2] is the default type 
             $(x[1]) = $(length(x) > 1 ? :($(dict[x[1]])) : Any)
@@ -231,14 +231,14 @@ fields. Type parameters are keyword arguments of the constructor:
 
 All population, synapse, stimulus and parameter types of SNNModels are defined with this macro.
 
-The generated constructor refers to `KwStrSentinel` unqualified, so when the macro is used
-outside SNNModels on a struct with type parameters, `KwStrSentinel` must be in scope
-(`using SNNModels: KwStrSentinel`).
+The macro can be used in any module: the generated constructor refers to the sentinel type
+itself, so nothing besides `@snn_kw` needs to be imported. (Up to SNNModels 1.8.4 it referred
+to `KwStrSentinel` by name, which had to be imported explicitly.)
 
 # Example
 ```julia
 using SpikingNeuralNetworks
-using SNNModels: @snn_kw, KwStrSentinel
+using SNNModels: @snn_kw
 @snn_kw struct MyStruct{FT = Float32}
     x::FT = 1.0
     y::FT = 2.0
@@ -344,8 +344,8 @@ with the listed fields replaced. `base` itself is not modified. Each assignment 
 `update_with_merge`; missing intermediate keys are created (with a warning), structs on the path
 are rebuilt through their keyword constructor.
 
-Only the `begin ... end` block form works in SNNModels 1.8.4: the single-assignment form
-`@update base a.b = v` throws `UndefVarError: current_config` at macro expansion.
+The single-assignment form `@update base a.b = v` is equivalent to a block with one line.
+(Up to SNNModels 1.8.4 it threw `UndefVarError: current_config` at macro expansion.)
 
 # Example
 ```julia
@@ -419,8 +419,8 @@ macro update(base, update_expr)
         # Convert the field names into symbols
         field_syms = [Symbol(f) for f in fields]
 
-        # Apply the update to the current config using the helper function
-        current_config = :(update_with_merge($current_config, $field_syms, $value))
+        # Apply the update to the base config using the helper function
+        return :(update_with_merge($(esc(base)), $field_syms, $value))
     end
     # end
 end
@@ -516,9 +516,9 @@ end
     end
 
 In-place counterpart of `@update`: computes the updated configuration and rebinds the variable
-`base` to it (`base = update_with_merge(...)`). As for `@update`, use the `begin ... end` form:
-the single-assignment form `@update! base a.b = v` does not escape `base` and fails with an
-`UndefVarError` in SNNModels 1.8.4.
+`base` to it (`base = update_with_merge(...)`). The single-assignment form
+`@update! base a.b = v` also works (up to SNNModels 1.8.4 it did not escape `base` and failed
+with an `UndefVarError`).
 
 # Example
 ```julia
@@ -559,7 +559,7 @@ macro update!(base, update_expr)
         end
         pushfirst!(fields, lhs)  # Add the first part
         field_syms = [Symbol(f) for f in fields]
-        current_config = :(update_with_merge($base, $field_syms, $rhs))
+        current_config = :(update_with_merge($(esc(base)), $field_syms, $(esc(rhs))))
     end
     return Expr(:(=), esc(base), :($current_config))
 end

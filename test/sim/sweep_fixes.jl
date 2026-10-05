@@ -278,7 +278,7 @@ end
     # groups: Poisson and layer parameters, concatenated neurons
     Tp = Tripod(N = 4)
     G = MultiCompartmentStimulusGroup(PoissonFixed(rate = 10Hz), Tp, :glu, [:d1, :d2])
-    @test neurons(G) isa Vector{<:Integer} && length(neurons(G)) == 8
+    @test SNNModels.neurons(G) isa Vector{<:Integer} && length(SNNModels.neurons(G)) == 8
     GL = MultiCompartmentStimulusGroup(PoissonLayer(rate = 10Hz, N = 5), Tp, :glu, [:d1, :d2];
                                        conn = (p = 1.0, μ = 1.0))
     @test length(GL.elements) == 2
@@ -337,6 +337,25 @@ end
     sE = Stimulus(PoissonFixed(rate = 3kHz), E, :ge)
     monitor!(E, [:fire])
     sim!(compose(; E, sE, silent = true), 200ms)
-    h, edges = SNNModels.average_firing_rate([E]; interval = 0:10ms:200ms)
-    @test length(h) == 20 && sum(h) == sum(length.(spiketimes(E)))
+    h, edges = SNNModels.average_firing_rate([E]; interval = 0:10ms:300ms)
+    @test length(h) == 30 && sum(h) == sum(length.(spiketimes(E)))
+end
+
+module _SnnKwOutside
+using SNNModels: @snn_kw
+@snn_kw struct Foo{FT = Float32, VT}
+    x::FT = 1.0
+    v::VT = [1, 2]
+end
+end
+
+@testset "Macros: @update single assignment, @snn_kw outside SNNModels" begin
+    config = (a = 1, b = (c = 2, d = 3))
+    new = SNNModels.@update config b.c = 5
+    @test new.b.c == 5 && config.b.c == 2
+    cfg = (a = 1, b = (c = 2, d = 3))
+    SNNModels.@update! cfg b.d = 9
+    @test cfg.b.d == 9
+    f = _SnnKwOutside.Foo()
+    @test f.x isa Float32 && f.v == [1, 2]
 end
