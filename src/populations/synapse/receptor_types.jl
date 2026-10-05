@@ -48,12 +48,6 @@ TripodDendSynapse = ReceptorSynapse(
 
 ## Soma parameters
 
-SomaNMDA = let
-    Mg_mM = 1.0mM |> Float32
-    nmda_b = 3.57f0   # voltage dependence of nmda channels
-    nmda_k = -0.062f0     # Eyal 2018
-    NMDAVoltageDependency(mg = Mg_mM/mM, b = nmda_b, k = nmda_k)
-end
 SomaGlu = Glutamatergic(
     Receptor(E_rev = 0.0, τr = 1ms, τd = 6.0ms, g0 = 0.7, target = :glu),
     ReceptorVoltage(
@@ -71,6 +65,9 @@ SomaGABA = GABAergic(
     Receptor(E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.006, target = :gaba),
 )
 
+# Somatic NMDA Mg block: the NMDAVoltageDependency defaults (b = 3.36, k = -0.077).
+# (An earlier definition with b = 3.57, k = -0.062 was always overridden by this line and has
+# been removed in 1.8.3; the effective value is unchanged.)
 SomaNMDA = NMDAVoltageDependency()
 SomaReceptors = Receptors(SomaGlu, SomaGABA)
 SomaSynapse = ReceptorSynapse(

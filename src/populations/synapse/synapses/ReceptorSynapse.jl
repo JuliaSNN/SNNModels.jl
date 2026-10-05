@@ -71,8 +71,8 @@ MultiReceptorSynapse
     receptors::REC = infer_receptors(syn)
 end
 
-MultiReceptorSynapse(syn::ReceptorArray) =
-    ReceptorSynapse(; syn = syn, NMDA = NMDA, receptors = receptors)
+# positional form, equivalent to the keyword form `MultiReceptorSynapse(; syn)`
+MultiReceptorSynapse(syn::ReceptorArray; kwargs...) = MultiReceptorSynapse(; syn = syn, kwargs...)
 
 function synaptic_receptors(synapse::MultiReceptorSynapse, N::Int)
 

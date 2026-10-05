@@ -159,8 +159,10 @@ function stimulate!(p, param::CurrentNoise, time::Time, dt::Float32)
     @unpack I, neurons, randcache = p
     @unpack I_base, I_dist, α = param
     rand!(I_dist, randcache)
-    @inbounds @simd for i in p.neurons
-        I[i] = (I_base[i] + randcache[i])*(1-α[i]) + I[i] * (α[i])
+    # randcache has one entry per stimulated neuron: index it by position k, not by neuron id i
+    @inbounds @simd for k in eachindex(neurons)
+        i = neurons[k]
+        I[i] = (I_base[i] + randcache[k])*(1-α[i]) + I[i] * (α[i])
     end
 end
 

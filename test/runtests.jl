@@ -67,6 +67,7 @@ end
     _ts("poisson",        "stim/poisson.jl")
     _ts("poisson_layer",  "stim/poisson_layer.jl")
     _ts("current",        "stim/current.jl")
+    _ts("current_subset", "stim/current_subset_and_receptors.jl")
     _ts("timed",          "stim/timed.jl")
     _ts("balanced",       "stim/balanced.jl")
 end

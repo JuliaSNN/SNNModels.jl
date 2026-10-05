@@ -104,6 +104,18 @@ over incoming synapses; traces read before the current step's spikes). They agre
 (2e-6) and Auryn (2e-7). Details: `src/connections/sparse_plasticity/STDP_kernels.jl` and
 `docs/stdp_rules_memo.md`.
 
+## Release notes: 1.8.3
+
+- **Bug fix, `CurrentStimulus` on a neuron subset.** With `CurrentNoise` and a `neurons` subset
+  whose ids exceed `length(neurons)` (e.g. `neurons = 51:100` on a 100-neuron population), the
+  random cache was indexed by neuron id and read past its end: wrong noise values without bounds
+  checking, a `BoundsError` with it. `neurons = :ALL` was not affected.
+- **Bug fix, `MultiReceptorSynapse(syn)`.** The positional constructor referenced undefined names;
+  it now matches the keyword form `MultiReceptorSynapse(; syn)`.
+- **Clean-up, `SomaNMDA`.** A first definition with `b = 3.57, k = -0.062` was always overridden by
+  `NMDAVoltageDependency()` (`b = 3.36, k = -0.077`); the dead definition is removed. The effective
+  value is unchanged.
+
 ## Release notes: 1.8.2
 
 - **Bug fix, iSTDP.** In `iSTDPRate` (and the former `iSTDPTime`) the potentiation at a
