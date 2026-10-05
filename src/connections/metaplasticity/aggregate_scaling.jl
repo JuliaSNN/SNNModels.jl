@@ -97,7 +97,7 @@ AggregateScaling
 } <: AbstractNormalization
     N::Int32 = 0
     id::String = randstring(12)
-    param::NormParam = MultiplicativeNorm()
+    param::NormParam
     synapses::VST
     Wt::VFT
     WT::VFT

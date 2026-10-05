@@ -178,3 +178,70 @@ end
     @test WT1 < 10.0                       # rate above target: the target weight decreases
     @test isapprox(W1, WT1; rtol = 0.1)    # weights follow the target after rescaling
 end
+
+@testset "SynapseNormalization: additive and multiplicative restore the sum" begin
+    for param in (AdditiveNorm(τ = 10ms), MultiplicativeNorm(τ = 10ms))
+        E = IF(N = 20)
+        EE = SpikingSynapse(E, E, :ge; conn = (p = 0.5, μ = 2.0))
+        N = SynapseNormalization([EE]; param)
+        W0 = copy(N.W0)
+        EE.W .*= 1.5f0
+        SNNModels.plasticity!(N, param)
+        sums = zeros(Float32, 20)
+        for i = 1:20, k = EE.rowptr[i]:(EE.rowptr[i+1]-1)
+            sums[i] += EE.W[EE.index[k]]
+        end
+        @test sums ≈ W0 rtol = 1e-4
+    end
+    @test_throws UndefKeywordError SynapseNormalization(; synapses = [SpikingSynapse(IF(N = 2), IF(N = 2), :ge; conn = (p = 1.0, μ = 1.0))])
+end
+
+@testset "Turnover: RandomTurnover under train!, positive weights, state consistency" begin
+    Random.seed!(2)
+    E = IF(N = 30)
+    EE = SpikingSynapse(E, E, :ge; conn = (p = 0.2, μ = 2.0))
+    TO = MetaPlasticity(RandomTurnover(τ = 5.0f0ms, threshold = 0.3f0, μ = 1.0f0), EE)
+    I0 = copy(EE.I)
+    EE.ρ .= range(0.1f0, 0.9f0, length = length(EE.ρ))
+    @test train!([E], [EE, TO]; duration = 20ms) isa SNNModels.Time
+    @test EE.I != I0
+    @test all(EE.W .> 0)
+    @test length(EE.ρ) == length(EE.W)
+    # the default p_new works and per-synapse ρ follows its synapse
+    nW = length(EE.W)
+    synaptic_turnover!(EE; p_rewire = 0.5)
+    @test length(EE.W) == nW == length(EE.ρ)
+    # every synapse can be rewired even when free targets are scarce
+    F = IF(N = 4)
+    FF = SpikingSynapse(F, F, :ge; conn = (p = 0.75, μ = 1.0))
+    synaptic_turnover!(FF; p_rewire = 1.0)
+    @test length(FF.W) == length(FF.ρ)
+end
+
+@testset "connect!/update_sparse_matrix! keep per-synapse state; set_plasticity!" begin
+    E = IF(N = 10)
+    EE = SpikingSynapse(E, E, :ge; conn = (p = 0.2, μ = 1.0))
+    EE.ρ .= 0.5f0
+    M = matrix(EE)
+    i, j = findfirst(iszero, M - SNNModels.spdiagm(0 => ones(Float32, 10)) .* 0) |> Tuple
+    # pick an absent synapse (i, j), i != j
+    i, j = first((a, b) for a = 1:10, b = 1:10 if a != b && M[a, b] == 0)
+    n0 = length(EE.W)
+    connect!(EE, j, i, 3.0f0)
+    @test length(EE.W) == length(EE.ρ) == n0 + 1
+    @test matrix(EE)[i, j] == 3.0f0
+    @test count(==(1.0f0), EE.ρ) == 1 && count(==(0.5f0), EE.ρ) == n0
+    sim!([E], [EE]; duration = 5ms)
+    # rebuilding from I, J, W keeps the matrix size even if the last neuron has no synapse
+    G = IF(N = 5)
+    w = SNNModels.sparse(Int32[1, 2], Int32[1, 1], Float32[1, 2], 5, 5)
+    GG = SpikingSynapse(G, G, :ge; conn = w)
+    update_sparse_matrix!(GG)
+    @test length(GG.rowptr) == 6 && length(GG.colptr) == 6
+    # set_plasticity!/has_plasticity on SpikingSynapse
+    P = SpikingSynapse(E, E, :ge; conn = (p = 0.2, μ = 1.0), LTPParam = STDPGerstner())
+    @test has_plasticity(P)
+    set_plasticity!(P, false)
+    @test !has_plasticity(P)
+    @test !has_plasticity(EE)
+end

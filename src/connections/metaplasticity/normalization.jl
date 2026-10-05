@@ -17,7 +17,8 @@ common factor so that their sum returns to its value at construction time (see
 
 # Fields
 - `τ::Float32`: interval between two normalizations (ms). Required, no default.
-- `operator::Function = *`: combination operator; do not change.
+- `operator::Function = *`: kept for compatibility, not used (the update is selected by the
+  type).
 
 # Example
 ```julia
@@ -38,12 +39,13 @@ end
 
 Additive synaptic normalization, to be passed to `SynapseNormalization` (or
 `MetaPlasticity`). Every `τ`, a common offset is added to the incoming weights of each
-postsynaptic neuron (see `SynapseNormalization` for the exact update, which does not
-restore the initial sum exactly).
+postsynaptic neuron so that their sum returns to its value at construction time (see
+`SynapseNormalization`).
 
 # Fields
 - `τ::Float32`: interval between two normalizations (ms). Required, no default.
-- `operator::Function = +`: combination operator; do not change.
+- `operator::Function = +`: kept for compatibility, not used (the update is selected by the
+  type).
 """
 AdditiveNorm
 
@@ -66,10 +68,17 @@ At construction ``W^0_i = \sum_{s \in \text{in}(i)} W_s`` (sum over all synapses
 `round(Int, τ / dt)`, with ``W^1_i`` the current sum:
 - `MultiplicativeNorm`: ``\mu_i = W^0_i / W^1_i`` and ``W_s \leftarrow W_s\,\mu_i``, which
   restores ``\sum_s W_s = W^0_i`` exactly.
-- `AdditiveNorm`: ``\mu_i = (W^0_i - W^1_i)/W^1_i`` and ``W_s \leftarrow W_s + \mu_i``. The
-  offset is not divided by the number of inputs, so the sum becomes
-  ``W^1_i + n_i (W^0_i - W^1_i)/W^1_i`` (``n_i`` inputs of neuron ``i``), which equals
-  ``W^0_i`` only if ``n_i = W^1_i``.
+- `AdditiveNorm`: ``\mu_i = (W^0_i - W^1_i)/n_i`` (``n_i`` inputs of neuron ``i``) and
+  ``W_s \leftarrow W_s + \mu_i``, which also restores ``\sum_s W_s = W^0_i`` exactly.
+
+Neurons without inputs (``n_i = 0``), and for `MultiplicativeNorm` neurons with ``W^1_i = 0``,
+are left unchanged. The period is `max(1, round(Int, τ / dt))` steps.
+
+!!! note "Changed after SNNModels 1.8.4"
+    Up to 1.8.4 `AdditiveNorm` used the offset ``(W^0_i - W^1_i)/W^1_i``, so the sum became
+    ``W^1_i + n_i (W^0_i - W^1_i)/W^1_i`` instead of ``W^0_i``; `τ < dt/2` divided by zero, and
+    the keyword constructor without `param` failed (`MultiplicativeNorm()` has no default `τ`;
+    `param` is now a required keyword).
 
 The normalization runs at its position in the connection list, after the `forward!` and
 `plasticity!` of the connections listed before it.
@@ -95,7 +104,7 @@ SynapseNormalization
     VST = Vector{<:AbstractSparseSynapse},
 } <: AbstractNormalization
     id::String = randstring(12)
-    param::NormParam = MultiplicativeNorm()
+    param::NormParam
     name::String = "SynapseNormalization"
     synapses::VST
     t::VIT = [0, 1]
@@ -175,12 +184,12 @@ function forward!(c::SynapseNormalization, param::NormParam) end
     plasticity!(c::SynapseNormalization, param::NormParam, dt::Float32, T::Time)
 
 Apply the normalization (see `SynapseNormalization`) when `get_step(T)` is a multiple of
-`round(Int, param.τ / dt)`; otherwise do nothing. Called only by `train!`.
+`max(1, round(Int, param.τ / dt))`; otherwise do nothing. Called only by `train!`.
 """
 function plasticity!(c::SynapseNormalization, param::NormParam, dt::Float32, T::Time)
     tt = get_step(T)
     @unpack τ = param
-    if ((tt) % round(Int, τ / dt)) < dt
+    if tt % max(1, round(Int, τ / dt)) == 0
         plasticity!(c, param)
     end
 end
@@ -193,8 +202,15 @@ update the weights of all `c.synapses`.
 """
 function plasticity!(c::SynapseNormalization, param::NormParam)
     @unpack W1, W0, μ, synapses = c
-    @unpack operator = param
+    additive = param isa AdditiveNorm
     fill!(W1, 0.0f0)
+    nsyn = zeros(Int, length(W1))
+    for syn in synapses
+        @unpack rowptr = syn
+        for i = 1:(length(rowptr)-1)
+            nsyn[i] += rowptr[i+1] - rowptr[i]
+        end
+    end
     for syn in synapses
         @unpack rowptr, W, index = syn
         Threads.@threads for i = 1:(length(rowptr)-1) # Iterate over all postsynaptic neuron
@@ -205,15 +221,19 @@ function plasticity!(c::SynapseNormalization, param::NormParam)
     end
     # normalize
     # @fastmath @inbounds @simd 
-    @turbo for i in eachindex(μ)
-        μ[i] = (W0[i] - operator(W1[i], 0.0f0)) / W1[i] #operator defines additive or multiplicative norm
+    @inbounds for i in eachindex(μ)
+        if additive
+            μ[i] = nsyn[i] > 0 ? (W0[i] - W1[i]) / nsyn[i] : 0.0f0
+        else
+            μ[i] = W1[i] > 0 ? W0[i] / W1[i] : 1.0f0
+        end
     end
     # apply
     for syn in synapses
         @unpack rowptr, W, index = syn
         Threads.@threads for i = 1:(length(rowptr)-1) # Iterate over all postsynaptic neuron
             @inbounds @fastmath @simd for j = rowptr[i]:(rowptr[i+1]-1) # all presynaptic neurons connected to neuron i
-                W[index[j]] = operator(W[index[j]], μ[i])
+                W[index[j]] = additive ? W[index[j]] + μ[i] : W[index[j]] * μ[i]
             end
         end
     end
