@@ -23,14 +23,16 @@ adds ``W_s ρ_s`` to the target conductance.
 ```math
 \frac{du}{dt} = \frac{U - u}{τ_F}, \qquad \frac{dx}{dt} = \frac{1 - x}{τ_D}
 ```
-and, at a presynaptic spike, ``u \leftarrow u + U (1 - u)`` followed by
-``x \leftarrow x - u\, x`` (with the facilitated ``u``).
+and, at a presynaptic spike (Mongillo, Barak & Tsodyks 2008), ``u \leftarrow u + U (1 - u)``,
+then ``ρ_s = u\, x`` for every outgoing synapse, then ``x \leftarrow x - u\, x`` (both with
+the facilitated ``u``).
 
 # Integration
-`plasticity!` (called by `train!` after `forward!`, so the spike of step ``n`` is transmitted
-with the efficacy computed at the end of step ``n-1``): (1) the jumps above for the neurons
-that fired; (2) forward-Euler relaxation of ``u`` and ``x`` for all neurons; (3) ``ρ_s = u_j x_j``
-copied to every outgoing synapse ``s`` of ``j``. `sim!` never calls it.
+The spike jumps and the efficacy are computed in `update_traces!`, which `train!` calls before
+`forward!`, so the spike of step ``n`` is transmitted with the efficacy ``u^+ x`` of that step.
+`plasticity!` (after `forward!`) relaxes ``u`` and ``x`` of all neurons by one forward-Euler
+step. `sim!` never calls either. Up to SNNModels 1.8.4 the spike was transmitted with the
+efficacy of the previous step (``u^-``) while the depletion used ``u^+``.
 
 # Fields
 - `τD::FT = 200ms`: recovery (depression) time constant of ``x`` (ms).
@@ -77,12 +79,19 @@ previous spike of the same neuron:
 ```math
 \begin{aligned}
 u^- &= U - (U - u)\, e^{-Δ/τ_F}, &\qquad x^- &= 1 - (1 - x)\, e^{-Δ/τ_D},\\
-ρ &= u^- x^-, & & \\
-u &\leftarrow u^- + U (1 - u^-), & x &\leftarrow x^- - u\, x^- .
+u^+ &= u^- + U (1 - u^-), & & \\
+ρ &= u^+ x^-, & x &\leftarrow x^- - u^+ x^- ,\qquad u \leftarrow u^+ .
 \end{aligned}
 ```
-The first spike (``Δ = ∞``) is transmitted with ``ρ = U``. Note that the efficacy uses the
-utilisation before the facilitation jump and the depletion uses the utilisation after it.
+This is the formulation of Mongillo, Barak & Tsodyks (2008): the utilisation jumps first, and
+the same ``u^+`` sets both the transmitted efficacy and the depletion of resources. From rest
+(``u = U``, ``x = 1``) the first spike is transmitted with ``ρ = U (2 - U)``.
+
+!!! note "Changed in SNNModels 1.8.5"
+    Up to 1.8.4 the efficacy used ``u^-`` (before the jump) while the depletion used ``u^+``,
+    a mix of the Markram et al. (1998) and Mongillo et al. (2008) conventions that depressed
+    more than either. Efficacies are now higher, e.g. ``0.51`` instead of ``0.30`` for the first
+    spike with ``U = 0.3``.
 
 # Integration
 Exact solution between spikes, evaluated only at presynaptic spikes (no per-step work for
@@ -222,14 +231,16 @@ function update_traces!(
             ΔT = get_time(T) > variables.last_spike[j] ? get_time(T) - variables.last_spike[j] : 0.f0
             variables.last_spike[j] = get_time(T)
             # update u and x based on time since last spike
-            u[j] = U - (U - u[j]) * exp(-ΔT / τF) 
+            # relax u and x over the interval since the previous spike (exact solution)
+            u[j] = U - (U - u[j]) * exp(-ΔT / τF)
             x[j] = 1 - (1 - x[j]) * exp(-ΔT / τD)
+            # Mongillo, Barak & Tsodyks 2008: u jumps first; release and depletion both use u+
+            u[j] += U * (1 - u[j])
             _ρ[j] = u[j] * x[j]
             @turbo for s = colptr[j]:(colptr[j+1]-1)
                 ρ[s] = _ρ[j]
             end
-            u[j] += U * (1 - u[j])
-            x[j] += (-u[j] * x[j])
+            x[j] -= u[j] * x[j]
         end
     end
 end
@@ -252,14 +263,16 @@ function update_traces!(
             ΔT = get_time(T) > variables.last_spike[j] ? get_time(T) - variables.last_spike[j] : 0.f0
             variables.last_spike[j] = get_time(T)
             # update u and x based on time since last spike
+            # relax u and x over the interval since the previous spike (exact solution)
             u[j] = U[j] - (U[j] - u[j]) * exp(-ΔT / τF[j])
             x[j] = 1 - (1 - x[j]) * exp(-ΔT / τD[j])
+            # Mongillo, Barak & Tsodyks 2008: u jumps first; release and depletion both use u+
+            u[j] += U[j] * (1 - u[j])
             _ρ[j] = u[j] * x[j]
             @turbo for s = colptr[j]:(colptr[j+1]-1)
                 ρ[s] = _ρ[j]
             end
-            u[j] += U[j] * (1 - u[j])
-            x[j] += (-u[j] * x[j])
+            x[j] -= u[j] * x[j]
         end
     end
 end
@@ -285,23 +298,33 @@ function plasticity!(
     @unpack u, x, _ρ = plasticity
     @unpack U, τF, τD, Wmax, Wmin = param
 
-    @simd for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
-        if fireJ[j]
-            u[j] += U * (1 - u[j])
-            x[j] += (-u[j] * x[j])
-        end
-    end
-
-    # update pre-synaptic spike trace
+    # relaxation between spikes (forward Euler); the spike jumps are applied in update_traces!
     @turbo for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
         @fastmath u[j] += dt * (U - u[j]) / τF # facilitation
         @fastmath x[j] += dt * (1 - x[j]) / τD # depression
-        @fastmath _ρ[j] = u[j] * x[j]
     end
+end
 
-    Threads.@threads :static for j in eachindex(fireJ) # Iterate over presynaptic neurons
-        @inbounds @simd for s = colptr[j]:(colptr[j+1]-1)
-            ρ[s] = _ρ[j]
+# Mongillo, Barak & Tsodyks 2008 order at a presynaptic spike: u jumps first, the efficacy
+# u+ x- is used by forward! in the same step, then x is depleted by u+ x-.
+function update_traces!(
+    c::PT,
+    param::MarkramSTPParameterTimestep,
+    variables::MarkramSTPVariables,
+    dt::Float32,
+    T::Time,
+) where {PT<:AbstractSparseSynapse}
+    @unpack colptr, fireJ, ρ = c
+    @unpack u, x, _ρ = variables
+    @unpack U = param
+    @inbounds for j in eachindex(fireJ)
+        if fireJ[j]
+            u[j] += U * (1 - u[j])
+            _ρ[j] = u[j] * x[j]
+            @simd for s = colptr[j]:(colptr[j+1]-1)
+                ρ[s] = _ρ[j]
+            end
+            x[j] -= u[j] * x[j]
         end
     end
 end
