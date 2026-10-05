@@ -1,3 +1,6 @@
+# NOTE: this file is not included by SNNModels (the include in populations/populations.jl is
+# commented out); the types defined here are not available in SNNModels 1.8.4. It refers to
+# names that no longer exist in the package (e.g. AbstractIFParameter / AbstractAdExParameter).
 
 
 @snn_kw struct IF_CANAHPParameter{

@@ -1,5 +1,5 @@
 @doc """
-    STDPGerstner{FT = Float32}
+    STDPGerstner(; A_post = -1e-4, A_pre = 1e-4, τpre = 20ms, τpost = 20ms, Wmax = 30pF, Wmin = 0pF)
 
 Additive pair-based STDP with all-to-all spike interaction, event-driven
 (Gerstner, W., Kempter, R., van Hemmen, J. L., & Wagner, H. (1996). A neuronal
@@ -46,10 +46,14 @@ Plasticity runs only under `train!`; `sim!` leaves the weights untouched.
 
 # Example
 ```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+pre = SNN.Poisson(N = 100, param = SNN.PoissonParameter(10Hz))
+post = SNN.IF(N = 10)
 rule = SNN.STDPGerstner(A_pre = 1e-2, A_post = -1.05e-2, τpre = 16.8ms, τpost = 33.7ms,
                         Wmin = 0, Wmax = 50)
 syn = SNN.SpikingSynapse(pre, post, :ge; conn = (p = 0.1, μ = 10.0), LTPParam = rule)
-SNN.train!(model = SNN.compose(; pre, post, syn), duration = 10s)   # not sim!
+SNN.train!(model = SNN.compose(; pre, post, syn), duration = 1s)   # not sim!
 ```
 """
 STDPGerstner
@@ -64,21 +68,40 @@ STDPGerstner
 end
 
 @doc """
-    STDPConfavreux2025{FT = Float32}
+    STDPConfavreux2025(; η = 0.01, α = 0, β = 0, κ = 1, γ = 1, τpre = 20ms, τpost = 20ms,
+                         Wmin = 0pF, Wmax = 30pF)
 
 Pair-based STDP with rate terms, event-driven (same traces and ordering as
-`STDPGerstner`, traces increment by 1):
+`STDPGerstner`, traces increment by 1 and are read before this step's spikes are added):
 
-- presynaptic spike:  ``w \\mathrel{+}= η (κ\\, x_{post} + α)``
-- postsynaptic spike: ``w \\mathrel{+}= η (γ\\, x_{pre} + β)``
+- presynaptic spike of j, each target i:  ``w_{ij} \\mathrel{+}= η (κ\\, x_{post,i} + α)``
+- postsynaptic spike of i, each source j: ``w_{ij} \\mathrel{+}= η (γ\\, x_{pre,j} + β)``
 
-then clamping to `[Wmin, Wmax]`.
+then clamping to `[Wmin, Wmax]`. For one pair with ``Δt = t_{post} - t_{pre}``, the trace
+terms give ``Δw = η γ e^{-Δt/τ_{pre}}`` for ``Δt > 0`` and ``Δw = η κ e^{Δt/τ_{post}}`` for
+``Δt < 0``; every presynaptic spike adds ``η α`` and every postsynaptic spike ``η β``.
 
 Fields: `η = 0.01` (learning rate), `α = 0`, `β = 0` (rate terms applied at every
-presynaptic / postsynaptic spike respectively), `κ = 1`, `γ = 1` (weights of the
-pre-post and post-pre trace terms), `τpre = τpost = 20ms`, `Wmin = 0pF`, `Wmax = 30pF`.
+presynaptic / postsynaptic spike respectively), `κ = 1` (weight of the post-before-pre term,
+read at a presynaptic spike), `γ = 1` (weight of the pre-before-post term, read at a
+postsynaptic spike), `τpre = τpost = 20ms`, `Wmin = 0pF`, `Wmax = 30pF`.
 Unlike `STDPGerstner` the sign of the trace terms is carried by `κ`, `γ`, `α`, `β`, not by a
-separate amplitude, and `η` multiplies both. Applied only under `train!`.
+separate amplitude, and `η` multiplies both. With the defaults both pairings potentiate.
+Applied only under `train!`. State: `STDPVariables`.
+
+Reference: named "Confavreux et al. 2025" in the code; the full reference is not given in the
+code.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+pre = SNN.Poisson(N = 100, param = SNN.PoissonParameter(10Hz))
+post = SNN.IF(N = 10)
+rule = SNN.STDPConfavreux2025(η = 1e-3, κ = -1.0, γ = 1.0, α = -0.1)
+syn = SNN.SpikingSynapse(pre, post, :ge; conn = (p = 0.1, μ = 1.0), LTPParam = rule)
+SNN.train!(model = SNN.compose(; pre, post, syn), duration = 500ms)
+```
 """
 STDPConfavreux2025
 
@@ -95,18 +118,37 @@ STDPConfavreux2025
 end
 
 @doc """
-    STDPMexicanHat{FT = Float32}
+    STDPMexicanHat(; A = 0.1, τ = 20ms, Wmax = 30pF, Wmin = 0pF)
 
-STDP with a Mexican-hat kernel whose integral is zero:
-``Δw = A\\, (1 - x)\\, e^{-x/\\sqrt{2}}`` with ``x = \\log(x_{pre}/x_{post})^2``, where
-`x_pre` and `x_post` are the pre- and postsynaptic traces (time constant `τ`).
+STDP with a Mexican-hat kernel:
+``Δw = A\\, (1 - z)\\, e^{-z/\\sqrt{2}}`` with ``z = \\left[\\ln(x_{pre}/x_{post})\\right]^2``, where
+`x_pre` and `x_post` are the pre- and postsynaptic traces (same time constant `τ`). For a
+single pair, ``\\ln(x_{pre}/x_{post}) = -Δt/τ`` up to the Euler discretisation of the traces, so
+``z = (Δt/τ)^2`` and the kernel is the symmetric "Mexican hat" ``(1 - z) e^{-z/\\sqrt{2}}``
+in ``Δt``: potentiation for ``|Δt| < τ``, depression beyond. The update is applied at every
+pre- and every postsynaptic spike of a synapse whose traces are both non-zero (a result
+`NaN` is replaced by 0).
 
-Fields: `A = 1e-1` (amplitude), `τ = 20ms`, `Wmax = 30pF`, `Wmin = 0pF`.
+Fields: `A = 10e-2pA / mV` (= 0.1, amplitude), `τ = 20ms` (trace time constant),
+`Wmax = 30pF`, `Wmin = 0pF`. State: `STDPVariables`. Reference not given in the code.
 
 Pre spikes walk their outgoing synapses and post spikes their incoming ones (event-driven);
 only touched weights are clamped. The traces keep their Euler integration, with the spike
 added before the weight update, and the rule is otherwise unchanged by the event-driven
-rewrite. Applied only under `train!`.
+rewrite. Same-step pre and post spikes interact (the traces already contain them). When a
+neuron pair fires in the same step the synapse is updated by both passes. Applied only under
+`train!`.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+pre = SNN.Poisson(N = 100, param = SNN.PoissonParameter(10Hz))
+post = SNN.IF(N = 10)
+syn = SNN.SpikingSynapse(pre, post, :ge; conn = (p = 0.1, μ = 1.0),
+                         LTPParam = SNN.STDPMexicanHat(A = 1e-3))
+SNN.train!(model = SNN.compose(; pre, post, syn), duration = 500ms)
+```
 """
 STDPMexicanHat
 
@@ -119,7 +161,9 @@ end
 
 ## Common variables for STDP rules
 @doc """
-    STDPVariables
+    STDPVariables(; Npre, Npost, tpre = zeros(Npre), tpost = zeros(Npost),
+                  last_pre = zeros(Npre), last_post = zeros(Npost), initialized = [false],
+                  active = [true])
 
 Per-neuron state of the pair-based STDP rules.
 
@@ -129,6 +173,10 @@ Per-neuron state of the pair-based STDP rules.
   Euler-integrated traces of that rule.
 - `last_pre`, `last_post`: time of the last spike (informational, not used in updates).
 - `initialized`: set after the one-off clamp of all weights on the first step.
+- `active`: the rule runs only if `any(active)` (see `set_LTP!`).
+
+Created by `plasticityvariables(::STDPParameter, Npre, Npost)`. Record the traces with
+`monitor!(syn, [:tpre, :tpost], :LTPVars)` (see the recording page).
 """
 STDPVariables
 

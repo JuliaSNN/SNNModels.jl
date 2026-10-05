@@ -1,18 +1,45 @@
 # synapse.jl
 
-"""
-Receptor struct represents a synaptic receptor with parameters for reversal potential, rise time, decay time, and conductance.
+@doc raw"""
+    Receptor(; name = "Receptor", E_rev = 0.0, τr = -1, τd = -1, g0 = 0, nmda = 0, target = :none)
+
+Parameters of one synaptic receptor with double-exponential kinetics, used by
+`ReceptorSynapse` and `MultiReceptorSynapse` (and by the dendritic models through them).
+`ReceptorVoltage` is an alias of `Receptor` (used for NMDA receptors, `nmda = 1`).
+
+The derived fields are computed from `τr`, `τd` and `g0` by the keyword constructor and
+should not be passed by hand:
+```math
+g_{syn} = g_0 \cdot \mathrm{norm\_synapse}(\tau_r, \tau_d), \qquad
+\alpha = \frac{\tau_d - \tau_r}{\tau_d \tau_r}, \qquad
+\tau_r^{-} = 1/\tau_r, \quad \tau_d^{-} = 1/\tau_d
+```
+so that a unit weight produces a conductance with peak ``g_0`` (see `ReceptorSynapse`).
 
 # Fields
-- `E_rev::T`: Reversal potential (default: 0.0)
-- `τr::T`: Rise time constant (default: -1.0)
-- `τd::T`: Decay time constant (default: -1.0)
-- `g0::T`: Maximum conductance (default: 0.0)
-- `gsyn::T`: Synaptic conductance (default: calculated based on `g0`, `τr`, and `τd`)
-- `α::T`: Alpha factor for the differential equation (default: calculated based on `τr` and `τd`)
-- `τr⁻::T`: Inverse of rise time constant (default: calculated based on `τr`)
-- `τd⁻::T`: Inverse of decay time constant (default: calculated based on `τd`)
-- `nmda::T`: NMDA factor (default: 0.0)
+- `name::String = "Receptor"`: label.
+- `E_rev::T = 0.0`: reversal potential (mV).
+- `τr::T = -1.0`: rise time constant (ms); non-positive values mean "unset".
+- `τd::T = -1.0`: decay time constant (ms); non-positive values mean "unset".
+- `g0::T = 0.0`: peak conductance per unit weight (nS).
+- `gsyn::T`: `g0 * norm_synapse(τr, τd)` if `g0 > 0`, else `0` (nS).
+- `α::T`: `α_synapse(τr, τd) = (τd - τr) / (τd τr)` (1/ms).
+- `τr⁻::T`: `1/τr` if positive, else `0` (1/ms).
+- `τd⁻::T`: `1/τd` if positive, else `0` (1/ms).
+- `nmda::T = 0.0`: if non-zero the receptor current is multiplied by the NMDA magnesium block.
+- `target::Symbol = :none`: input group of the receptor, used by `MultiReceptorSynapse`
+  (e.g. `:glu`, `:gaba`, `:AMPA`); ignored by `ReceptorSynapse`.
+
+`T` defaults to `Float32`.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+AMPA = SNN.Receptor(E_rev = 0mV, τr = 0.26ms, τd = 2ms, g0 = 0.73nS, target = :glu)
+NMDA = SNN.ReceptorVoltage(E_rev = 0mV, τr = 8ms, τd = 35ms, g0 = 1.31nS, nmda = 1, target = :glu)
+AMPA.gsyn
+```
 """
 Receptor
 
@@ -32,19 +59,44 @@ abstract type AbstractReceptor end
     target::Symbol = :none
 end
 
+"""
+    ReceptorArray = Vector{Receptor{Float32}}
+
+Vector of receptors, the type of the `syn` field of `ReceptorSynapse` and `MultiReceptorSynapse`.
+"""
 ReceptorArray = Vector{Receptor{Float32}}
+
+"""
+    ReceptorVoltage = Receptor
+
+Alias of `Receptor`, used to mark voltage-dependent (NMDA) receptors, which are created with
+`nmda = 1`. It is not a distinct type.
+"""
 ReceptorVoltage = Receptor
 
 
 
 """
-Receptors struct represents a synaptic connection with different types of receptors.
+    Receptors(; AMPA = Receptor(), NMDA = ReceptorVoltage(), GABAa = Receptor(), GABAb = Receptor())
+    Receptors(AMPA, NMDA, GABAa, GABAb)
+    Receptors(glu::Glutamatergic, gaba::GABAergic)
+    Receptors(args...)
 
-# Fields
-- `AMPA::T`: AMPA receptor
-- `NMDA::T`: NMDA receptor (with voltage dependency)
-- `GABAa::T`: GABAa receptor
-- `GABAb::T`: GABAb receptor
+Build a `ReceptorArray` (`Vector{Receptor{Float32}}`). `Receptors` is a function, not a type.
+The four-receptor forms return `[AMPA, NMDA, GABAa, GABAb]`, so that in a `ReceptorSynapse` the
+glutamatergic receptors have indices `[1, 2]` and the GABAergic ones `[3, 4]` (the default
+`glu_receptors`/`gaba_receptors`). The variadic form collects any number of receptors in the
+given order. The keyword defaults are the empty `Receptor()` (zero conductance), so all
+receptors are normally passed explicitly.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+recs = SNN.Receptors(SNN.Receptor(E_rev = 0mV, τr = 1ms, τd = 6ms, g0 = 0.7nS, target = :glu),
+                     SNN.Receptor(E_rev = -70mV, τr = 0.5ms, τd = 10ms, g0 = 2nS, target = :gaba))
+length(recs)  # 2
+```
 """
 Receptors
 
@@ -87,19 +139,21 @@ of each field is a vector of indices that reference the receptors of that type i
 - `NamedTuple`: A named tuple where each field name is a receptor type (Symbol) and the
   corresponding value is a vector of indices (Int) of receptors of that type in the input array
 
-# Throws
-- Error: If any receptor in the input array has a `target` field set to `:none`
+# Errors
+- Logs an error (`@error`, it does not throw) if a receptor has `target == :none`; that
+  receptor is then grouped under `:none`.
 
 # Example
 
 ```julia
-receptors = ReceptorArray([
-    Receptor(target=:glu),
-    Receptor(target=:gaba),
-    Receptor(target=:glu),
-])  
-result = infer_receptors(receptors)
-# result will be (; glu = [1, 3], gaba = [2])
+using SpikingNeuralNetworks
+receptors = SNN.ReceptorArray([
+    SNN.Receptor(target = :glu),
+    SNN.Receptor(target = :gaba),
+    SNN.Receptor(target = :glu),
+])
+result = SNNModels.infer_receptors(receptors)
+# result.glu == [1, 3], result.gaba == [2] (the order of the fields is not guaranteed)
 ```
 """
 function infer_receptors(receptors::ReceptorArray)::NamedTuple
@@ -126,11 +180,15 @@ end
 
 
 """
-Glutamatergic struct represents a group of glutamatergic receptors.
+    Glutamatergic(; AMPA = Receptor(), NMDA = ReceptorVoltage())
+    Glutamatergic(AMPA, NMDA)
+
+Pair of glutamatergic receptors (AMPA and NMDA), used with `GABAergic` to build a
+four-receptor array via `Receptors(glu, gaba)`.
 
 # Fields
-- `AMPA::T`: AMPA receptor
-- `NMDA::T`: NMDA receptor
+- `AMPA::Receptor = Receptor()`: AMPA receptor.
+- `NMDA::Receptor = ReceptorVoltage()`: NMDA receptor (set `nmda = 1` to enable the magnesium block).
 """
 Glutamatergic
 
@@ -140,11 +198,14 @@ Glutamatergic
 end
 
 """
-GABAergic struct represents a group of GABAergic receptors.
+    GABAergic(; GABAa = Receptor(), GABAb = Receptor())
+    GABAergic(GABAa, GABAb)
+
+Pair of GABAergic receptors (GABAa and GABAb), used with `Glutamatergic` in `Receptors(glu, gaba)`.
 
 # Fields
-- `GABAa::T`: GABAa receptor
-- `GABAb::T`: GABAb receptor
+- `GABAa::Receptor = Receptor()`: fast GABAa receptor.
+- `GABAb::Receptor = Receptor()`: slow GABAb receptor.
 """
 GABAergic
 
@@ -154,14 +215,9 @@ GABAergic
 end
 
 """
-Construct a Receptors from Glutamatergic and GABAergic receptors.
+    Receptors(glu::Glutamatergic, gaba::GABAergic) -> ReceptorArray
 
-# Arguments
-- `glu::Glutamatergic`: Glutamatergic receptors
-- `gaba::GABAergic`: GABAergic receptors
-
-# Returns
-- `Receptors`: A Receptors object
+Return `[glu.AMPA, glu.NMDA, gaba.GABAa, gaba.GABAb]`.
 """
 function Receptors(glu::Glutamatergic, gaba::GABAergic)
     return Receptors(glu.AMPA, glu.NMDA, gaba.GABAa, gaba.GABAb)
@@ -176,27 +232,30 @@ export Receptor,
     NMDAVoltageDependency
 
 """
-Calculate the normalization factor for a receptor.
+    norm_synapse(receptor::Receptor)
 
-# Arguments
-- `receptor::Receptor`: The receptor for which to calculate the normalization factor
-
-# Returns
-- `Float32`: The normalization factor
+Normalisation factor of `receptor`, `norm_synapse(receptor.τr, receptor.τd)`.
 """
 function norm_synapse(receptor::Receptor)
     norm_synapse(receptor.τr, receptor.τd)
 end
 
-"""
-Calculate the normalization factor for a synapse given rise and decay time constants.
+@doc raw"""
+    norm_synapse(τr, τd)
 
-# Arguments
-- `τr`: Rise time constant
-- `τd`: Decay time constant
+Inverse of the peak of the difference of exponentials ``e^{-t/\tau_d} - e^{-t/\tau_r}``:
+```math
+t_p = \frac{\tau_r \tau_d}{\tau_d - \tau_r}\ln\frac{\tau_d}{\tau_r}, \qquad
+\mathrm{norm\_synapse} = \left(e^{-t_p/\tau_d} - e^{-t_p/\tau_r}\right)^{-1}
+```
+Used to set `gsyn = g0 * norm_synapse(τr, τd)` in `Receptor`, so that `g0` is the peak
+conductance per unit weight. Requires `τd != τr`, both positive.
 
-# Returns
-- `Float32`: The normalization factor
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.norm_synapse(0.26, 2.0)   # ≈ 1.559
+```
 """
 function norm_synapse(τr, τd)
     t_p = τr * τd / (τd - τr) * log(τd / τr)
@@ -204,30 +263,48 @@ function norm_synapse(τr, τd)
 end
 
 """
-Calculate the alpha factor for a synapse given rise and decay time constants.
+    α_synapse(τr, τd)
 
-# Arguments
-- `τr`: Rise time constant
-- `τd`: Decay time constant
-
-# Returns
-- `Float32`: The alpha factor
+Return `(τd - τr) / (τd * τr)` (= `1/τr - 1/τd`), the increment of the rise variable per unit
+weight in the receptor kinetics (see `ReceptorSynapse`).
 """
 function α_synapse(τr, τd)
     return (τd - τr) / (τd * τr)
 end
 
-Mg_mM = 1.0f0
-nmda_b = 3.36   # voltage dependence of nmda channels
-nmda_k = -0.077     # Eyal 2018
+const Mg_mM = 1.0f0
+const nmda_b = 3.36f0   # voltage dependence of nmda channels
+const nmda_k = -0.077f0     # Eyal 2018
 
-"""
-NMDAVoltageDependency struct represents the voltage dependence of NMDA receptors.
+@doc raw"""
+    NMDAVoltageDependency(; b = 3.36, k = -0.077, mg = 1.0)
+
+Parameters of the voltage-dependent magnesium block of NMDA receptors. The block factor
+multiplying the current of every receptor with `nmda != 0` is
+```math
+B(V) = \frac{1}{1 + \frac{[\mathrm{Mg}]}{b}\, e^{k V}}
+```
+(see `nmda_gating`), the Jahr and Stevens form; the default values are those given in the
+code comments for Eyal et al. (2018).
 
 # Fields
-- `b::T`: Voltage dependence factor (default: 3.36)
-- `k::T`: Voltage dependence factor (default: -0.077)
-- `mg::T`: Magnesium concentration (default: 1.0)
+- `b::T = 3.36`: (mM).
+- `k::T = -0.077`: voltage sensitivity (1/mV).
+- `mg::T = 1.0`: extracellular magnesium concentration (mM).
+
+`T` defaults to `Float32`. Predefined instances: `SomaNMDA` (defaults) and `EyalNMDA`
+(identical values).
+
+# References
+Jahr C. E., Stevens C. F. (1990), J. Neurosci. (functional form of the block).
+Eyal G. et al. (2018), Human cortical pyramidal neurons: from spines to spikes via models,
+Front. Cell. Neurosci. 12, doi:10.3389/fncel.2018.00181 (cited in the code as "Eyal 2018").
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.nmda_gating(-70.0f0, SNN.NMDAVoltageDependency())
+```
 """
 NMDAVoltageDependency
 
@@ -237,6 +314,11 @@ NMDAVoltageDependency
     mg::T = Mg_mM
 end
 
+@doc raw"""
+    nmda_gating(v, NMDA::NMDAVoltageDependency)
+
+Magnesium block factor ``B(v) = 1 / (1 + (mg/b)\, e^{k v})`` at membrane potential `v` (mV).
+"""
 function nmda_gating(v, NMDA::NMDAVoltageDependency)
     @unpack b, k, mg = NMDA
     return 1 / (1.0f0 + (mg / b) * exp256(k * v))
@@ -250,6 +332,5 @@ export norm_synapse,
     GABAergic,
     Glutamatergic,
     ReceptorArray,
-    synapsearray,
     NMDAVoltageDependency,
     nmda_gating

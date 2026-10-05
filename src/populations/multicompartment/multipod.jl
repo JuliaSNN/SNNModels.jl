@@ -1,4 +1,16 @@
 # Multipod
+#
+# NOT LOADED: the include of this file is commented out in src/populations/populations.jl
+# (SNNModels 1.8.4). It implements an AdEx soma coupled to `Nd` passive dendrites with
+# receptor-based synapses (Heun integration of soma and dendrites, Euler adaptation, spike
+# when v_s > θ + 10 mV). It depends on names that no longer exist in the loaded code
+# (`AdExSoma`, `synapsearray`, `PostSpike(A = ...)`), so it does not compile as is. The name
+# `Multipod` is used in dendneuron_parameter.jl for an (unused) `AbstractDendriticTree` tag.
+# Re-enabling it requires porting it to the current receptor/AdExParameter/PostSpike API (a
+# rewrite, not a fix), so it stays unloaded and its `export` line has no effect.
+# After SNNModels 1.8.4 the sign of the predicted-state term of the somatic leak was corrected:
+# `-(v_s + Δv dt) + El` (it was `-v_s + Δv dt + El`). The exponential term already carried `gl`.
+# Its adaptation current is integrated with forward Euler after the voltage update.
 
 @snn_kw struct Multipod{
     TFT = Array{Float32,3}, ## Float type
@@ -295,7 +307,7 @@ function update_multipod!(
         Δv[1] =
             (
                 gl * (
-                    (-v_s[i] + Δv[1] * dt + El) +
+                    (-(v_s[i] + Δv[1] * dt) + El) +
                     ΔT * exp64(1 / ΔT * (v_s[i] + Δv[1] * dt - θ[i]))
                 ) - w_s[i] - is[1] - sum(cs)
             ) / C

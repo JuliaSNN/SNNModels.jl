@@ -48,6 +48,7 @@ end
 # ── Populations ───────────────────────────────────────────────────────────────
 @testset "Populations" verbose = true begin
     _ts("parameters",   "pop/parameters.jl")
+    _ts("membrane_pair", "pop/membrane_pair.jl")
     _ts("poisson",      "pop/poisson.jl")
     _ts("dendrite",     "pop/dendrite.jl")
     _ts("spiketime",    "pop/spiketime.jl")
@@ -60,6 +61,7 @@ end
     _inc("hh_neuron",    "pop/hh_neuron.jl")
     _inc("tripod",       "pop/tripod.jl")
     _inc("ballandstick", "pop/ballandstick.jl")
+    _ts("multicompartment_numerics", "pop/multicompartment_numerics.jl")
 end
 
 # ── Stimuli ───────────────────────────────────────────────────────────────────
@@ -80,6 +82,7 @@ end
     _ts("float32",           "syn/float32.jl")
     _ts("stdp_event",        "syn/stdp_event.jl")
     _ts("istdp_kernel",      "syn/istdp_kernel.jl")
+    _ts("stp_mongillo",      "syn/stp_mongillo.jl")
     _ts("metaplasticity",    "syn/metaplasticity.jl")
 end
 
@@ -92,6 +95,7 @@ end
 
 # ── Simulation control ────────────────────────────────────────────────────────
 _ts("sim_control", "sim/sim_control.jl")
+_ts("sweep_fixes", "sim/sweep_fixes.jl")
 
 # ── Networks ──────────────────────────────────────────────────────────────────
 @testset "Networks" verbose = true begin

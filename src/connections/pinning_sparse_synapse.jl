@@ -1,4 +1,10 @@
-struct PINningSparseSynapseParameter end
+"""
+    PINningSparseSynapseParameter()
+
+Parameter of the non-exported `PINningSparseSynapse` (no fields; a subtype of
+`AbstractConnectionParameter`).
+"""
+struct PINningSparseSynapseParameter <: AbstractConnectionParameter end
 
 @snn_kw mutable struct PINningSparseSynapse{VIT = Vector{Int32},VFT = Vector{Float32}} <:
                        AbstractConnection
@@ -18,12 +24,29 @@ struct PINningSparseSynapseParameter end
     records::Dict = Dict()
 end
 
-"""
-[PINing Sparse Receptors](https://www.ncbi.nlm.nih.gov/pubmed/26971945)
+@doc raw"""
+    PINningSparseSynapse(pre, post; μ = 1.5, p = 0.0, α = 1, kwargs...)
+
+Sparse variant of `PINningSynapse` (not exported). ``W = \mu X/\sqrt{p N_{pre}}`` with
+``X`` = `sprandn(N_post, N_pre, p)`; ``P`` lives on the sparsity pattern of ``W``, initialised
+to ``\alpha`` on stored diagonal entries.
+
+`forward!(c, param)` resets `g` and `q` and accumulates, over stored synapses,
+``g_i = \sum_j W_{ij} r_j`` and ``q_i = \sum_j P_{ij} r_j``.
+`plasticity!(c, param, dt, T)` with ``C = 1/(1 + q^\top r^{post})`` updates every stored
+synapse: ``P_{ij} \leftarrow P_{ij} - C q_i q_j`` and
+``W_{ij} \leftarrow W_{ij} + C (f_i - g_i) q_j``.
+
+`p` must be in `(0, 1]` (an `ArgumentError` is raised otherwise). Up to SNNModels 1.8.4 the
+parameter type had no supertype, so `sim!`/`train!` did not dispatch on it.
+
+# References
+Rajan K, Harvey CD, Tank DW (2016). Neuron 90:128-142 (PubMed 26971945, linked in the code).
 """
 PINningSparseSynapse
 
 function PINningSparseSynapse(pre, post; μ = 1.5, p = 0.0, α = 1, kwargs...)
+    0 < p <= 1 || throw(ArgumentError("PINningSparseSynapse needs a connection probability 0 < p <= 1, got p = $p"))
     w = μ / √(p * pre.N) * sprandn(post.N, pre.N, p)
     rowptr, colptr, I, J, index, W = dsparse(w)
     rI, rJ = post.r, pre.r

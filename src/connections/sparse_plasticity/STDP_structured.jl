@@ -2,18 +2,64 @@
 # STDP Parameters Structure
 abstract type STDPStructuredParameter <: STDPParameter end
 
-@doc """
-    STDPSymmetric{FT = Float32}
+"""
+    STDPStructuredParameter <: STDPParameter
 
-    Symmetric STDP rules described in:
-    `Structured stabilization in recurrent neural circuits through inhibitory synaptic plasticity` 
-    by Festa, D., Cusseddu, C, and Gjorgjieva, J. (2024).
-    
-    The STDP is defined such that integral of the kernel is zero. The STDP kernel is defined as:
+Abstract supertype of `STDPSymmetric` and `STDPAntiSymmetric`; their state is
+`STDPStructuredVariables`.
+"""
+STDPStructuredParameter
 
-    `` (\frac{A_{post}}{1/\tau_{post}} * exp(-t/\tau_{post} - \frac{A_{pre}}{\tau_pre} * exp(-t/\tau_{pre}) ``
+@doc raw"""
+    STDPSymmetric(; A_x = 3e-2, A_y = 3e-2, τ_x = 50ms, τ_y = 500ms, αpre = 0pF, αpost = 0pF,
+                    Wmax = 30pF, Wmin = 0pF)
 
-    where ``A_{post}`` and ``A_{pre}`` are the learning rates for post and pre-synaptic spikes, respectively, and ``\tau_{post}`` and ``\tau_{pre}`` are the time constants for post and pre-synaptic traces, respectively.
+Symmetric STDP rule with a difference-of-exponentials kernel, as used for structured
+inhibitory plasticity by Festa, Cusseddu and Gjorgjieva (2024).
+
+# Equations
+For one pair with ``Δt = t_{post} - t_{pre}``:
+```math
+Δw(Δt) = \frac{A_x}{2τ_x} e^{-|Δt|/τ_x} - \frac{A_y}{2τ_y} e^{-|Δt|/τ_y},
+```
+whose integral over ``Δt`` is ``A_x - A_y`` (zero with the defaults). With ``τ_x < τ_y``
+the kernel potentiates near-coincident spikes and depresses spikes farther apart. In
+addition every presynaptic spike adds `αpre` and every postsynaptic spike `αpost`.
+
+Implementation: each neuron has two traces (time constants ``τ_x`` and ``τ_y``) that jump
+by 1 at a spike:
+- presynaptic spike of j, each target i:
+  ``w_{ij} \mathrel{+}= α_{pre} + \frac{A_x}{2τ_x} o_{x,i} - \frac{A_y}{2τ_y} o_{y,i}``
+- postsynaptic spike of i, each source j:
+  ``w_{ij} \mathrel{+}= α_{post} + \frac{A_x}{2τ_x} r_{x,j} - \frac{A_y}{2τ_y} r_{y,j}``
+
+# Integration
+`plasticity!` (only under `train!`): (1) pre-spike pass, (2) post-spike pass, both reading
+the traces before this step's spikes are added; (3) forward-Euler decay of all traces, then
++1 for the neurons that fired; (4) clamp to `[Wmin, Wmax]` of the touched weights (all
+weights once at the first step).
+
+# Fields
+- `A_x::FT = 3e-2`: amplitude of the narrow (potentiating) kernel.
+- `A_y::FT = 3e-2`: amplitude of the wide (depressing) kernel.
+- `τ_x::FT = 50ms`, `τ_y::FT = 500ms`: kernel time constants.
+- `αpre::FT = 0pF`, `αpost::FT = 0pF`: constant change at each pre / post spike.
+- `Wmax::FT = 30pF`, `Wmin::FT = 0pF`: weight bounds.
+
+# References
+Festa, D., Cusseddu, C. & Gjorgjieva, J., "Structured stabilization in recurrent neural
+circuits through inhibitory synaptic plasticity" (2024), as cited in the code.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+pre = SNN.Poisson(N = 100, param = SNN.PoissonParameter(10Hz))
+post = SNN.IF(N = 10)
+syn = SNN.SpikingSynapse(pre, post, :ge; conn = (p = 0.1, μ = 1.0),
+                         LTPParam = SNN.STDPSymmetric(A_x = 1e-2, A_y = 1e-2))
+SNN.train!(model = SNN.compose(; pre, post, syn), duration = 500ms)
+```
 """
 STDPSymmetric
 @snn_kw struct STDPSymmetric{FT = Float32} <: STDPStructuredParameter
@@ -27,6 +73,44 @@ STDPSymmetric
     Wmin::FT = 0.0pF    # Min weight (negative for inhibition)
 end
 
+@doc raw"""
+    STDPAntiSymmetric(; A_y = 3e-2, A_x = 3e-2, τ_x = 50ms, τ_y = 50ms, αpre = 0pF, αpost = 0pF,
+                        Wmax = 30pF, Wmin = 0pF)
+
+Antisymmetric (Hebbian, pair-based) STDP rule with normalised exponential lobes, as used by
+Festa, Cusseddu and Gjorgjieva (2024).
+
+# Equations
+For one pair with ``Δt = t_{post} - t_{pre}``:
+```math
+Δw(Δt) = \begin{cases} \dfrac{A_x}{τ_x} e^{-Δt/τ_x} & Δt > 0 \\[1ex]
+                      -\dfrac{A_y}{τ_y} e^{Δt/τ_y} & Δt < 0 \end{cases}
+```
+with integral ``A_x - A_y`` (zero with the defaults); in addition every presynaptic spike adds
+`αpre` and every postsynaptic spike `αpost`.
+
+Implementation: a presynaptic trace ``r_{x,j}`` (``τ_x``) and a postsynaptic trace
+``o_{y,i}`` (``τ_y``), both jumping by 1 at a spike:
+- presynaptic spike of j, each target i: ``w_{ij} \mathrel{+}= α_{pre} - \frac{A_y}{τ_y} o_{y,i}``
+- postsynaptic spike of i, each source j: ``w_{ij} \mathrel{+}= α_{post} + \frac{A_x}{τ_x} r_{x,j}``
+
+# Integration
+As for [`STDPSymmetric`](@ref): pre pass, post pass, Euler decay and +1 of the traces,
+clamp of the touched weights. Only under `train!`.
+
+# Fields
+- `A_y::FT = 3e-2`: depression amplitude (post-before-pre).
+- `A_x::FT = 3e-2`: potentiation amplitude (pre-before-post).
+- `τ_x::FT = 50ms`, `τ_y::FT = 50ms`: time constants of the pre and post traces.
+- `αpre::FT = 0pF`, `αpost::FT = 0pF`: constant change at each pre / post spike.
+- `Wmax::FT = 30pF`, `Wmin::FT = 0pF`: weight bounds.
+
+# References
+Festa, D., Cusseddu, C. & Gjorgjieva, J., "Structured stabilization in recurrent neural
+circuits through inhibitory synaptic plasticity" (2024), as cited in the code.
+"""
+STDPAntiSymmetric
+
 @snn_kw struct STDPAntiSymmetric{FT = Float32} <: STDPStructuredParameter
     A_y::FT = 3e-2     # LTD learning rate (inhibitory synapses)
     A_x::FT = 3e-2    # LTP learning rate (inhibitory synapses)
@@ -39,14 +123,26 @@ end
 end
 
 
+"""
+    STDPStructuredVariables(; Npre, Npost, to_x = zeros(Npost), to_y = zeros(Npost),
+                            tr_x = zeros(Npre), tr_y = zeros(Npre), initialized = [false],
+                            active = [true])
+
+Traces of `STDPSymmetric` / `STDPAntiSymmetric`: `to_x`, `to_y` are postsynaptic traces
+(length `Npost`, time constants `τ_x`, `τ_y`), `tr_x`, `tr_y` presynaptic traces (length
+`Npre`). `STDPAntiSymmetric` uses only `tr_x` and `to_y`. `initialized` marks the one-off
+clamp of all weights; `active` enables the rule.
+"""
+STDPStructuredVariables
+
 @snn_kw struct STDPStructuredVariables{VFT = Vector{Float32},IT = Int} <:
                PlasticityVariables
     Npost::IT                      # Number of post-synaptic neurons
     Npre::IT                       # Number of pre-synaptic neurons
-    to_x::VFT = zeros(Npost)        # Pre-synaptic spike trace
-    to_y::VFT = zeros(Npost)        # Pre-synaptic spike trace
-    tr_x::VFT = zeros(Npre)         # Post-synaptic spike trace
-    tr_y::VFT = zeros(Npre)         # Post-synaptic spike trace
+    to_x::VFT = zeros(Npost)        # post-synaptic spike trace, τ_x
+    to_y::VFT = zeros(Npost)        # post-synaptic spike trace, τ_y
+    tr_x::VFT = zeros(Npre)         # pre-synaptic spike trace, τ_x
+    tr_y::VFT = zeros(Npre)         # pre-synaptic spike trace, τ_y
     initialized::VBT = [false]      # one-off clamp of all weights done
     active::VBT = [true]
 end

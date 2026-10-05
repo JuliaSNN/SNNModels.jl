@@ -1,7 +1,7 @@
 """
     rand_value(N, p1, p2)
 
-Generate N random values uniformly distributed between p1 and p2.
+Generate `N` random values (`Float64`) uniformly distributed between `p1` and `p2`.
 
 # Arguments
 - `N`: Number of random values to generate
@@ -16,13 +16,11 @@ rand_value(N, p1, p2) = minimum([p1, p2]) .+ rand(N) .* abs(p1-p2)
 """
     exp32(x::R) where {R<:Real}
 
-Fast approximation of exp(x) using 32 iterations. Clamps input to avoid underflow.
-
-# Arguments
-- `x::Real`: Input value
+Fast approximation of `exp(x)` as ``(1 + x/32)^{32}``, computed with five squarings.
+Inputs below `-10` are clamped to `-10`.
 
 # Returns
-- Approximation of exp(x)
+- `Float32` approximation of `exp(x)`; accurate only for small `|x|`.
 """
 @inline function exp32(x::R) where {R<:Real}
     x = ifelse(x < -10.0f0, -10.0f0, x)
@@ -38,13 +36,17 @@ end
 """
     exp64(x::R) where {R<:Real}
 
-Fast approximation of exp(x) using 64 iterations. Clamps input to avoid underflow.
-
-# Arguments
-- `x::Real`: Input value
+Fast approximation of `exp(x)` as ``(1 + x/64)^{64}``, computed with six squarings.
+Inputs below `-10` are replaced by `-64`, so that the result is exactly `0`.
 
 # Returns
-- Approximation of exp(x)
+- `Float32` approximation of `exp(x)`; accurate only for small `|x|`.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNNModels.exp64(-1.0f0)   # 0.3650, exp(-1) = 0.3679
+```
 """
 @inline function exp64(x::R) where {R<:Real}
     x = ifelse(x < -10.0f0, -64.0f0, x)
@@ -61,13 +63,11 @@ end
 """
     exp256(x::Float32)
 
-Fast approximation of exp(x) using 256 iterations. Clamps input to avoid underflow.
-
-# Arguments
-- `x::Float32`: Input value
+Fast approximation of `exp(x)` as ``(1 + x/256)^{256}``, computed with eight squarings.
+Inputs below `-10` are replaced by `-256`, so that the result is exactly `0`.
 
 # Returns
-- Approximation of exp(x)
+- `Float32` approximation of `exp(x)`.
 """
 @inline function exp256(x::Float32)
     x = ifelse(x < -10.0f0, -256.0f0, x)
@@ -132,30 +132,42 @@ str_name(pre::String, k = nothing) = isnothing(k) ? "$pre" : "$(pre)_$(k)"
 
 
 """
+    compose(args...; name = randstring(10), silent = false, time = Time(), kwargs...)
 
-    compose(kwargs...; syn=nothing, pop=nothing)
+Assemble populations, connections and stimuli (or whole models) into one network model.
 
-Merge multiple models into a single model.
+Returns the `NamedTuple` `(pop = ..., syn = ..., stim = ..., name = name, time = time)`, where
+`pop`, `syn` and `stim` are `NamedTuple`s of components. This is the object accepted by `sim!`,
+`train!`, `monitor!`, `save_model`, etc.
 
-## Arguments
-- `kwargs...`: List of `kwarg` elements, i.e., dictionary or named tuples, containing the models to be merged.
-    - if `kwarg` has elements with `:pop` and `:syn` entries, the function copies them into the merged model.
-    - if `kwarg` has no `:pop` and `:syn` entries, the function iterates over all the elements contained in `kwarg` and merge them into the model.
-- `syn`: Optional dictionary of synapses to be merged.
-- `pop`: Optional dictionary of populations to be merged.
-- `stim`: Optional dictionary of stimuli to be merged.
+# Arguments
+- `args...`: models or containers (`NamedTuple`/`Dict`) to merge. Their components keep their own
+  keys. `String` and `Time` positional arguments are ignored.
+- `kwargs...`: components or containers given by key. A component passed as `E = pop` is stored
+  under `:E`. A container passed as `exc = (E = ..., EE = ...)` is flattened with the key as
+  prefix (`:exc_E`, `:exc_EE`). Inside containers, the keys `:pop`, `:syn`, `:stim` are descended
+  into without prefixing and the key `:name` is skipped.
+- `name`: model name (default: random 10-character string).
+- `silent = false`: if `false`, print the model summary with `print_model`.
+- `time = Time()`: the simulation clock of the new model. The clocks of merged models are
+  not reused: pass `time = model.time` to keep one.
 
-## Returns
-A tuple `(pop, syn)` representing the merged populations and synapses.
+Components are classified by type (`AbstractPopulation`, `AbstractConnection`,
+`AbstractStimulus` or `AbstractStimulusGroup`); duplicated keys raise an `AssertionError`.
+`pop` and `syn` are sorted by key, `stim` by the stimuli `name`.
 
-## Details
-This function takes in multiple models represented as keyword arguments and merges them into a single model. The models can be specified using the `pop` and `syn` fields in the keyword arguments. If the `pop` and `syn` fields are not present, the function expects the keyword arguments to have elements with `:pop` or `:syn` fields.
-
-The merged populations and synapses are stored in dictionaries `populations` and `synapses`, respectively. The function performs type assertions to ensure that the elements being merged are of the correct types (`AbstractPopulation` for populations and `AbstractConnection` for synapses).
-
-If `syn` and/or `pop` and/or `stim` arguments are provided, they are merged into the respective dictionaries.
-
-## Example
+# Example
+```julia
+using SpikingNeuralNetworks
+@load_units
+E = SNN.IF(N = 10, name = "E")
+I = SNN.IF(N = 5, name = "I")
+EI = SNN.SpikingSynapse(E, I, :ge, conn = (μ = 1.0, p = 0.2))
+model = SNN.compose(; E, I, EI, name = "toy", silent = true)
+model2 = SNN.compose(model, extra = (A = SNN.IF(N = 3, name = "A"),), silent = true)
+keys(model2.pop)   # (:E, :I, :extra_A)
+sim!(model, 100ms)
+```
 """
 function compose(args...; name = randstring(10), silent = false, time = Time(), kwargs...)
     pop = Dict{Symbol,Any}()
@@ -174,7 +186,6 @@ function compose(args...; name = randstring(10), silent = false, time = Time(), 
     pop = DrWatson.dict2ntuple(sort(pop, by = x -> x))
     syn = DrWatson.dict2ntuple(sort(syn, by = x -> x))
     stim = DrWatson.dict2ntuple(sort(stim, by = x -> stim[x].name))
-    name = haskey(kwargs, :name) ? args.name : name
     model = (pop = pop, syn = syn, stim = stim, name = name, time = time)
     if !silent
         print_model(model)
@@ -206,18 +217,16 @@ end
 
 
 """
-    print_model(model)
+    print_model(model, get_keys = false)
 
-Prints the details of the given model. 
-The model is expected to have three components: `pop` (populations), `syn` (synapses), and `stim` (stimuli).
-
-The function displays a graph representation of the model, followed by detailed information about each component.
+Log (with `@info`) a summary of a model built by `compose`: name, current time (s), and one line
+per population (name, type, `N`, parameter type), per synapse (name, pre/post populations,
+long-term plasticity type, metaplasticity, short-term plasticity type; `AbstractMetaPlasticity`
+connections are skipped in the list) and per stimulus (name, target, type). The connectivity is
+taken from `graph(model)`. `get_keys` is accepted but does not change the output.
 
 # Arguments
 - `model`: The model containing populations, synapses, and stimuli to be printed.
-
-# Outputs
-Prints the graph of the model, along with the name, key, type, and parameters of each component in the populations, synapses, and stimuli.
 
 # Exception
 Raises an assertion error if any component in the populations is not a subtype of `AbstractPopulation`, if any component in the synapses is not a subtype of `AbstractConnection`, or if any component in the stimuli is not a subtype of `AbstractStimulus`.
@@ -305,9 +314,11 @@ function print_model(model, get_keys = false)
 end
 
 """
-    extract_items(root::Symbol, container; pop::Dict{Symbol,Any}, syn::Dict{Symbol, Any}, stim::Dict{Symbol,Any})
+    extract_items(root::Symbol, container; pop::Dict{Symbol,Any}, syn::Dict{Symbol,Any}, stim::Dict{Symbol,Any}, time::Time)
 
-Extracts items from a container and adds them to the corresponding dictionaries based on their type.
+Recursively collect the components found in `container` into `pop`, `syn` and `stim`
+(helper of `compose`). Keys of nested containers are prefixed with `root` (`root_key`) unless
+`root` is empty or one of `:pop`, `:syn`, `:stim`; `:name` entries and `Time` values are skipped.
 
 ## Arguments
 - `root::Symbol`: The root symbol for the items being extracted.
@@ -391,7 +402,10 @@ Remove an element (population, synapse, or stimulus) from a model by its key.
 - New model with the element removed
 
 # Throws
-- `ArgumentError` if the key is not found in the model
+- Nothing: if `key` is not found, an `@info` message is logged and the model is returned unchanged.
+
+The new model is built with `compose(; model..., silent = true)`, so it keeps the `name` and
+`time` of `model`. `remove_element(model, keys::Vector)` removes several elements.
 """
 function remove_element(model, key)
     pop = Dict(pairs(model.pop))
@@ -417,7 +431,11 @@ function remove_element(model, key::Vector)
     return model
 end
 
+"""
+    merge_models(args...; kwargs...)
 
+Deprecated alias of `compose` (emits a warning).
+"""
 function merge_models(args...; kwargs...)
     @warn "merge_models is deprecated, use `compose` instead"
     compose(args...; kwargs...)

@@ -1,17 +1,35 @@
 abstract type AbstractDeltaParameter <: AbstractSynapseParameter end
 
-"""
-    DeltaSynapse{FT} <: AbstractDeltaParameter
+@doc raw"""
+    DeltaSynapse()
 
-A synaptic parameter type that models delta (instantaneous) synaptic dynamics.
+Instantaneous (delta) current synapse. The sum of the weights of the spikes received during
+the previous step is applied as a current during one integration step and then discarded.
 
-# Fields
-None - this type implements instantaneous synaptic dynamics where synaptic inputs are applied directly without any time constants.
+# Equations
+```math
+I_{syn}(t) = -\left(\sum_{k \in \text{exc}} w_k - \sum_{k \in \text{inh}} w_k\right)
+```
+where the sums run over the spikes delivered since the previous step. The struct has no fields.
 
-# Type Parameters
-- `FT`: Floating point type (default: `Float32`)
+# Integration
+`update_synapses!` adds the receptor buffers to `ge`, `gi` and zeroes the buffers;
+`synaptic_current!(p, synapse, synvars)` sets `syn_curr = -(ge - gi)` and resets `ge` and `gi`
+to zero. With the forward Euler membrane update ``V \mathrel{+}= \frac{dt}{\tau_m} R (\ldots - I_{syn})``
+of `IF`, a weight `w` therefore produces a voltage jump of ``R\,w\,dt/\tau_m``, which depends on `dt`.
 
-This type implements delta synaptic dynamics, where synaptic inputs are applied instantaneously without any time delays or decay. The synaptic current is calculated as the difference between excitatory and inhibitory inputs.
+`DeltaSynapse` works with the generalized IF point neurons (`IF`, `AdEx`, `ExtendedIF`) only.
+`Tripod` and `BallAndStick` call the five-argument `synaptic_current!`, which raises an
+`ArgumentError` for `DeltaSynapse` (use a conductance-based synapse such as `ReceptorSynapse`).
+
+State variables: `DeltaSynapseVars`.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 10, param = SNN.IFParameter(C = 281pF, gl = 40nS), synapse = SNN.DeltaSynapse())
+```
 """
 DeltaSynapse
 
@@ -20,12 +38,13 @@ struct DeltaSynapse <: AbstractDeltaParameter end
 """
     DeltaSynapseVars{VFT} <: AbstractSynapseVariable
 
-    A synaptic variable type that stores the state variables for delta synaptic dynamics.
-    # Fields
-    - `N::Int`: Number of synapses
-    - `ge::VFT`: Vector of excitatory conductances
-    - `gi::VFT`: Vector of inhibitory conductances
-    """
+State variables of `DeltaSynapse`, created by `synaptic_variables(::DeltaSynapse, N)`.
+
+# Fields
+- `N::Int = 100`: number of neurons.
+- `ge::VFT`: excitatory input accumulated for the current step (pA).
+- `gi::VFT`: inhibitory input accumulated for the current step (pA).
+"""
 DeltaSynapseVars
 @snn_kw struct DeltaSynapseVars{VFT = Vector{Float32}} <: AbstractSynapseVariable
     N::Int = 100
@@ -70,3 +89,15 @@ end
 end
 
 export DeltaSynapse
+
+# Multicompartment models evaluate the synaptic current at given compartment potentials
+# (five-argument form); a delta synapse has no such current.
+function synaptic_current!(
+    p::AbstractPopulation,
+    synapse::DeltaSynapse,
+    synvars::AbstractSynapseVariable,
+    v::AbstractVector,
+    syncurr::AbstractVector,
+)
+    throw(ArgumentError("DeltaSynapse cannot be used with $(nameof(typeof(p))) (it has no voltage-dependent current); use a conductance-based synapse such as ReceptorSynapse"))
+end

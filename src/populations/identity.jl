@@ -1,15 +1,43 @@
+"""
+    IdentityParam <: AbstractPopulationParameter
+
+Parameter type of `Identity` (no fields). `Population(IdentityParam(); kwargs...)` returns an
+`Identity`.
+"""
 struct IdentityParam <: AbstractPopulationParameter end
 
 """
-    Identity{VFT, IT} <: AbstractPopulation
+    Identity(; N = 100, name = "identity", kwargs...)
 
-A simple population type that acts as an identity function, passing input directly to output.
+Relay population: each neuron emits a spike in every step in which it received positive input,
+so that spikes arriving through a connection are relayed to downstream connections. Because
+populations are integrated before connections are forwarded, input written in step ``t`` is
+turned into a spike in step ``t + 1`` (one-step delay). Any target symbol used by a connection is mapped to the input field `g`.
+
+# Integration
+For each neuron, per step: `h += g`; `spikecount = g` if `g > 0` (else 0); `fire = g > 0`;
+then `g = 0`.
 
 # Fields
-- `VFT`: Vector type for storing floating-point values (default: `Vector{Float32}`)
-- `IT`: Integer type for storing population size (default: `Int32`)
+- `name::String = "identity"`, `id::String = randstring(12)`, `param::IdentityParam`.
+- `N::Int32 = 100`.
+- `g::Vector{Float32}`: input received in the current step (summed synaptic weights), reset
+  each step.
+- `spikecount::Vector{Float32}`: input of the last step for neurons that fired (0 otherwise).
+- `h::Vector{Float32}`: cumulative input since construction.
+- `fire::Vector{Bool}`; `records::Dict`.
 
-This population type is useful for testing and as a building block in more complex networks.
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+P = SNN.Poisson(N = 10, param = SNN.PoissonParameter(50Hz))
+Id = SNN.Identity(N = 10)
+s = SNN.SpikingSynapse(P, Id, :g; conn = (μ = 1, p = 1.0))
+model = SNN.compose(; P, Id, s)
+SNN.monitor!(Id, [:fire])
+SNN.sim!(model, 100ms)
+```
 """
 Identity
 @snn_kw mutable struct Identity{VFT = Vector{Float32},IT = Int32} <: AbstractPopulation

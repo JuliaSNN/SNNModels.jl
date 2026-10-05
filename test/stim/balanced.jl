@@ -127,3 +127,27 @@ using Test
     end
 end
 true
+
+@testset "BalancedStimulus runs with defaults; rates per neuron" begin
+    for same_input in (false, true)
+        P = IF(N = 50)
+        param = BalancedParameter(r0 = 1kHz, kIE = 0.5, same_input = same_input)
+        stim = Stimulus(param, P, :ge)
+        @test stim.ge !== stim.gi
+        T = SNNModels.Time()
+        dt = 0.125f0
+        nsteps = 4000
+        for _ = 1:nsteps
+            SNNModels.stimulate!(stim, stim.param, T, dt)
+        end
+        rate_e = stim.ge ./ (nsteps * dt)   # w = 1: summed draws per ms
+        rate_i = stim.gi ./ (nsteps * dt)
+        @test all(rate_e .> 0.5)            # every neuron is driven
+        @test 0.9 < sum(rate_e) / 50 < 1.6  # r0 = 1/ms, adaptive offset relaxes from 1.5 r0
+        @test isapprox(sum(rate_i) / 50, 0.5; rtol = 0.05)
+    end
+    P = IF(N = 5)
+    @test BalancedStimulus(P, :ge, :gi; param = 2kHz).param.r0 ≈ 2kHz
+    @test_throws ArgumentError Stimulus(BalancedParameter(), P, :foo)
+    @test sim!([P], [EmptySynapse()], [Stimulus(BalancedParameter(), P, :ge)]; duration = 10ms) isa SNNModels.Time
+end

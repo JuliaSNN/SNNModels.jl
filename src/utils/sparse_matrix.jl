@@ -1,3 +1,15 @@
+"""
+    connect!(c, j, i, μ = randn(Float32))
+
+Set the weight of the synapse from presynaptic neuron `j` to postsynaptic neuron `i` of the
+sparse connection `c` to `μ`, creating the synapse if it does not exist, and rebuild the
+sparse storage with `update_sparse_matrix!(c, W)`.
+
+The per-synapse arrays are kept consistent (see `update_sparse_matrix!`): existing synapses keep
+their short-term efficacy `ρ` and delay, a new synapse gets `ρ = 1` and the mean delay.
+(Up to SNNModels 1.8.4 `ρ` and the delays kept their old length, so `forward!` read out of
+bounds after a synapse was created.)
+"""
 function connect!(c, j, i, μ = randn(Float32))
     W = matrix(c)
     W[i, j] = μ
@@ -5,6 +17,24 @@ function connect!(c, j, i, μ = randn(Float32))
     return nothing
 end
 
+"""
+    matrix(c::AbstractConnection)
+    matrix(c::AbstractConnection, sym::Symbol)
+
+Return the weights of the sparse connection `c` as a `SparseMatrixCSC` of size
+`N_post x N_pre` (rows: postsynaptic, columns: presynaptic). With `sym`, the matrix holds
+the per-synapse field `sym` of `c` instead of `W` (e.g. `:ρ`).
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 50); I = SNN.IF(N = 20)
+EI = SNN.SpikingSynapse(E, I, :ge; conn = (p = 0.2, μ = 2.0))
+W = SNN.matrix(EI)          # 20 x 50
+size(W)
+```
+"""
 function matrix(c::C) where {C<:AbstractConnection}
     return sparse(c.I, c.J, c.W, length(c.rowptr) - 1, length(c.colptr) - 1)
 end
@@ -14,6 +44,16 @@ function matrix(c::C, sym::Symbol) where {C<:AbstractConnection}
     return sparse(c.I, c.J, getfield(c, sym), length(c.rowptr) - 1, length(c.colptr) - 1)
 end
 
+"""
+    matrix_record(c::AbstractConnection, sym::Symbol, time::Number)
+    matrix_record(c::AbstractConnection, sym::Symbol, time::AbstractVector)
+
+Rebuild the `N_post x N_pre` sparse matrix of the recorded per-synapse variable `sym`
+(e.g. `:W`, recorded with `monitor!(c, [:W])`) at time `time` (ms), interpolating the
+record (`record(c, sym, range = true)`). For a vector of times, the matrices are
+concatenated along the third dimension. `time` must lie within the recorded range
+(asserted). The sparsity pattern is the current one of `c`.
+"""
 function matrix_record(c::C, sym::Symbol, time::Number) where {C<:AbstractConnection}
     W, r = record(c, sym, range = true)
     @assert time <= r[end] && time >= r[1] "Time $time not in recorded range $(r[1]):$(r[end])"
@@ -27,6 +67,14 @@ function matrix_record(c::C, sym::Symbol, time::AbstractVector) where {C<:Abstra
 end
 
 
+"""
+    matrix(c::AbstractConnection, W, time::Number)
+    matrix(c::AbstractConnection, W, time::AbstractVector)
+
+Sparse `N_post x N_pre` matrix of the interpolated record `W` (callable as
+`W(synapses, time)`) at `time`; for a vector of times, a 3-dimensional array. Used by
+`matrix_record`.
+"""
 function matrix(c::C, W::AbstractArray, time::Number) where {C<:AbstractConnection}
     return sparse(c.I, c.J, W(axes(W, 1), time), length(c.rowptr) - 1, length(c.colptr) - 1)
 end
@@ -38,6 +86,14 @@ function matrix(c::C, W::AbstractArray, time::AbstractVector) where {C<:Abstract
     ] |> x -> cat(x..., dims = 3)
 end
 
+"""
+    update_weights!(c::AbstractConnection, j, i, w)
+    update_weights!(c::AbstractConnection, js::Vector, is::Vector, w::Real)
+
+Set to `w` the weight of the existing synapse from presynaptic `j` to postsynaptic `i`
+(first form), or of every existing synapse from any `j in js` to any `i in is` (second
+form). Synapses that do not exist are not created (see `connect!`).
+"""
 function update_weights!(c::C, j, i, w) where {C<:AbstractConnection}
     @unpack colptr, I, W = c
     for s = colptr[j]:(colptr[j+1]-1)
@@ -67,11 +123,38 @@ end
 
 ##
 
+"""
+    presynaptic_idxs(c::AbstractConnection, i::Int)
+
+Range of positions, in the row-major (transposed) ordering, of the synapses onto
+postsynaptic neuron `i`: `c.rowptr[i]:(c.rowptr[i+1]-1)`. These are not indices into
+`c.W`: the corresponding synapses are `c.index[presynaptic_idxs(c, i)]` (CSC positions),
+e.g. `c.W[c.index[presynaptic_idxs(c, i)]]` are the input weights of `i`.
+"""
 function presynaptic_idxs(c::C, i::Int) where {C<:AbstractConnection}
     @unpack rowptr, index, J, W = c
     rowptr[i]:(rowptr[i+1]-1)
 end
 
+"""
+    presynaptic(c::AbstractConnection)
+    presynaptic(c::AbstractConnection, i::Int)
+    presynaptic(c::AbstractConnection, is::AbstractVector)
+
+Presynaptic neuron indices of the connection `c`: for every postsynaptic neuron (first
+form, a vector of vectors), for neuron `i` (second form) or for each neuron in `is` (third
+form).
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 50); I = SNN.IF(N = 20)
+EI = SNN.SpikingSynapse(E, I, :ge; conn = (p = 0.2, μ = 2.0))
+SNN.SNNModels.presynaptic(EI, 1)     # inputs of I neuron 1
+SNN.SNNModels.postsynaptic(EI, 1)    # targets of E neuron 1
+```
+"""
 function presynaptic(c::C) where {C<:AbstractConnection}
     @unpack rowptr, index, J, W = c
     [J[index[rowptr[i]:(rowptr[i+1]-1)]] for i = 1:(length(rowptr)-1)]
@@ -93,11 +176,26 @@ end
 
 ##
 
+"""
+    postsynaptic_idxs(c::AbstractConnection, j::Int)
+
+Range of CSC positions of the synapses of presynaptic neuron `j`:
+`c.colptr[j]:(c.colptr[j+1]-1)`. These index `c.W`, `c.I` and the other per-synapse arrays
+directly.
+"""
 function postsynaptic_idxs(c::C, j::Int) where {C<:AbstractConnection}
     @unpack colptr, I, index = c
     colptr[j]:(colptr[j+1]-1)
 end
 
+"""
+    postsynaptic(c::AbstractConnection)
+    postsynaptic(c::AbstractConnection, j::Int)
+    postsynaptic(c::AbstractConnection, js::AbstractVector)
+
+Postsynaptic neuron indices of the connection `c`: for every presynaptic neuron (first
+form), for neuron `j`, or for each neuron in `js`.
+"""
 function postsynaptic(c::C) where {C<:AbstractConnection}
     @unpack colptr, I, index = c
     [I[colptr[j]:(colptr[j+1]-1)] for j = 1:(length(colptr)-1)]
@@ -118,6 +216,12 @@ function postsynaptic(c::C, js::AbstractVector) where {C<:AbstractConnection}
 end
 
 
+"""
+    indices(c::AbstractConnection, js::AbstractVector, is::AbstractVector)
+
+CSC positions (indices into `c.W`) of all existing synapses from presynaptic neurons in
+`js` to postsynaptic neurons in `is`.
+"""
 function indices(c::C, js::AbstractVector, is::AbstractVector) where {C<:AbstractConnection}
     @unpack colptr, I, W = c
     indices = Int[]
@@ -131,11 +235,40 @@ function indices(c::C, js::AbstractVector, is::AbstractVector) where {C<:Abstrac
     return indices
 end
 
+"""
+    set_plasticity!(synapse::AbstractConnection, bool::Bool)
+    has_plasticity(synapse::AbstractConnection)
+
+Switch / read the plasticity of a connection. For a sparse synapse with plasticity variables
+(`SpikingSynapse`) `set_plasticity!` sets the `active` flag of both `LTPVars` and `STPVars`
+(as `set_LTP!` and `set_STP!`), and `has_plasticity` returns whether a long-term or
+short-term rule is present and active. For other connections the `active` field of
+`param` is used if it exists; otherwise `set_plasticity!` is a no-op and `has_plasticity`
+returns `false`. (Up to SNNModels 1.8.4 both raised a `FieldError` for `SpikingSynapse`.)
+"""
 function set_plasticity!(synapse::AbstractConnection, bool::Bool)
-    synapse.param.active[1] = bool
+    if hasfield(typeof(synapse), :LTPVars)
+        synapse.LTPVars.active .= bool
+        synapse.STPVars.active .= bool
+    elseif hasfield(typeof(synapse.param), :active)
+        synapse.param.active[1] = bool
+    end
+    return nothing
 end
+"""
+    has_plasticity(synapse::AbstractConnection)
+
+Whether the connection has an active plasticity rule (see `set_plasticity!`).
+"""
 function has_plasticity(synapse::AbstractConnection)
-    synapse.param.active[1] |> Bool
+    if hasfield(typeof(synapse), :LTPVars)
+        ltp = !(synapse.LTPParam isa NoLTP) && Bool(synapse.LTPVars.active[1])
+        stp = !(synapse.STPParam isa NoSTP) && Bool(synapse.STPVars.active[1])
+        return ltp || stp
+    elseif hasfield(typeof(synapse.param), :active)
+        return Bool(synapse.param.active[1])
+    end
+    return false
 end
 # """function dsparse
 
@@ -161,8 +294,12 @@ Random connectivity matrix of size `Npost x Npre` (rows: postsynaptic, columns:
 presynaptic) as a `SparseMatrixCSC{Float32,Int}`, built directly in CSC form in
 O(nnz + Npre + Npost) time and memory: no dense `Npost x Npre` array is ever allocated.
 
+Exactly one of `p` and `ρ` (connection probability / density, in [0, 1]) must be given.
+Unknown keywords are ignored with a warning (up to SNNModels 1.8.4 they were ignored silently,
+so a typo such as `sigma` went unnoticed); `w` is not used (pass a matrix as `conn` instead).
+
 # Connectivity rules (`rule`)
-- `:Fixed` / `:FixedIn`: every postsynaptic neuron receives exactly
+- `:Fixed` / `:FixedIn` (default): every postsynaptic neuron receives exactly
   `K = Npre - round(Int, (1 - ρ) * Npre)` inputs, sampled without replacement.
 - `:FixedOut`: every presynaptic neuron projects to exactly
   `K = Npost - round(Int, (1 - ρ) * Npost)` targets, sampled without replacement.
@@ -172,13 +309,25 @@ O(nnz + Npre + Npost) time and memory: no dense `Npost x Npre` array is ever all
   `min(round(Int, rand(Pareto(γ, kmin))), Npost - 1)`; targets sampled without replacement.
 
 # Weights
-One draw per connection from `dist(|μ|, σ)` (a `Distributions` type name, Float32
-parameters). Draws `<= 0` are not synapses and are removed; a negative `μ` flips the sign
-of all weights afterwards (with a warning). This is the same treatment as the previous
-dense generator.
+One draw per connection from `dist(|μ|, σ)`, where `dist` is a two-parameter `Distributions`
+type or its `Symbol` (default `:Normal`; for `:LogNormal`, `μ` and `σ` are
+the parameters of the logarithm), with Float32 parameters. Draws `<= 0` are not synapses and
+are removed, so with `σ > 0` the realised degrees can be lower than `K`; a negative `μ` flips
+the sign of all weights afterwards (with a warning). This is the same treatment as the
+previous dense generator. Weights are in the units of the target variable (e.g. nS).
+
+Autapses are not removed here; `SpikingSynapse` removes them when `pre == post`.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+w = SNN.SNNModels.sparse_matrix(100, 40; p = 0.1, μ = 2.0, σ = 0.5, rule = :Bernoulli)
+size(w)   # (40, 100): Npost x Npre
+```
 
 # Reproducibility
-The random stream differs from the dense generator used up to SNNModels 1.8, so seeded
+The random stream differs from the dense generator used before SNNModels 1.8.2, so seeded
 networks do not reproduce the old realisations; the statistics (degree distributions,
 weight moments, sparsity) are the same. The old generator is still available as the
 non-exported `SNNModels.sparse_matrix_dense_legacy`.
@@ -197,6 +346,8 @@ function sparse_matrix(
     kmin = -1,
     kwargs...,
 )
+    isempty(kwargs) || @warn "sparse_matrix: unknown connectivity keyword(s) $(collect(keys(kwargs))) ignored"
+    isnothing(w) || @warn "sparse_matrix: the keyword `w` is not used; pass a matrix as `conn` instead"
     @assert (isnothing(p) || isnothing(ρ)) && !(isnothing(p) && isnothing(ρ)) "Specify either p or ρ"
     ρ = isnothing(ρ) ? p : ρ
     @assert ρ >= 0 && ρ <= 1 "ρ must be in [0, 1]"
@@ -229,7 +380,7 @@ function sparse_matrix(
     end
 
     # 2. One Float32 weight per connection; non-positive draws are not synapses.
-    my_dist = getfield(Distributions, dist)
+    my_dist = dist isa Symbol ? getfield(Distributions, dist) : dist
     nzval = Vector{Float32}(undef, length(rowval))
     rand!(my_dist(Float32(μ), Float32(σ)), nzval)
     w = SparseMatrixCSC{Float32,Int}(Npost, Npre, colptr, rowval, nzval)
@@ -368,6 +519,8 @@ function sparse_matrix_dense_legacy(
     kmin = -1,
     kwargs...,
 )
+    isempty(kwargs) || @warn "sparse_matrix: unknown connectivity keyword(s) $(collect(keys(kwargs))) ignored"
+    isnothing(w) || @warn "sparse_matrix: the keyword `w` is not used; pass a matrix as `conn` instead"
     @assert (isnothing(p) || isnothing(ρ)) && !(isnothing(p) && isnothing(ρ)) "Specify either p or ρ"
     ρ = isnothing(ρ) ? p : ρ
     @assert ρ >= 0 && ρ <= 1 "ρ must be in [0, 1]"
@@ -378,7 +531,7 @@ function sparse_matrix_dense_legacy(
         μ = abs(μ)
     end
 
-    my_dist = getfield(Distributions, dist)
+    my_dist = dist isa Symbol ? getfield(Distributions, dist) : dist
     w = rand(my_dist(μ, σ), Npost, Npre) # Construct a random dense matrix with dimensions post.N x pre.N
     if rule == :FixedOut
         # Set to zero a fraction (1-ρ)*Npost of the weights in each column
@@ -422,6 +575,15 @@ _float32_sparse(w::SparseMatrixCSC) = SparseMatrixCSC{Float32,Int}(w)
 _float32_sparse(w::AbstractMatrix) = SparseMatrixCSC{Float32,Int}(sparse(Float32.(w)))
 
 
+"""
+    sparse_matrix(Npre, Npost, conn::NamedTuple)
+    sparse_matrix(Npre, Npost, conn::AbstractMatrix)
+
+Connectivity of a connection constructor: a `NamedTuple` is splatted into the keyword form
+of `sparse_matrix`; a matrix (dense or sparse, any element type, size `Npost x Npre`,
+asserted) is converted to `SparseMatrixCSC{Float32,Int}` as is (stored zeros of a sparse
+input are kept, explicit zeros of a dense input are dropped).
+"""
 sparse_matrix(Npre, Npost, conn::NamedTuple) = sparse_matrix(Npre, Npost; conn...)
 
 function sparse_matrix(Npre, Npost, conn::AbstractMatrix)
@@ -431,25 +593,46 @@ function sparse_matrix(Npre, Npost, conn::AbstractMatrix)
 end
 
 
+"""
+    update_sparse_matrix!(c::AbstractConnection, W::SparseMatrixCSC)
+    update_sparse_matrix!(c::AbstractConnection)
+
+Rebuild the double sparse storage of `c` (`rowptr`, `colptr`, `I`, `J`, `index`, `W`). The
+first form replaces it with the matrix `W` (same size, asserted; the number of synapses may
+change). The second form rebuilds it from the current `c.I`, `c.J`, `c.W` (used after
+`synaptic_turnover!` has changed postsynaptic indices), keeping the size of the matrix
+(`length(c.rowptr) - 1` postsynaptic, `length(c.colptr) - 1` presynaptic neurons).
+
+The per-synapse arrays are resized and reordered with the synapses: the short-term efficacy
+`ρ` and, for delayed synapses, the delays `param.delaytime`. In the first form a synapse
+`(i, j)` that already existed keeps its values and a new synapse gets `ρ = 1` and the mean
+delay; in the second form every stored synapse keeps its values (its CSC position may change).
+The plasticity variables are per neuron and are not affected.
+
+!!! note "Changed after SNNModels 1.8.4"
+    Up to 1.8.4 `ρ` and the delays were neither resized nor reordered (out-of-bounds reads in
+    `forward!` after `connect!` created a synapse, and a mismatch between `W` and `ρ` after a
+    turnover), and the second form inferred the matrix size from the largest stored indices
+    (the matrix shrank if the last neurons had no synapse).
+"""
 function update_sparse_matrix!(c::S, W::SparseMatrixCSC) where {S<:AbstractConnection}
+    old_I, old_J = copy(c.I), copy(c.J)
     rowptr, colptr, I, J, index, W = dsparse(W)
     @assert length(rowptr) == length(c.rowptr) "Rowptr length mismatch"
     @assert length(colptr) == length(c.colptr) "Colptr length mismatch"
+
+    # position of every new synapse in the old storage (0 = new synapse)
+    old_pos = Dict{Tuple{Int,Int},Int}()
+    for s in eachindex(old_I)
+        old_pos[(Int(old_I[s]), Int(old_J[s]))] = s
+    end
+    perm = [get(old_pos, (Int(I[s]), Int(J[s])), 0) for s in eachindex(I)]
 
     resize!(c.I, length(I))
     resize!(c.J, length(I))
     resize!(c.W, length(I))
     resize!(c.index, length(I))
 
-    @assert length(c.I) ==
-            length(c.J) ==
-            length(c.index) ==
-            length(c.W) ==
-            length(I) ==
-            length(J) ==
-            length(index) ==
-            length(W) "Length mismatch"
-
     @inbounds @simd for i in eachindex(I)
         c.I[i] = I[i]
         c.J[i] = J[i]
@@ -458,11 +641,17 @@ function update_sparse_matrix!(c::S, W::SparseMatrixCSC) where {S<:AbstractConne
     end
     c.colptr = colptr
     c.rowptr = rowptr
+    _remap_synapse_state!(c, perm)
     return nothing
 end
 
 function update_sparse_matrix!(c::S) where {S<:AbstractConnection}
-    rowptr, colptr, I, J, index, W = sparse(c.I, c.J, c.W) |> dsparse
+    Npost, Npre = length(c.rowptr) - 1, length(c.colptr) - 1
+    # CSC order: by presynaptic neuron, then postsynaptic neuron
+    perm = sortperm(collect(zip(c.J, c.I)))
+    A = sparse(c.I[perm], c.J[perm], c.W[perm], Npost, Npre)
+    @assert nnz(A) == length(c.W) "duplicate synapses after rewiring"
+    rowptr, colptr, I, J, index, W = dsparse(A)
 
     @inbounds @simd for i in eachindex(I)
         c.I[i] = I[i]
@@ -472,10 +661,46 @@ function update_sparse_matrix!(c::S) where {S<:AbstractConnection}
     end
     c.colptr = colptr
     c.rowptr = rowptr
+    _remap_synapse_state!(c, perm)
     return nothing
 end
 
+# Reorder / resize the per-synapse arrays of `c` after a rebuild of its sparse storage:
+# `perm[s]` is the old position of the synapse now stored at `s` (0 for a new synapse).
+function _remap_synapse_state!(c, perm::AbstractVector{<:Integer})
+    if hasfield(typeof(c), :ρ)
+        old = copy(c.ρ)
+        resize!(c.ρ, length(perm))
+        for s in eachindex(perm)
+            c.ρ[s] = perm[s] > 0 ? old[perm[s]] : 1.0f0
+        end
+    end
+    if hasfield(typeof(c), :param) && hasfield(typeof(c.param), :delaytime)
+        old = copy(c.param.delaytime)
+        d0 = isempty(old) ? 0.0f0 : Float32(sum(old) / length(old))
+        resize!(c.param.delaytime, length(perm))
+        for s in eachindex(perm)
+            c.param.delaytime[s] = perm[s] > 0 ? old[perm[s]] : d0
+        end
+    end
+    return c
+end
 
+
+"""
+    dsparse(A::SparseMatrixCSC) -> (rowptr, colptr, I, J, index, V)
+
+Double sparse representation of the `N_post x N_pre` matrix `A`, used by all sparse
+connections:
+- `colptr`, `I` (row indices = postsynaptic neurons), `V` (values): the CSC arrays of `A`,
+  ordered by presynaptic neuron;
+- `J`: the column (presynaptic neuron) of every stored entry;
+- `rowptr`: column pointers of `sparse(A')`, i.e. row pointers of `A`;
+- `index`: map from row-major position to CSC position, so that
+  `V[index[rowptr[i]:(rowptr[i+1]-1)]]` are the entries of row `i`.
+
+The returned arrays alias the internal arrays of `A` (`colptr`, `I`, `V`).
+"""
 function dsparse(A)
     # them in a special data structure leads to savings in space and execution time, compared to dense arrays.
     At = sparse(A') # Transposes the input sparse matrix A and stores it as At.
@@ -487,7 +712,6 @@ function dsparse(A)
     index = zeros(Int, size(I)) # Initializes an array index of the same size as I filled with zeros.
 
 
-    # FIXME: Breaks when A is empty
     for j = 1:(length(colptr)-1) # Starts a loop iterating through the columns of the matrix.
         J[colptr[j]:(colptr[j+1]-1)] .= j # Assigns column indices to J for each element in the column range.
     end

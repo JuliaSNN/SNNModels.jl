@@ -1,19 +1,73 @@
-"""
-    vSTDPParameter{FT = Float32} <: SpikingSynapseParameter
+@doc raw"""
+    vSTDPParameter(; A_LTD = 8e-4, A_LTP = 1.4e-3, θ_LTD = -70mV, θ_LTP = -49mV,
+                     τu = 20ms, τv = 7ms, τx = 15ms, Wmax = 30pF, Wmin = 0.1pF, active = [true])
 
-Contains parameters for the voltage-dependent Spike-Timing Dependent Plasticity (vSTDP) model.
+Voltage-based STDP in the form of Clopath et al. (2010): depression is triggered by a
+presynaptic spike and depends on a low-pass filtered postsynaptic membrane potential;
+potentiation depends on a presynaptic spike trace, on the instantaneous postsynaptic
+potential and on a second low-pass filter of it. It is a subtype of `LTPParameter`; pass it
+as `LTPParam` to a `SpikingSynapse` that targets a population with a membrane potential
+(`v_post` of the synapse). Its state is `vSTDPVariables`.
+
+# Equations
+With ``V_i`` the postsynaptic potential (`v_post`), ``u_i``, ``v_i`` its low-pass filters,
+``x_j`` the presynaptic trace and ``[z]_+ = \max(z, 0)``:
+```math
+\begin{aligned}
+τ_x \frac{dx_j}{dt} &= -x_j + \sum_k δ(t - t_j^k), \qquad
+τ_u \frac{du_i}{dt} = -u_i + V_i, \qquad
+τ_v \frac{dv_i}{dt} = -v_i + V_i,\\
+Δw_{ij}^{LTD} &= -A_{LTD}\,[u_i - θ_{LTD}]_+ \quad \text{at each presynaptic spike of } j,\\
+\frac{dw_{ij}^{LTP}}{dt} &= A_{LTP}\, x_j\, [v_i - θ_{LTD}]_+\, [V_i - θ_{LTP}]_+ .
+\end{aligned}
+```
+A presynaptic spike increases ``x_j`` by ``1/τ_x`` (units 1/ms) and potentiation is a rate,
+integrated over `dt`; the rule is independent of `dt`, as in Clopath et al. (2010). Note that
+both thresholds of the LTP term are as in the code: the filtered potential ``v`` is compared
+with `θ_LTD`, the instantaneous one with `θ_LTP`.
+
+# Integration
+`plasticity!` (only under `train!`), per step: (1) forward Euler for ``x`` (all presynaptic
+neurons, including this step's spikes), (2) forward Euler for ``u`` and ``v`` (all
+postsynaptic neurons, driven by the current `v_post`), (3) for each presynaptic neuron ``j``
+(threaded over chunks of ``j``): if ``j`` fired, LTD on its outgoing synapses and clamp at
+`Wmin`; then, whether or not ``j`` fired, the LTP increment `dt * A_LTP * x * ...` on all its
+outgoing synapses and clamp at `Wmax`. At the first call, the voltage traces ``u`` and ``v`` are
+set to the current postsynaptic potential (they are not started at 0 mV).
+
+!!! note "Changed after SNNModels 1.8.4"
+    Up to 1.8.4 a spike increased ``x_j`` by ``dt/τ_x`` and the LTP increment was added per step
+    without `dt`. The two factors cancel, so the weights are unchanged (same values up to
+    rounding); only the scale of the recorded trace `x` changes (it was proportional to `dt`).
+    The voltage traces started at 0 mV, which produced spurious depression during the first
+    ``τ_u`` (about 0.02 of mean weight in 50 ms for a silent AdEx target with 20 Hz input).
 
 # Fields
-- `A_LTD::FT`: Long Term Depression learning rate.
-- `A_LTP::FT`: Long Term Potentiation learning rate.
-- `θ_LTD::FT`: LTD threshold.
-- `θ_LTP::FT`: LTP threshold.
-- `τu::FT`: Time constant for the pre-synaptic spike trace.
-- `τv::FT`: Time constant for the post-synaptic membrane trace.
-- `τx::FT`: Time constant for the variable `x`.
-- `Wmax::FT`: Maximum synaptic weight.
-- `Wmin::FT`: Minimum synaptic weight.
-- `active::Vector{Bool}`: Flag to activate or deactivate the plasticity rule.
+- `A_LTD::FT = 8 * 10e-5pA / mV` (= 8e-4): LTD amplitude per mV.
+- `A_LTP::FT = 14 * 10e-5pA / (mV * mV)` (= 1.4e-3): LTP amplitude per mV².
+- `θ_LTD::FT = -70mV`: LTD threshold (also used for the filtered potential in the LTP term).
+- `θ_LTP::FT = -49mV`: LTP threshold on the instantaneous potential.
+- `τu::FT = 20ms`: time constant of ``u`` (LTD filter).
+- `τv::FT = 7ms`: time constant of ``v`` (LTP filter).
+- `τx::FT = 15ms`: time constant of the presynaptic trace ``x``.
+- `Wmax::FT = 30pF`, `Wmin::FT = 0.1pF`: weight bounds.
+- `active::VBT = [true]`: present in the parameter type; activation is controlled by the
+  `active` field of `vSTDPVariables` (see `set_LTP!`).
+
+# References
+Clopath, C., Büsing, L., Vasilaki, E. & Gerstner, W. (2010). Connectivity reflects coding: a
+model of voltage-based STDP with homeostasis. Nature Neuroscience 13, 344-352. The default
+parameter values are not referenced in the code.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.Poisson(N = 50, param = SNN.PoissonParameter(20Hz))
+P = SNN.AdEx(N = 10, param = SNN.AdExParameter())
+syn = SNN.SpikingSynapse(E, P, :ge; conn = (p = 0.2, μ = 1.0), LTPParam = SNN.vSTDPParameter())
+SNN.train!(model = SNN.compose(; E, P, syn), duration = 200ms)
+```
 """
 vSTDPParameter
 
@@ -30,14 +84,26 @@ vSTDPParameter
     active::VBT = [true]
 end
 
+"""
+    vSTDPVariables(; Npre, Npost, u = zeros(Npost), v = zeros(Npost), x = zeros(Npre), active = [true],
+                     initialized = [false])
+
+State of `vSTDPParameter`: `u`, `v` (low-pass filters of the postsynaptic potential with
+time constants `τu`, `τv`, length `Npost`, mV), `x` (presynaptic spike trace, length `Npre`,
+1/ms), the `active` flag and `initialized`: while `initialized[1]` is false, the first
+`plasticity!` call sets `u` and `v` to the postsynaptic potential.
+"""
+vSTDPVariables
+
 @snn_kw struct vSTDPVariables{VFT = Vector{Float32},IT = Int} <: LTPVariables
     ## Plasticity variables
     Npost::IT
     Npre::IT
-    u::VFT = zeros(Npost) # presynaptic spiking time
-    v::VFT = zeros(Npost) # postsynaptic spiking time
+    u::VFT = zeros(Npost) # postsynaptic potential filtered with τu (LTD)
+    v::VFT = zeros(Npost) # postsynaptic potential filtered with τv (LTP)
     x::VFT = zeros(Npre) # presynaptic spike trace
     active::VBT = [true]
+    initialized::VBT = [false] # u, v are set to v_post at the first plasticity! call
 end
 
 function plasticityvariables(param::T, Npre, Npost) where {T<:vSTDPParameter}
@@ -45,30 +111,12 @@ function plasticityvariables(param::T, Npre, Npost) where {T<:vSTDPParameter}
 end
 
 """
-    plasticity!(c::AbstractSparseSynapse, param::vSTDPParameter, dt::Float32)
+    plasticity!(c::AbstractSparseSynapse, param::vSTDPParameter, variables::vSTDPVariables, dt::Float32, T::Time)
 
-Perform update of synapses using plasticity rules based on the Spike Timing Dependent Plasticity (STDP) model.
-This function updates pre-synaptic spike traces and post-synaptic membrane traces, and modifies synaptic weights using vSTDP rules.
-
-# Arguments
-- `c::AbstractSparseSynapse`: The spiking synapse to be updated.
-- `param::vSTDPParameter`: Contains STDP parameters including A_LTD, A_LTP, θ_LTD, θ_LTP, τu, τv, τx, Wmax, Wmin.
-    - `A_LTD`: Long Term Depression learning rate.
-    - `A_LTP`: Long Term Potentiation learning rate.
-    - `θ_LTD`: LTD threshold.
-    - `θ_LTP`: LTP threshold.
-    - `τu, τv, τx`: Time constants for different variables in STDP.
-    - `Wmax, Wmin`: Maximum and minimum synaptic weight.
-- `dt::Float32`: Time step for simulation.
-
-In addition to these, the function uses normalization where the operator can be multiplicative or additive as defined by `c.normalize.param.operator`.
-The `operator` is applied when updating the synaptic weights. The frequency of normalization is controlled by `τ`, 
-where if `τ > 0.0f0` then normalization will occur at intervals approximately equal to `τ`.
-
-After all updates, the synaptic weights are clamped between `Wmin` and `Wmax`.
-
+One step of the voltage-based STDP rule `vSTDPParameter` (see its docstring for the
+equations and the update order): updates the traces in `variables` and the weights `c.W` in
+place, clamping them to `[Wmin, Wmax]`. Called by `train!`, never by `sim!`.
 """
-
 function plasticity!(
     c::PT,
     param::vSTDPParameter,
@@ -77,14 +125,19 @@ function plasticity!(
     T::Time,
 ) where {PT<:AbstractSparseSynapse}
     @unpack rowptr, colptr, I, J, index, W, v_post, fireJ, g, index = c
-    @unpack u, v, x = plasticity
+    @unpack u, v, x, initialized = plasticity
     @unpack A_LTD, A_LTP, θ_LTD, θ_LTP, τu, τv, τx, Wmax, Wmin = param
-    # R(x::Float32) = x < 0.0f0 ? 0.0f0 : x
+    if !initialized[1]
+        u .= v_post
+        v .= v_post
+        initialized[1] = true
+    end
+    dtA_LTP = dt * A_LTP
 
     # update pre-synaptic spike trace
     @fastmath @inbounds begin
         for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
-            x[j] += dt * (-x[j] + fireJ[j]) / τx
+            x[j] += -dt * x[j] / τx + fireJ[j] / τx
         end
 
         Is = 1:(length(rowptr)-1)
@@ -103,7 +156,7 @@ function plasticity!(
                     end
                 end
                 @turbo for s = colptr[j]:(colptr[j+1]-1)
-                    W[s] += A_LTP *
+                    W[s] += dtA_LTP *
                         x[j] *
                         clamp(v[I[s]] - θ_LTD, 0.0f0, Inf) *
                         clamp(v_post[I[s]] - θ_LTP, 0.0f0, Inf)

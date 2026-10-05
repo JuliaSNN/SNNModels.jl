@@ -1,5 +1,6 @@
 @doc """
-    STDPWeightDependent{FT = Float32}
+    STDPWeightDependent(; η = 1e-3, α = 1, μ_plus = 1, μ_minus = 1, τpre = 20ms, τpost = 20ms,
+                          Wmax = 30pF, Wmin = 0pF)
 
 Weight-dependent (soft-bound) pair STDP, all-to-all interaction, event-driven
 (Gütig, R., Aharonov, R., Rotter, S., & Sompolinsky, H. (2003). Learning input
@@ -31,8 +32,13 @@ serial, applied only under `train!`.
 
 # Example
 ```julia
-rule = SNN.STDPWeightDependent(η = 1e-3, α = 1.05, μ_plus = 0.0, μ_minus = 1.0)  # Gütig 2003
+using SpikingNeuralNetworks
+SNN.@load_units
+pre = SNN.Poisson(N = 100, param = SNN.PoissonParameter(10Hz))
+post = SNN.IF(N = 10)
+rule = SNN.STDPWeightDependent(η = 1e-3, α = 1.05, μ_plus = 0.0, μ_minus = 1.0)
 syn = SNN.SpikingSynapse(pre, post, :ge; conn = (p = 0.1, μ = 10.0), LTPParam = rule)
+SNN.train!(model = SNN.compose(; pre, post, syn), duration = 500ms)
 ```
 """
 STDPWeightDependent

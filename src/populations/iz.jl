@@ -1,23 +1,34 @@
-"""
-    IZParameter{FT<:AbstractFloat}
+@doc raw"""
+    IZParameter{FT = Float32}(; a = 0.01, b = 0.2, c = -65, d = 2, τe = 5ms, τi = 10ms,
+                               Ee = 0mV, Ei = -80mV)
 
-Parameters for the Izhikevich neuron model.
+Parameters of the Izhikevich neuron model (`IZ`) with two conductance-based, exponentially
+decaying synapses.
+
+`IZParameter <: AbstractPopulationParameter`, so `IZ` populations run under both `sim!` and
+`train!` (the population has no plasticity of its own; `update_traces!` and `plasticity!` are
+the no-op fallbacks). Up to SNNModels 1.8.4 the type had no supertype and `train!` raised a
+`MethodError`.
 
 # Fields
-- `a::FT`: Time scale of recovery variable u (default: 0.01)
-- `b::FT`: Sensitivity of u to v (default: 0.2)
-- `c::FT`: After-spike reset value of v in mV (default: -65)
-- `d::FT`: After-spike increment of u (default: 2)
-- `τe::FT`: Excitatory synaptic time constant (default: 5ms)
-- `τi::FT`: Inhibitory synaptic time constant (default: 10ms)
-- `Ee::FT`: Excitatory reversal potential (default: 0mV)
-- `Ei::FT`: Inhibitory reversal potential (default: -80mV)
+- `a::FT = 0.01`: time scale of the recovery variable ``u`` (1/ms).
+- `b::FT = 0.2`: sensitivity of ``u`` to ``v``.
+- `c::FT = -65`: after-spike reset value of ``v`` (mV).
+- `d::FT = 2`: after-spike increment of ``u``.
+- `τe::FT = 5ms`: decay time constant of the excitatory conductance `ge` (ms).
+- `τi::FT = 10ms`: decay time constant of the inhibitory conductance `gi` (ms).
+- `Ee::FT = 0mV`: excitatory reversal potential (mV).
+- `Ei::FT = -80mV`: inhibitory reversal potential (mV).
+
+The defaults `a = 0.01, b = 0.2, c = -65, d = 2` are not one of the named firing classes of
+Izhikevich (2003) (regular spiking is `a = 0.02, b = 0.2, c = -65, d = 8`).
 
 # References
-- Izhikevich, E. M. (2003). Simple model of spiking neurons. IEEE Transactions on neural networks, 14(6), 1569-1572.
+Izhikevich, E. M. (2003). Simple model of spiking neurons. IEEE Transactions on Neural
+Networks, 14(6), 1569-1572.
 """
 IZParameter
-@snn_kw struct IZParameter{FT = Float32}
+@snn_kw struct IZParameter{FT = Float32} <: AbstractPopulationParameter
     a::FT = 0.01
     b::FT = 0.2
     c::FT = -65
@@ -28,38 +39,54 @@ IZParameter
     Ei::FT = -80mV
 end
 
-"""
-    IZ{VFT, VBT} <: AbstractPopulation
+@doc raw"""
+    IZ(; N = 100, param = IZParameter(), name = "IZ", kwargs...)
 
-Izhikevich neuron population model. Simple yet biologically plausible model that can reproduce various spiking patterns.
+Population of Izhikevich neurons with conductance-based excitatory (`ge`) and inhibitory
+(`gi`) synapses. Connections target `:ge` or `:gi` directly.
+
+# Equations
+```math
+\begin{aligned}
+\frac{dv}{dt} &= 0.04 v^2 + 5 v + 140 - u + I + g_e (E_e - v) + g_i (E_i - v) \\
+\frac{du}{dt} &= a\,(b v - u) \\
+\frac{dg_e}{dt} &= -\frac{g_e}{\tau_e}, \qquad \frac{dg_i}{dt} = -\frac{g_i}{\tau_i}
+\end{aligned}
+```
+with ``v`` in mV and ``t`` in ms. When ``v > 30`` mV: ``v \leftarrow c``, ``u \leftarrow u + d``.
+There is no capacitance: ``I`` and ``g (E - v)`` enter directly in mV/ms.
+
+# Integration
+Per step: the conductances decay (forward Euler); ``v`` is advanced with two forward-Euler
+half steps of `dt/2` of the quadratic part (as in Izhikevich 2003), ``u`` with one Euler step
+using the new ``v``, then the synaptic term `dt * (ge * (Ee - v) + gi * (Ei - v))` is added;
+finally spikes are detected (`v > 30`) and reset. No refractory period.
 
 # Fields
-## Population Info
-- `id::String`: Unique identifier (default: random 12-character string)
-- `name::String`: Population name (default: "IZ")
-- `N::Int32`: Number of neurons (default: 100)
-
-## Parameters
-- `param::IZParameter`: Model parameters (default: `IZParameter()`)
-
-## State Variables
-- `v::VFT`: Membrane potential (initialized to -65mV)
-- `u::VFT`: Recovery variable (initialized to b*v)
-- `fire::VBT`: Spike flags (default: false)
-- `I::VFT`: External input current (default: zeros)
-- `ge::VFT`: Excitatory conductance (initialized with random values)
-- `gi::VFT`: Inhibitory conductance (initialized with random values)
-
-## Recordings
-- `records::Dict`: Dictionary for storing simulation data
-
-# Model Equations
-- dv/dt = 0.04v² + 5v + 140 - u + I
-- du/dt = a(bv - u)
-- if v ≥ 30mV: v ← c, u ← u + d
+- `id::String = randstring(12)`, `name::String = "IZ"`, `param::IZParameter = IZParameter()`.
+- `N::Int32 = 100`.
+- `v::Vector{Float32} = fill(-65, N)`: membrane potential (mV).
+- `u::Vector{Float32} = param.b * v`: recovery variable.
+- `fire::Vector{Bool}`; `I::Vector{Float32}`: external input (mV/ms), zeros.
+- `ge::Vector{Float32} = (1.5randn(N) .+ 4) .* 10nS`: excitatory conductance, random initial
+  values (mean 40 nS).
+- `gi::Vector{Float32} = (12randn(N) .+ 20) .* 10nS`: inhibitory conductance, random initial
+  values (mean 200 nS, can be negative).
+- `records::Dict`.
 
 # References
-- [Izhikevich, 2003](https://www.izhikevich.org/publications/spikes.htm)
+Izhikevich, E. M. (2003). Simple model of spiking neurons. IEEE Transactions on Neural
+Networks, 14(6), 1569-1572.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IZ(N = 10, param = SNN.IZParameter(a = 0.02, b = 0.2, c = -65, d = 8))
+E.I .= 10
+SNN.monitor!(E, [:v, :fire])
+SNN.sim!([E]; duration = 200ms, dt = 0.5ms)
+```
 """
 IZ
 
@@ -92,19 +119,9 @@ end
 """
     integrate!(p::IZ, param::IZParameter, dt::Float32)
 
-Update Izhikevich neuron population for one timestep.
-
-# Arguments
-- `p::IZ`: The neuron population
-- `param::IZParameter`: Model parameters
-- `dt::Float32`: Time step size
-
-# Details
-- Updates synaptic conductances exponentially
-- Integrates membrane potential using Euler method (two half-steps for stability)
-- Updates recovery variable u
-- Applies synaptic currents
-- Detects spikes (v > 30mV) and applies reset
+One step of the Izhikevich population: exponential decay of `ge`, `gi` (forward Euler), two
+half steps of the quadratic membrane equation, one step of `u`, the synaptic term, then spike
+detection (`v > 30`) with reset `v = c`, `u += d`. See `IZ`.
 """
 function integrate!(p::IZ, param::IZParameter, dt::Float32)
     @unpack N, v, u, fire, I = p

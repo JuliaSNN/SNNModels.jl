@@ -1,24 +1,49 @@
 abstract type AbstractDoubleExpParameter <: AbstractSynapseParameter end
 
-"""
-    DoubleExpSynapse{FT} <: AbstractDoubleExpParameter
+@doc raw"""
+    DoubleExpSynapse(; τre = 1ms, τde = 6ms, τri = 0.5ms, τdi = 2ms,
+                       E_i = -75mV, E_e = 0mV, gsyn_e = 1, gsyn_i = 1)
 
-A synaptic parameter type that models double exponential synaptic dynamics.
+Conductance-based synapse with double-exponential (rise and decay) kinetics, one excitatory
+and one inhibitory conductance per neuron. This is the default synapse of `IF` and `AdEx`.
+
+# Equations
+Each spike increments the auxiliary variable ``h``, which drives the conductance ``g``:
+```math
+\frac{dh_e}{dt} = -\frac{h_e}{\tau_{re}} + \sum_k w_k\,\delta(t - t_k), \qquad
+\frac{dg_e}{dt} = -\frac{g_e}{\tau_{de}} + h_e
+```
+(same for ``h_i, g_i`` with ``\tau_{ri}, \tau_{di}``), and
+```math
+I_{syn} = g_{syn,e}\, g_e\,(V - E_e) + g_{syn,i}\, g_i\,(V - E_i).
+```
+The kernel is not normalised: a unit jump of ``h`` gives a conductance time course
+``\frac{\tau_r \tau_d}{\tau_d - \tau_r}\left(e^{-t/\tau_d} - e^{-t/\tau_r}\right)``.
+
+# Integration
+Forward Euler: the input is added to `he`/`hi`; then `ge += dt (-ge/τde + he)` (using the
+updated `he`) and `he += -dt he / τre` (same for the inhibitory pair). The receptor buffers
+are then zeroed.
 
 # Fields
-- `τre::FT`: Rise time constant for excitatory synapses (default: 1ms)
-- `τde::FT`: Decay time constant for excitatory synapses (default: 6ms)
-- `τri::FT`: Rise time constant for inhibitory synapses (default: 0.5ms)
-- `τdi::FT`: Decay time constant for inhibitory synapses (default: 2ms)
-- `E_i::FT`: Reversal potential for inhibitory synapses (default: -75mV)
-- `E_e::FT`: Reversal potential for excitatory synapses (default: 0mV)
-- `gsyn_e::FT`: Synaptic conductance for excitatory synapses (default: 1.0f0)
-- `gsyn_i::FT`: Synaptic conductance for inhibitory synapses (default: 1.0f0)
+- `τre::FT = 1ms`: rise time constant, excitatory (ms).
+- `τde::FT = 6ms`: decay time constant, excitatory (ms).
+- `τri::FT = 0.5ms`: rise time constant, inhibitory (ms).
+- `τdi::FT = 2ms`: decay time constant, inhibitory (ms).
+- `E_i::FT = -75mV`: inhibitory reversal potential (mV).
+- `E_e::FT = 0mV`: excitatory reversal potential (mV).
+- `gsyn_e::FT = 1.0`: scaling of the excitatory conductance (dimensionless).
+- `gsyn_i::FT = 1.0`: scaling of the inhibitory conductance (dimensionless).
 
-# Type Parameters
-- `FT`: Floating point type (default: `Float32`)
+`FT` defaults to `Float32`. State variables: `DoubleExpSynapseVars`.
 
-This type implements double exponential synaptic dynamics, where synaptic currents are calculated using separate rise and decay time constants for both excitatory and inhibitory synapses.
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+syn = SNN.DoubleExpSynapse(τre = 1ms, τde = 6ms, τri = 0.5ms, τdi = 2ms)
+E = SNN.IF(N = 10, param = SNN.IFParameter(C = 281pF, gl = 40nS), synapse = syn)
+```
 """
 DoubleExpSynapse
 
@@ -35,13 +60,15 @@ end
 
 """
     DoubleExpSynapseVars{VFT} <: AbstractSynapseVariable
-A synaptic variable type that stores the state variables for double exponential synaptic dynamics.
+
+State variables of `DoubleExpSynapse`, created by `synaptic_variables(::DoubleExpSynapse, N)`.
+
 # Fields
-- `N::Int`: Number of synapses
-- `ge::VFT`: Vector of excitatory conductances
-- `gi::VFT`: Vector of inhibitory conductances
-- `he::VFT`: Vector of auxiliary variables for excitatory synapses
-- `hi::VFT`: Vector of auxiliary variables for inhibitory synapses
+- `N::Int = 100`: number of neurons.
+- `ge::VFT`: excitatory conductance (nS).
+- `gi::VFT`: inhibitory conductance (nS).
+- `he::VFT`: excitatory rise (auxiliary) variable (nS/ms).
+- `hi::VFT`: inhibitory rise (auxiliary) variable (nS/ms).
 """
 DoubleExpSynapseVars
 @snn_kw struct DoubleExpSynapseVars{VFT = Vector{Float32}} <: AbstractSynapseVariable

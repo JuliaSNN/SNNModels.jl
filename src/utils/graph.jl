@@ -3,43 +3,38 @@
 """
     graph(model)
 
-Generate a graph representation of the model.
+Build a `MetaGraphs.MetaDiGraph` describing the connectivity of a model created by `compose`.
 
-## Arguments
-- `model`: The model to generate the graph from.
+# Vertices
+One per population and one per stimulus, with properties `:name` (component name), `:id`
+(component `id`) and `:key` (key in `model.pop` or `model.stim`).
 
-## Returns
-A `MetaGraphs.MetaDiGraph` object representing the graph.
+# Edges
+One edge per ordered pair of vertices; several connections between the same pair are stored as
+vectors in the same edge. Edge properties (vectors with one entry per connection): `:type`
+(`syn.targets[:type]`, `:fire_to_g` for stimuli), `:name` (connection name), `:pop`
+(`"pre -> post.sym"`), `:key`, `:id`, `:meta` (key of the metaplasticity operator acting on the
+connection, or `:none`), `:target` (`targets[:sym]`) and `:count`; `:multi` is the number of
+connections on the edge.
 
-## Details
-- Each vertex represents either a population ('pop'), a normalization synapse ('meta'), or a stimulus pre-target ('pre'). 
-  Its metadata includes:
-    - `name`: Actual name of the population, 'meta' for a SynapseNormalization, or the pre-target's name for a stimulus.
-    - `id`: Identifier of the population, SynapseNormalization, or stimulus.
-    - `key`: Key from the original 'pop', 'syn', or 'stim' dictionary in the model.
-
-- Each edge represents a synaptic connection or a stimulus. 
-  Its metadata includes:
-    - `type`: Type of the edge, ':fire_to_g' for SpikingSynapse, ':meta' for SynapseNormalization, or ':stim' for a stimulus.
-    - `name`: Name of the edge, formatted as "from_vertex_name to to_vertex_name".
-    - `key`: Key from the original 'syn' or 'stim' dictionary in the model.
-    - `id`: Identifier of the synapse or stimulus.    
-    
-- The function iterates over the populations, synapses, and stimuli in the model.
-
-`AbstractPopulation` items are added as vertices.
-
-For each connection it checks the type of the synapse and adds an edge between the pre-synaptic population and the post-synaptic population. 
-    - `SpikingSynapse`: the edge represents a connection from the firing population to the receiving population.   
-    - `SynapseNormalization`: the edge represents a normalization of synapses between populations.
-    - `PoissonStimulus`: the edge represents a stimulus from the pre-synaptic population to the post-synaptic population.
-
-For each stimulus, it adds a vertex to the graph representing an implicit pre-synaptic population [:fire] an edge between it and the post-synaptic population [:post].
-
-Returns a MetaGraphs.MetaDiGraph where:
+- Connections are added from `syn.targets[:fire]` (presynaptic id) to `syn.targets[:post]`.
+- Stimuli are drawn as an edge from the stimulus vertex to `stim.targets[:post]`.
+- `AbstractMetaPlasticity` connections (normalization, scaling, turnover) add no edge; their key
+  is written in the `:meta` property of the edges of the synapses listed in
+  `targets[:synapses]`.
 
 # Errors
-Throws ArgumentError when the synapse type is neither SpikingSynapse nor SynapseNormalization.
+Throws `ArgumentError` for a connection whose `targets` has no `:type` entry, and an error if a
+target population id is not in the model.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+@load_units
+E = SNN.IF(N = 10, name = "E")
+EE = SNN.SpikingSynapse(E, E, :ge, conn = (μ = 1.0, p = 0.2))
+g = SNN.graph(SNN.compose(; E, EE, silent = true))   # 1 vertex, 1 self-loop edge
+```
 """
 function graph(model)
     graph = MetaGraphs.MetaDiGraph()
@@ -145,10 +140,7 @@ function filter_edge_props(g::AbstractMetaGraph, key, value)
             end
         end
     end
-    if isempty(_edges)
-        # error("No edge matching conditions found")
-        return []
-    end
+    # empty vectors when nothing matches (callers destructure the result; it was `[]` up to 1.8.4)
     return _edges, _ids
 end
 
@@ -159,10 +151,17 @@ function find_id_vertex(g::AbstractMetaGraph, id)
 end
 
 
+# Vertex whose :key is `id`, otherwise the first edge whose :key contains `id`.
+# (Up to 1.8.4 this referred to an undefined `e` and to `insothing`.)
 function find_key_graph(g::AbstractMetaGraph, id)
-    v = filter_first_vertex(g, (g, v) -> get_prop(g, v, :key) == id)
-    isnothing(v) && isnothing(e) && error("Vertex or edge not found")
-    return insothing(v) ? e : v
+    v = filter_first_vertex(g, (g, v) -> has_prop(g, v, :key) && get_prop(g, v, :key) == id)
+    isnothing(v) || return v
+    for e in edges(g)
+        has_prop(g, e, :key) || continue
+        k = get_prop(g, e, :key)
+        (k == id || (k isa AbstractVector && id in k)) && return e
+    end
+    error("Vertex or edge not found")
 end
 
 

@@ -1,56 +1,68 @@
 # @eval SNNModels begin
 """
-    StimulusGroup
+    StimulusGroup(; id = randstring(12), name = "StimulusGroup", param::AbstractStimulusParameter,
+                  elements::Vector{AbstractStimulus}, targets = Dict(), records = Dict())
 
-A container to group multiple stimuli together. This is useful for managing and applying operations to a set of related stimuli simultaneously.
+A container of stimuli handled as one model component. It is a subtype of
+`AbstractStimulusGroup`, not of `AbstractStimulus`: when a model is simulated, `sim!` and
+`train!` unpack the group and run each element as an ordinary stimulus. The helper methods
+`set_variable!`, `set_intervals!`, `set_active!`, `record` and `stimulate!` broadcast to all
+elements.
 
-An example is the `MultiCompartmentStimulusGroup` function, which creates a `StimulusGroup` to deliver stimuli to multiple compartments of a multi-compartment neuron model.
+`param` is any `AbstractStimulusParameter` (up to SNNModels 1.8.4 it was restricted to
+`PoissonStimulusParameter`). The usual way to build a group is
+[`MultiCompartmentStimulusGroup`](@ref).
 
 # Fields
-- `id::String`: A unique identifier for the stimulus group.
-- `name::String`: A name for the stimulus group.
-- `param::PoissonStimulusParameter`: The parameter for the Poisson stimulus. This seems to be a common parameter for the group, though individual elements can have their own variations.
-- `elements::Vector{AbstractStimulus}`: A vector of `AbstractStimulus` objects that belong to this group.
-- `targets::Dict`: A dictionary specifying the targets of the stimuli in the group.
-- `records::Dict`: A dictionary to store recorded data from the stimuli.
+- `id::String`, `name::String = "StimulusGroup"`
+- `param::AbstractStimulusParameter`: parameter shared by the elements.
+- `elements::Vector{AbstractStimulus}`: the grouped stimuli.
+- `targets::Dict`, `records::Dict`
 """
 StimulusGroup
 
 @snn_kw struct StimulusGroup{ST=Vector{AbstractStimulus}, } <: AbstractStimulusGroup
     id::String = randstring(12)
     name::String = "StimulusGroup"
-    param::PoissonStimulusParameter
+    param::AbstractStimulusParameter
     elements::ST
     targets::Dict = Dict()
     records::Dict = Dict()
 end
 
 """
-    MultiCompartmentStimulusGroup(param, post, sym, comps; name="StimulusGroup", kwargs...)
+    MultiCompartmentStimulusGroup(param::AbstractStimulusParameter, post::AbstractPopulation,
+                                  sym::Symbol, comps::AbstractVector; name = "StimulusGroup", kwargs...)
 
-A constructor function that creates a `StimulusGroup` for delivering stimuli to multiple compartments of a population of neurons (e.g., a multi-compartment model).
+Build a [`StimulusGroup`](@ref) with one stimulus per compartment in `comps`, each created
+with `Stimulus(param, post, sym, comp; name, kwargs...)`. All elements share the same
+parameter object, so changing it (for instance with `set_variable!`) affects all
+compartments. `comps` may contain `nothing` for a point neuron (`[nothing]` gives a group with one
+element). It works with every stimulus parameter whose `Stimulus` method takes the
+compartment (Poisson, Poisson layer, spike-time stimuli; pass `conn` for the last two).
+(Up to SNNModels 1.8.4 the compartment was passed as a keyword and only Poisson parameters
+worked.)
 
-# Arguments
-- `param::PoissonStimulusParameter`: The parameter object for the stimuli to be created.
-- `post::AbstractPopulation`: The target population for the stimuli.
-- `sym::Symbol`: The symbol representing the synaptic variable to be targeted (e.g., `:ge` for excitatory conductance).
-- `comps::Vector{Symbol}`: A vector of symbols representing the names of the compartments to be stimulated.
-- `name::String`: An optional name for the `StimulusGroup`.
-- `kwargs...`: Additional keyword arguments passed to the `Stimulus` constructor.
-
-# Returns
-- `StimulusGroup`: A `StimulusGroup` containing a `Stimulus` for each specified compartment.
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.Tripod(N = 10)
+group = SNN.MultiCompartmentStimulusGroup(SNN.PoissonFixed(rate = 10Hz), E, :glu, [:d1, :d2])
+model = SNN.compose(; E, group)
+SNN.sim!(; model, duration = 10ms)
+```
 """
 function MultiCompartmentStimulusGroup(param::P, 
                         post::T,  
                         sym::Symbol, 
-                        comps::Vector{Symbol};
+                        comps::AbstractVector;
                         name = "StimulusGroup",
                         kwargs...
                         ) where {T<: AbstractPopulation, P<:AbstractStimulusParameter}
     elements = Vector{AbstractStimulus}()
     for comp in comps
-        push!(elements, Stimulus(param, post, sym; comp=comp, name, kwargs...))
+        push!(elements, Stimulus(param, post, sym, comp; name, kwargs...))
     end
     targets = Dict(:pre => :StimulusGroup, :post => post.id, :sym => comps)
     StimulusGroup(;name, param, elements, targets)
@@ -94,9 +106,12 @@ set_active!(stim::StimulusGroup, active::Bool) = map(s -> set_active!(s, active)
 """
     neurons(stim::StimulusGroup)
 
-Returns a concatenated vector of the neuron indices targeted by all stimuli within the `StimulusGroup`.
+Return the neuron indices targeted by the stimuli of the group, concatenated over the
+elements (elements without a `neurons` field contribute nothing). (Up to SNNModels 1.8.4 the
+result was a vector of index vectors.)
 """
-neurons(stim::StimulusGroup) = vcat(map(s -> neurons(s), stim.elements))
+neurons(stim::StimulusGroup) =
+    reduce(vcat, [n for n in map(s -> neurons(s), stim.elements) if !isnothing(n)]; init = Int[])
 
 export  StimulusGroup, set_variable!, set_intervals!, stimulate!, set_active!, neurons, MultiCompartmentStimulusGroup
 # end

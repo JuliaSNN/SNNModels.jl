@@ -1,20 +1,40 @@
-"""
-    BalancedStimulusParameter{VFT} <: AbstractParameter
+@doc raw"""
+    BalancedParameter(; kIE = 1.0, β = 0.0, τ = 50ms, r0 = 1kHz, w = 1.0, wIE = 1.0, same_input = false)
 
-A parameter struct for the BalancedStimulus, containing parameters for the balanced input distribution.
-The balanced stimulus generates both excitatory and inhibitory inputs to a postsynaptic population, maintaining a balance between excitation and inhibition. The balance is controlled by two parameters that define the characteristics of the input.
-kIE: Scaling factor for inhibitory rate.
-wIE: Weight for inhibitory connections.
+Parameter of a [`BalancedStimulus`](@ref): Poisson excitatory input with a slowly
+fluctuating rate and Poisson inhibitory input with a fixed rate, delivered to every neuron of
+the target population.
 
-The parameter β controls the noise in the firing rate, with higher values leading to more variability. The time constant τ determines how quickly the noise decays over time. The baseline firing rate r0 sets the average rate of input spikes.
+# Equations
+Per step (``\Delta t`` = `dt`), for each neuron ``n``:
+```math
+g^{I}_n \leftarrow g^{I}_n + w\, w_{IE}\, k^{I}_n, \qquad k^{I}_n \sim \mathrm{Poisson}(k_{IE}\, r_0\, \Delta t)
+```
+The excitatory rate ``r^{E}`` is driven by a noise variable ``\eta`` and an adaptive
+offset ``r`` (``u`` uniform on ``[-1/2, 1/2]``, ``[x]_+ = \max(x, 0)``, and ``R(x)`` = ``x``
+if ``x > 0`` else 1):
+```math
+\eta \leftarrow (\eta - u)(1 - \Delta t/\tau) + u, \qquad
+r^{E} = \Big[\tfrac{r_0}{2}\, R(\beta\,\eta) + r\Big]_+, \qquad
+r \leftarrow r + \frac{r_0 - r^{E}}{400\,\mathrm{ms}}\,\Delta t
+```
+and the excitatory target of neuron ``n`` receives ``w\,k^{E}_n`` with
+``k^{E}_n \sim \mathrm{Poisson}(r^{E}_n\,\Delta t)`` (one draw per neuron and step). With
+`same_input = true` a single rate process (``\eta``, ``r``, ``r^E`` shared by all neurons) is used
+and every neuron draws its own Poisson count at that rate. Note the rule ``R(x)`` (1 for
+``x \le 0``), transcribed from the code.
 
 # Fields
-- `kIE::Float32`: Scaling factor for inhibitory rate (default: 1.0)
-- `β::Float32`: Noise parameter (default: 0.0)
-- `τ::Float32`: Time constant for noise (default: 50.0 ms)
-- `r0::Float32`: Baseline firing rate (default: 1kHz)
-- `wIE::Float32`: Weight for inhibitory connections (default: 1.0)
-- `same_input::Bool`: Whether to use same input for all neurons (default: false)
+- `kIE::Float32 = 1.0`: ratio of the inhibitory rate to `r0`.
+- `β::Float32 = 0.0`: amplitude of the rate fluctuations (dimensionless).
+- `τ::Float32 = 50ms`: correlation time of the rate noise.
+- `r0::Float32 = 1kHz`: baseline rate (library units: `1kHz` = 1 per ms).
+- `w::Float32 = 1.0`: increment per input spike (excitatory and inhibitory).
+- `wIE::Float32 = 1.0`: extra factor on the inhibitory increment.
+- `same_input::Bool = false`: use a single excitatory rate process shared by all neurons
+  instead of one per neuron.
+
+Reference not given in the code.
 """
 BalancedParameter
 
@@ -29,30 +49,34 @@ BalancedParameter
 end
 
 """
-    BalancedStimulus{
-        VFT = Vector{Float32},
-        VBT = Vector{Bool},
-        VIT = Vector{Int},
-        IT = Int32,
-    } <: AbstractStimulus
-A stimulus that generates balanced excitatory and inhibitory inputs to a postsynaptic population.
+    BalancedStimulus(post::AbstractPopulation, sym_e::Symbol, sym_i::Symbol, target = nothing;
+                     param::BalancedParameter, name = "Balanced")
+    Stimulus(param::BalancedParameter, post, sym, target = nothing; kwargs...)
+
+Balanced excitatory and inhibitory Poisson drive to all `post.N` neurons of `post`, with
+rates defined by [`BalancedParameter`](@ref). `sym_e` and `sym_i` select the excitatory and
+inhibitory target variables (`target` is the compartment for multicompartment models).
+
+`param` may also be a number, the baseline rate `r0` (library units, e.g. `2kHz`), used with
+the other defaults of `BalancedParameter`.
+
+!!! note "Changed after SNNModels 1.8.4"
+    Up to 1.8.4: the default `same_input = false` threw `UndefVarError: randcache`;
+    `same_input = true` added all excitatory draws to neuron 1; the per-neuron branch added `N`
+    Poisson draws per step to each neuron (rate multiplied by `N`); `Stimulus(param, post, sym)`
+    used `sym` as both the excitatory and the inhibitory target; a numeric `param` referred to
+    the undefined `BSParam`.
+
 # Fields
-- `param::BalancedStimulusParameter`: Parameters for the balanced stimulus.
-- `N::IT`: Number of neurons in the stimulus.
-- `neurons::VIT`: Indices of neurons in the postsynaptic population receiving the stimulus.
-- `ge::VFT`: Target excitatory conductance for each neuron.
-- `gi::VFT`: Target inhibitory conductance for each neuron.
-- `colptr::VIT`: Column pointers for sparse connectivity matrix.
-- `rowptr::VIT`: Row pointers for sparse connectivity matrix.
-- `I::VIT`: Row indices for sparse connectivity matrix.
-- `J::VIT`: Column indices for sparse connectivity matrix.
-- `index::VIT`: Indices for non-zero entries in sparse connectivity matrix.
-- `r::VFT`: Firing rates for each neuron.
-- `noise::VFT`: Noise values for each neuron.
-- `randcache::VFT`: Cache for random values used in spike generation.
-- `randcache_β::VFT`: Cache for random values used in noise generation.
-- `records::Dict`: Dictionary for recording variables during simulation.
-- `targets::Dict`: Dictionary specifying the target populations and synaptic variables.
+- `id::String`; `param::BalancedParameter`; `name::String = "Balanced"`
+- `N::Int32`: number of target neurons (`post.N`).
+- `ge::Vector{Float32}`, `gi::Vector{Float32}`: excitatory and inhibitory targets of `post`
+  (shared).
+- `fire::Vector{Bool} = zeros(Bool, 0)`: unused.
+- `r::Vector{Float32}`: adaptive rate offset per neuron (initialised to `r0`).
+- `noise::Vector{Float32}`: rate noise per neuron (initialised to 0).
+- `randcache_β::Vector{Float32}`: uniform random numbers for the noise.
+- `records::Dict`, `targets::Dict`
 """
 BalancedStimulus
 
@@ -74,20 +98,6 @@ BalancedStimulus
 end
 
 
-"""
-    BalancedStimulus(post::T, sym::Symbol, r::Union{Function, Float32}, neurons=[]; N_pre::Int=50, p_post::R=0.05f0, μ::R=1.f0, param=BalancedParameter()) where {T <: AbstractPopulation, R <: Number}
-
-Constructs a BalancedStimulus object for a spiking neural network.
-
-# Arguments
-- `post::T`: The target population for the stimulus.
-- `sym_e::Symbol`: The symbol representing the excitatory synaptic conductance or current.
-- `sym_i::Symbol`: The symbol representing the inhibitory synaptic conductance or current.
-- `param=BalancedParameter()`: The parameters for the Balanced distribution.
-
-# Returns
-A `BalancedStimulus` object.
-"""
 function BalancedStimulus(
     post::T,
     sym_e::Symbol,
@@ -103,8 +113,7 @@ function BalancedStimulus(
     gi, _ = synaptic_target(targets, post, sym_i, target)
 
     if typeof(param) <: Real
-        r = param
-        param = BSParam(rate = (x, y) -> r, r * param.kIE)
+        param = BalancedParameter(r0 = Float32(param))
     end
 
     r = ones(Float32, post.N) * param.r0
@@ -123,6 +132,27 @@ function BalancedStimulus(
 end
 
 
+const _BALANCED_INH = Dict(:ge => :gi, :glu => :gaba, :he => :hi, :AMPA => :GABAa)
+
+"""
+    Stimulus(param::BalancedParameter, post::AbstractPopulation, sym_e::Symbol, sym_i::Symbol, target = nothing; kwargs...)
+    Stimulus(param::BalancedParameter, post::AbstractPopulation, sym::Symbol, target = nothing; kwargs...)
+
+Build a [`BalancedStimulus`](@ref). In the second form `sym` is the excitatory target and the
+inhibitory one is its counterpart (`:ge` -> `:gi`, `:glu` -> `:gaba`, `:he` -> `:hi`,
+`:AMPA` -> `:GABAa`); other symbols raise an `ArgumentError`.
+"""
+function Stimulus(
+    param::BalancedParameter,
+    post::T,
+    sym_e::Symbol,
+    sym_i::Symbol,
+    target = nothing;
+    kwargs...,
+) where {T<:AbstractPopulation}
+    return BalancedStimulus(post, sym_e, sym_i, target; param, kwargs...)
+end
+
 function Stimulus(
     param::BalancedParameter,
     post::T,
@@ -130,14 +160,15 @@ function Stimulus(
     target = nothing;
     kwargs...,
 ) where {T<:AbstractPopulation}
-    return BalancedStimulus(post, sym, sym, target; param, kwargs...)
+    haskey(_BALANCED_INH, sym) || throw(ArgumentError("no inhibitory counterpart known for :$sym; use Stimulus(param, post, sym_e, sym_i)"))
+    return BalancedStimulus(post, sym, _BALANCED_INH[sym], target; param, kwargs...)
 end
 
 
 """
     stimulate!(p::BalancedStimulus, param::BalancedParameter, time::Time, dt::Float32)
 
-Generate a Balanced stimulus for a postsynaptic population.
+One step of the balanced input (equations in [`BalancedParameter`](@ref)).
 """
 function stimulate!(p::BalancedStimulus, param::BalancedParameter, time::Time, dt::Float32)
     @unpack N, randcache_β, ge, gi = p
@@ -153,40 +184,28 @@ function stimulate!(p::BalancedStimulus, param::BalancedParameter, time::Time, d
         gi[n] += w * rand(my_rate) * wIE
     end
 
-    # Excitatory spike
-    re::Float32 = 0.0f0
-    cc::Float32 = 0.0f0
-    Erate::Float32 = 0.0f0
+    # Excitatory spikes: one Poisson draw per neuron and step
+    cc = 1.0f0 - dt / τ
     rand!(randcache_β)
     if same_input
-        i = 1
-        re = randcache_β[i] - 0.5f0
-        cc = 1.0f0 - dt / τ
-        noise[i] = (noise[i] - re) * cc + re
-        Erate = R(r0 ./ 2 * R(noise[i] * β, 1.0f0) + r[i], 0.0f0)
-        r[i] += (r0 - Erate) / 400ms * dt
-        @assert Erate >= 0
-
+        # one rate process shared by all neurons (state stored at index 1)
+        re = randcache_β[1] - 0.5f0
+        noise[1] = (noise[1] - re) * cc + re
+        Erate = R(r0 / 2 * R(noise[1] * β, 1.0f0) + r[1], 0.0f0)
+        r[1] += (r0 - Erate) / 400ms * dt
         my_rate = Distributions.Poisson{Float32}(Erate * dt)
-        @fastmath @simd for n = 1:N
+        @inbounds for i = 1:N
             ge[i] += w * rand(my_rate)
         end
     else
-        @inbounds @fastmath for i = 1:N
+        @inbounds for i = 1:N
             re = randcache_β[i] - 0.5f0
-            cc = 1.0f0 - dt / τ
             noise[i] = (noise[i] - re) * cc + re
-            Erate = R(r0 ./ 2 * R(noise[i] * β, 1.0f0) + r[i], 0.0f0)
+            Erate = R(r0 / 2 * R(noise[i] * β, 1.0f0) + r[i], 0.0f0)
             r[i] += (r0 - Erate) / 400ms * dt
-            @assert Erate >= 0
-            rand!(randcache)
-            my_rate = Distributions.Poisson{Float32}(Erate * dt)
-            @fastmath @simd for n = 1:N
-                ge[i] += w * rand(my_rate)
-            end
+            ge[i] += w * rand(Distributions.Poisson{Float32}(Erate * dt))
         end
     end
-
 end
 
-export BalancedStimulus, stimulate!, BSParam, BalancedParameter
+export BalancedStimulus, stimulate!, BalancedParameter

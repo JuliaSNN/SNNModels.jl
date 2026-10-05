@@ -2,8 +2,8 @@ network = let
     NE = 400
     NI = 100
     E = Tripod()
-    I1 = IF(; N = NI ÷ 2, param = IFParameter(τm = 7ms, El = -55mV))
-    I2 = IF(; N = NI ÷ 2, param = IFParameter(τm = 20ms, El = -55mV))
+    I1 = IF(; N = NI ÷ 2, param = IFParameter(τm = 7ms, R = 0.06, El = -55mV))
+    I2 = IF(; N = NI ÷ 2, param = IFParameter(τm = 20ms, R = 0.06, El = -55mV))
     E_to_I1 = SpikingSynapse(E, I1, :ge, p = 0.2, μ = 15.0)
     E_to_I2 = SpikingSynapse(E, I2, :ge, p = 0.2, μ = 15.0)
     I2_to_E = CompartmentSynapse(
