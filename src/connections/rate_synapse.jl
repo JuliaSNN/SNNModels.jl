@@ -41,7 +41,8 @@ The weight matrix is ``W = \frac{\mu}{\sqrt{p N_{pre}}} X`` with ``X`` a sparse
 ```math
 g_i \leftarrow g_i + \sum_j W_{ij}\, r_j
 ```
-`g` is not reset by the synapse.
+`g` is not reset by the synapse; the postsynaptic `Rate`/`WilsonCowan` resets it after
+using it, so `g` is the input of the current step.
 
 # Plasticity (`plasticity!`, only under `train!`)
 For every presynaptic neuron ``j``, with learning rate ``\eta`` = `param.lr`:
@@ -53,9 +54,9 @@ W_{ij} \leftarrow W_{ij} + r_i\, \Delta_j
 docstring previously linked a Brian2 tutorial on synapses, which does not describe this rule).
 
 # Keyword arguments
-- `μ = 0.0`: weight scale; `p = 0.0`: connection density. Always pass `p > 0`: with
-  `p = 0` the scale ``\mu/\sqrt{p N_{pre}}`` is not finite and every entry of the
-  `N_post x N_pre` matrix becomes `NaN` (the matrix is stored densely).
+- `μ = 0.0`: weight scale; `p`: connection density, must be in `(0, 1]` (an `ArgumentError`
+  is raised otherwise; up to SNNModels 1.8.4 the default `p = 0` produced a dense matrix of
+  `NaN`).
 
 `RateSynapse` stores only `colptr`, `I`, `W` (no `rowptr`, `J`, `index`), so the
 connectivity helpers that need them (`matrix`, `presynaptic`, ...) do not apply.
@@ -74,6 +75,7 @@ SNN.sim!([R], [RR]; duration = 10ms)
 RateSynapse
 
 function RateSynapse(pre, post; μ = 0.0, p = 0.0, kwargs...)
+    0 < p <= 1 || throw(ArgumentError("RateSynapse needs a connection probability 0 < p <= 1, got p = $p"))
     w = SparseMatrixCSC{Float32,Int}(μ / √(p * pre.N) * sprandn(post.N, pre.N, p))
     rowptr, colptr, I, J, index, W = dsparse(w)
     rI, rJ = post.r, pre.r

@@ -17,7 +17,7 @@ equations (no separate E and I variables, no refractory term, no sigmoid paramet
 ```math
 \frac{dx}{dt} = -x + g + I, \qquad r = \tanh(x)
 ```
-(``t`` in ms), integrated with forward Euler.
+(``t`` in ms), integrated with forward Euler; `g` is reset to zero after each step, as in `Rate`.
 
 # Fields
 - `id::String = randstring(12)`, `name::String = "WilsonCowan"`, `param::WCParameter`.
@@ -59,6 +59,7 @@ function integrate!(p::WilsonCowan, param::WCParameter, dt::Float32)
     @inbounds for i = 1:N
         x[i] += dt * (-x[i] + g[i] + I[i])
         r[i] = tanh(x[i])
+        g[i] = 0.0f0 # g is the synaptic input of this step (connections add to it)
     end
 end
 

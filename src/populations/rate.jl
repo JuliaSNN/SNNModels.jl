@@ -21,9 +21,11 @@ with ``t`` in ms, i.e. the time constant is fixed to 1 ms. ``g`` is the input wr
 `RateSynapse` (``g_i \mathrel{+}= \sum_j W_{ij} r_j`` each step), ``I`` an external input.
 
 # Integration
-Forward Euler, `x += dt * (-x + g + I)`, then `r = tanh(x)`. `integrate!` does not reset ``g``
-and `RateSynapse` accumulates into it without clearing, so with a `RateSynapse` the input ``g``
-grows by ``W r`` every step (it is the running sum of all past inputs).
+Forward Euler, `x += dt * (-x + g + I)`, then `r = tanh(x)`, then `g` is set to zero: ``g`` is
+the synaptic input of one step, written by the connections after the population update
+(`RateSynapse` adds ``W r``, the FORCE connections overwrite it). Use `I` for a constant input.
+Up to SNNModels 1.8.4 `g` was never reset, so with a `RateSynapse` it was the running sum of all
+past inputs.
 
 The population has no `fire` field, so only `:x`, `:r`, `:g` can be recorded.
 
@@ -80,14 +82,15 @@ end
 """
     integrate!(p::Rate, param::RateParameter, dt::Float32)
 
-One forward-Euler step of the rate units: `x += dt * (-x + g + I)`, `r = tanh(x)`.
-`g` is not reset (see `Rate`).
+One forward-Euler step of the rate units: `x += dt * (-x + g + I)`, `r = tanh(x)`, then
+`g = 0` (see `Rate`).
 """
 function integrate!(p::Rate, param::RateParameter, dt::Float32)
     @unpack N, x, r, g, I = p
     @inbounds for i = 1:N
         x[i] += dt * (-x[i] + g[i] + I[i])
         r[i] = tanh(x[i]) #max(0, x[i])
+        g[i] = 0.0f0 # g is the synaptic input of this step (connections add to it)
     end
 end
 

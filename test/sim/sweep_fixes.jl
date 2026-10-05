@@ -88,3 +88,34 @@ end
     @test nf == 3 # one action potential per pulse (peak > 50 mV)
     @test SNNModels.MorrisLecar_w_nullcline(0.0f0, M.param) ≈ 0.5f0
 end
+
+@testset "Rate input g is reset every step; RateSynapse/SpikeRateSynapse" begin
+    R = Rate(N = 20)
+    RR = RateSynapse(R, R; μ = 1.0, p = 1.0)
+    T = SNNModels.Time()
+    for _ = 1:10
+        sim!([R], [RR], SNNModels.AbstractStimulus[], 0.125f0, T)
+    end
+    # after a step, g holds only the input of that step: W r
+    Wm = zeros(Float32, 20, 20)
+    for j = 1:20, s = RR.colptr[j]:(RR.colptr[j+1]-1)
+        Wm[RR.I[s], j] = RR.W[s]
+    end
+    @test R.g ≈ Wm * R.r
+    @test_throws ArgumentError RateSynapse(R, R)
+    # a spike makes x jump by W (delta input), independently of dt
+    for dt in (0.125f0, 0.05f0)
+        E = Identity(N = 1)
+        Q = Rate(N = 1); Q.x .= 0; Q.r .= 0
+        S = SNNModels.SpikeRateSynapse(E, Q; μ = 1.0, p = 1.0)
+        S.W .= 0.5f0
+        E.fire .= true
+        SNNModels.forward!(S, S.param, dt, SNNModels.Time())
+        SNNModels.integrate!(Q, Q.param, dt)
+        @test Q.x[1] ≈ 0.5f0
+        @test Q.g[1] == 0
+    end
+    E = Poisson(N = 10, param = PoissonParameter(50Hz))
+    S = SNNModels.SpikeRateSynapse(E, R; μ = 1.0, p = 0.5)
+    @test train!([E, R], [S]; duration = 10ms) isa SNNModels.Time
+end
