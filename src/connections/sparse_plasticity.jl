@@ -273,15 +273,15 @@ end
 export SpikingSynapse,
     PlasticityParameter,
     SpikingSynapseParameter,
-    no_STDPParameter,
     NoSTDP,
-    no_PlasticityVariables,
     plasticityvariables,
     plasticity!,
-    change_plasticity!, set_plasticity!,
-    set_STP!, set_LTP!,
-     update_traces!,
-     NoVariables
+    change_plasticity!,
+    set_plasticity!,
+    set_STP!,
+    set_LTP!,
+    update_traces!,
+    NoVariables
 
 
 export LTP, STP, NoLTP, NoSTP

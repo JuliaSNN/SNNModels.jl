@@ -279,7 +279,6 @@ end
 
 export PoissonStimulus,
     stimulate!,
-    PSParam,
     PoissonStimulusParameter,
     PoissonVariable,
     PoissonFixed,

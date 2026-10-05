@@ -166,13 +166,9 @@ SomaSynapse = ReceptorSynapse(
 # end
 
 
-# NOTE: `NMDA_CANAHP` and `Synapse_CANAHP` are exported below but their definitions are
-# commented out above, so they are not defined.
 export SomaNMDA,
     SomaSynapse,
     TripodSomaSynapse,
     TripodDendSynapse,
     EyalNMDA,
-    NMDA_CANAHP,
-    Synapse_CANAHP,
     SomaReceptors

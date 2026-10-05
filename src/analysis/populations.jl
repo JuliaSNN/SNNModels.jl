@@ -109,4 +109,4 @@ function average_conn_strength(M::T, pops::Vector{Vector{Int}}, sparsity=0.2) wh
     return ave_conn
 end
 
-export population_indices, target_neurons, filter_populations, subpopulations, filter_items, average_conn_strength
+export population_indices, target_neurons, subpopulations, filter_items, average_conn_strength

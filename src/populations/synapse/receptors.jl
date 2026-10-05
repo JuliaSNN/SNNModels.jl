@@ -324,7 +324,6 @@ function nmda_gating(v, NMDA::NMDAVoltageDependency)
     return 1 / (1.0f0 + (mg / b) * exp256(k * v))
 end
 
-# NOTE: `synapsearray` is exported below but not defined.
 export norm_synapse,
     EyalNMDA,
     Receptor,
@@ -333,6 +332,5 @@ export norm_synapse,
     GABAergic,
     Glutamatergic,
     ReceptorArray,
-    synapsearray,
     NMDAVoltageDependency,
     nmda_gating

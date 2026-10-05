@@ -157,18 +157,14 @@ The fallback method defined in this file (for `AbstractSinExpParameter`) only th
     error("synaptic_current! not implemented for synapse type $(typeof(synapse))")
 end
 
-# NOTE: `get_synapse_symbols` and `MultiRecetorSynapse` are exported below but not defined
-# (the defined names are `get_synapse_symbol` and `MultiReceptorSynapse`).
 export synaptic_current!,
     update_synapses!,
     synaptic_variables,
     synaptic_target,
-    get_synapse_symbols,
     CurrentSynapse,
     DeltaSynapse,
     DoubleExpSynapse,
     SingleExpSynapse,
-    MultiRecetorSynapse,
     ReceptorSynapse,
     AbstractSynapseParameter,
     AbstractSynapseVariable

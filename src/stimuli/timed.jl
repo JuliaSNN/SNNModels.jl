@@ -378,5 +378,4 @@ export SpikeTimeStimulusParameter,
     next_neuron,
     max_neuron,
     shift_spikes!,
-    update_spikes!,
-    SpikeTime
+    update_spikes!

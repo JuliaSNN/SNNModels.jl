@@ -208,13 +208,9 @@ One dendrite with length drawn in 150-400 μm (BallAndStick `ds`).
 """
 all_lengths = [(150um, 400um)]
 
-# NOTE: `HUMAN` and `MOUSE` are exported below but not defined (the defined names are
-# `human_dend` and `mouse_dend`).
 export create_dendrite,
     Dendrite,
     Physiology,
-    HUMAN,
-    MOUSE,
     proximal_distal,
     proximal_proximal,
     proximal,

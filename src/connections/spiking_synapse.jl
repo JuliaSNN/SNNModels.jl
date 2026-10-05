@@ -39,8 +39,8 @@ end
     param::SYNP = SpikingSynapseParameter()
     LTPParam::LTPParameter = NoLTP()
     STPParam::STPParameter = NoSTP()
-    LTPVars::PlasticityVariables = NoPlasticityVariables()
-    STPVars::PlasticityVariables = NoPlasticityVariables()
+    LTPVars::PlasticityVariables = NoVariables()
+    STPVars::PlasticityVariables = NoVariables()
     rowptr::VIT # row pointer of sparse W
     colptr::VIT # column pointer of sparse W
     I::VIT      # postsynaptic index of W
@@ -297,4 +297,4 @@ function forward!(c::SpikingSynapse, param::SpikingSynapseDelayParameter, dt::Fl
 end
 
 
-export SpikingSynapse, SpikingSynapseDelay, update_plasticity!
+export SpikingSynapse, update_plasticity!

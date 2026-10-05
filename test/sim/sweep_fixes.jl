@@ -382,3 +382,11 @@ end
     @test SNNModels.periodic_distance([0.1f0, 0.1f0], [0.0f0, 0.0f0], [1.0f0, 1.0f0]) ≈
           SNNModels.periodic_distance([0.1f0, 0.1f0], [0.0f0, 0.0f0], 1.0f0)
 end
+
+@testset "Every exported name of SNNModels is defined" begin
+    @test isempty([n for n in names(SNNModels) if !isdefined(SNNModels, n)])
+    s = SpikingSynapse(; rowptr = Int32[1], colptr = Int32[1], I = Int32[], J = Int32[],
+        index = Int32[], W = Float32[], ρ = Float32[], fireI = Bool[], fireJ = Bool[],
+        v_post = Float32[], g = Float32[])
+    @test s.LTPVars isa NoVariables
+end
