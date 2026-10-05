@@ -130,3 +130,26 @@ end
         @test E.synvars.gGABA ≈ [0.0f0, 3.0f0]
     end
 end
+
+@testset "vSTDP: dt-independent rule, traces start at the membrane potential" begin
+    function vstdp_dw(dt; Tsim = 30.0f0, vpost = -40.0f0)
+        E = Identity(N = 1)
+        P = AdEx(N = 1)
+        syn = SpikingSynapse(E, P, :glu; conn = (p = 1.0, μ = 1.0), LTPParam = vSTDPParameter())
+        W0 = copy(syn.W)
+        T = SNNModels.Time()
+        for k = 1:round(Int, Tsim / dt)
+            E.fire .= (k == 1)
+            P.v .= vpost
+            SNNModels.plasticity!(syn, syn.LTPParam, syn.LTPVars, Float32(dt), T)
+        end
+        syn.W[1] - W0[1], syn.LTPVars.x[1]
+    end
+    dw1, x1 = vstdp_dw(0.125)
+    dw2, x2 = vstdp_dw(0.0625)
+    @test dw1 > 0 && isapprox(dw1, dw2; rtol = 0.05)
+    @test isapprox(x1, x2; rtol = 0.05)
+    # silent target at rest: no spurious LTD from 0 mV initial traces
+    dw_rest, _ = vstdp_dw(0.125; vpost = -70.6f0)
+    @test dw_rest == 0
+end

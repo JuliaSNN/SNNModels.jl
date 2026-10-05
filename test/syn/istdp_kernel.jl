@@ -58,6 +58,8 @@ end
             post.v .= -70.0f0 .+ 20.0f0 .* rand(Float32, post.N)
             update_time!(T, dt)
             SNNModels.plasticity!(syn, param, vars, dt, T)
+            # iSTDPPotential initialises tpost to v_post at its first call
+            step == 1 && param isa iSTDPPotential && (tpost .= post.v)
             _ref_istdp!(W, tpre, tpost, syn, param, dt, post.v)
             maxdiff = max(maxdiff, maximum(abs.(W .- syn.W)))
         end

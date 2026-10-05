@@ -109,8 +109,9 @@ decreases it otherwise. Reference for the variant: not given in the code.
 Δw_{ij} = η\, x_j \;\text{at a postsynaptic spike of } i,
 ```
 with ``V_i`` the postsynaptic potential (`v_post`) and clamping to `[Wmin, Wmax]`.
-The trace `tpost` starts at 0 mV (`iSTDPVariables` default), so for the first few `τy` it is
-above `v0` whatever the potential.
+At the first `plasticity!` call the trace `tpost` is set to the postsynaptic potential.
+(Up to SNNModels 1.8.4 it started at 0 mV, so for the first few `τy` it was above `v0` whatever
+the potential, which potentiated inhibition at the start of every simulation.)
 
 Fields: `η = 0.001pA` (learning rate), `v0 = -50mV` (reference potential),
 `τy = 200ms` (trace time constant), `Wmax = 243pF`, `Wmin = 0.01pF`.
@@ -142,7 +143,8 @@ end
     iSTDPVariables
 
 State of the inhibitory STDP rules: `tpre` (length `Npre`) and `tpost` (length `Npost`)
-traces, `last_spike` (unused by the update) and the `active` flag. Record the traces with
+traces, `last_spike` (unused by the update), the `active` flag and `initialized` (used by
+`iSTDPPotential`: while false, the first `plasticity!` call sets `tpost` to `v_post`). Record the traces with
 `LTPVars` as the variable set, e.g. `monitor!(syn, [:tpost], :LTPVars)`.
 """
 iSTDPVariables
@@ -155,6 +157,7 @@ iSTDPVariables
     tpre::VFT = zeros(Npre) # presynaptic spike trace
     last_spike::VFT = zeros(Npost) # last spike time for each postsynaptic neuron
     active::VBT = [true]
+    initialized::VBT = [false] # iSTDPPotential: tpost set to v_post at the first call
 end
 
 function plasticityvariables(param::T, Npre, Npost) where {T<:iSTDPParameter}
@@ -230,6 +233,7 @@ equations.
 - Presynaptic pass, for every `j`: Euler decay `tpre[j] += -dt * tpre[j] / τy`; if `j` fired,
   `tpre[j] += 1` and every outgoing synapse gets `η (tpost[i] - v0)` (depression if the
   filtered potential is below `v0`), clamped to `[Wmin, Wmax]`.
+- At the first call, `tpost .= v_post`.
 - Postsynaptic pass, for every `i`: Euler step `tpost[i] += dt * (v_post[i] - tpost[i]) / τy`;
   if `i` fired, every incoming synapse gets `η tpre[j]`, clamped to `[Wmin, Wmax]`.
 - `T` is unused.
@@ -243,9 +247,12 @@ function plasticity!(
 )
     @unpack rowptr, colptr, index, I, J, W, v_post, fireI, fireJ, g = c
     @unpack η, v0, τy, Wmax, Wmin = param
-    @unpack tpre, tpost = plasticity
+    @unpack tpre, tpost, initialized = plasticity
+    if !initialized[1]
+        tpost .= v_post
+        initialized[1] = true
+    end
 
-    # @inbounds 
     # if pre-synaptic inhibitory neuron fires
     @fastmath @inbounds for j in eachindex(fireJ) # presynaptic indices j
         tpre[j] += dt * (-tpre[j]) / τy

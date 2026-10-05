@@ -14,25 +14,33 @@ With ``V_i`` the postsynaptic potential (`v_post`), ``u_i``, ``v_i`` its low-pas
 ``x_j`` the presynaptic trace and ``[z]_+ = \max(z, 0)``:
 ```math
 \begin{aligned}
-τ_x \frac{dx_j}{dt} &= -x_j + S_j, \qquad
+τ_x \frac{dx_j}{dt} &= -x_j + \sum_k δ(t - t_j^k), \qquad
 τ_u \frac{du_i}{dt} = -u_i + V_i, \qquad
 τ_v \frac{dv_i}{dt} = -v_i + V_i,\\
 Δw_{ij}^{LTD} &= -A_{LTD}\,[u_i - θ_{LTD}]_+ \quad \text{at each presynaptic spike of } j,\\
-Δw_{ij}^{LTP} &= A_{LTP}\, x_j\, [v_i - θ_{LTD}]_+\, [V_i - θ_{LTP}]_+ \quad \text{at every time step}.
+\frac{dw_{ij}^{LTP}}{dt} &= A_{LTP}\, x_j\, [v_i - θ_{LTD}]_+\, [V_i - θ_{LTP}]_+ .
 \end{aligned}
 ```
-``S_j`` is 1 in the step in which ``j`` fires and 0 otherwise, so a spike increases ``x_j``
-by ``dt/τ_x``. Note that both thresholds of the LTP term are as in the code: the filtered
-potential ``v`` is compared with `θ_LTD`, the instantaneous one with `θ_LTP`.
+A presynaptic spike increases ``x_j`` by ``1/τ_x`` (units 1/ms) and potentiation is a rate,
+integrated over `dt`; the rule is independent of `dt`, as in Clopath et al. (2010). Note that
+both thresholds of the LTP term are as in the code: the filtered potential ``v`` is compared
+with `θ_LTD`, the instantaneous one with `θ_LTP`.
 
 # Integration
 `plasticity!` (only under `train!`), per step: (1) forward Euler for ``x`` (all presynaptic
 neurons, including this step's spikes), (2) forward Euler for ``u`` and ``v`` (all
 postsynaptic neurons, driven by the current `v_post`), (3) for each presynaptic neuron ``j``
 (threaded over chunks of ``j``): if ``j`` fired, LTD on its outgoing synapses and clamp at
-`Wmin`; then, whether or not ``j`` fired, the LTP increment on all its outgoing synapses and
-clamp at `Wmax`. The LTP increment is added per step and is not multiplied by `dt`.
-The traces start at 0 mV (`vSTDPVariables` defaults), not at the resting potential.
+`Wmin`; then, whether or not ``j`` fired, the LTP increment `dt * A_LTP * x * ...` on all its
+outgoing synapses and clamp at `Wmax`. At the first call, the voltage traces ``u`` and ``v`` are
+set to the current postsynaptic potential (they are not started at 0 mV).
+
+!!! note "Changed after SNNModels 1.8.4"
+    Up to 1.8.4 a spike increased ``x_j`` by ``dt/τ_x`` and the LTP increment was added per step
+    without `dt`. The two factors cancel, so the weights are unchanged (same values up to
+    rounding); only the scale of the recorded trace `x` changes (it was proportional to `dt`).
+    The voltage traces started at 0 mV, which produced spurious depression during the first
+    ``τ_u`` (about 0.02 of mean weight in 50 ms for a silent AdEx target with 20 Hz input).
 
 # Fields
 - `A_LTD::FT = 8 * 10e-5pA / mV` (= 8e-4): LTD amplitude per mV.
@@ -77,11 +85,13 @@ vSTDPParameter
 end
 
 """
-    vSTDPVariables(; Npre, Npost, u = zeros(Npost), v = zeros(Npost), x = zeros(Npre), active = [true])
+    vSTDPVariables(; Npre, Npost, u = zeros(Npost), v = zeros(Npost), x = zeros(Npre), active = [true],
+                     initialized = [false])
 
 State of `vSTDPParameter`: `u`, `v` (low-pass filters of the postsynaptic potential with
-time constants `τu`, `τv`, length `Npost`, mV), `x` (presynaptic spike trace, length `Npre`)
-and the `active` flag. All traces start at 0.
+time constants `τu`, `τv`, length `Npost`, mV), `x` (presynaptic spike trace, length `Npre`,
+1/ms), the `active` flag and `initialized`: while `initialized[1]` is false, the first
+`plasticity!` call sets `u` and `v` to the postsynaptic potential.
 """
 vSTDPVariables
 
@@ -93,6 +103,7 @@ vSTDPVariables
     v::VFT = zeros(Npost) # postsynaptic potential filtered with τv (LTP)
     x::VFT = zeros(Npre) # presynaptic spike trace
     active::VBT = [true]
+    initialized::VBT = [false] # u, v are set to v_post at the first plasticity! call
 end
 
 function plasticityvariables(param::T, Npre, Npost) where {T<:vSTDPParameter}
@@ -114,14 +125,19 @@ function plasticity!(
     T::Time,
 ) where {PT<:AbstractSparseSynapse}
     @unpack rowptr, colptr, I, J, index, W, v_post, fireJ, g, index = c
-    @unpack u, v, x = plasticity
+    @unpack u, v, x, initialized = plasticity
     @unpack A_LTD, A_LTP, θ_LTD, θ_LTP, τu, τv, τx, Wmax, Wmin = param
-    # R(x::Float32) = x < 0.0f0 ? 0.0f0 : x
+    if !initialized[1]
+        u .= v_post
+        v .= v_post
+        initialized[1] = true
+    end
+    dtA_LTP = dt * A_LTP
 
     # update pre-synaptic spike trace
     @fastmath @inbounds begin
         for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
-            x[j] += dt * (-x[j] + fireJ[j]) / τx
+            x[j] += -dt * x[j] / τx + fireJ[j] / τx
         end
 
         Is = 1:(length(rowptr)-1)
@@ -140,7 +156,7 @@ function plasticity!(
                     end
                 end
                 @turbo for s = colptr[j]:(colptr[j+1]-1)
-                    W[s] += A_LTP *
+                    W[s] += dtA_LTP *
                         x[j] *
                         clamp(v[I[s]] - θ_LTD, 0.0f0, Inf) *
                         clamp(v_post[I[s]] - θ_LTP, 0.0f0, Inf)
