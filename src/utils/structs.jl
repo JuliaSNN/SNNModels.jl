@@ -80,12 +80,11 @@ Time
 end
 
 """
-    Time(time::Number)
+    Time(time::Number; dt = 0.125f0)
 
-Create a clock set at `time` (ms), with `dt = 0.125f0` and step counter `tt = time / 0.125`.
-
-`time` must be an integer multiple of 0.125 ms, otherwise the conversion `Int32(time / 0.125)`
-throws an `InexactError`.
+Create a clock set at `time` (ms), with time step `dt` and step counter
+`tt = round(time / dt)`. (Up to SNNModels 1.8.4 `dt` was fixed to 0.125 ms and a `time` that
+was not a multiple of it threw an `InexactError`.)
 
 # Example
 ```julia
@@ -93,9 +92,9 @@ using SpikingNeuralNetworks
 T = SNN.Time(100.0)   # t = 100 ms, tt = 800
 ```
 """
-function Time(time::Number)
-    tts = time / 0.125f0
-    return Time([Float32(time)], Int32[Int32(tts)], 0.125f0)
+function Time(time::Number; dt::Real = 0.125f0)
+    tts = round(Int32, Float32(time) / Float32(dt))
+    return Time([Float32(time)], Int32[tts], Float32(dt))
 end
 
 export Spiketimes, Time, NetworkModel

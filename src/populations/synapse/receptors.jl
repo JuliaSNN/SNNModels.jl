@@ -272,9 +272,9 @@ function α_synapse(τr, τd)
     return (τd - τr) / (τd * τr)
 end
 
-Mg_mM = 1.0f0
-nmda_b = 3.36   # voltage dependence of nmda channels
-nmda_k = -0.077     # Eyal 2018
+const Mg_mM = 1.0f0
+const nmda_b = 3.36f0   # voltage dependence of nmda channels
+const nmda_k = -0.077f0     # Eyal 2018
 
 @doc raw"""
     NMDAVoltageDependency(; b = 3.36, k = -0.077, mg = 1.0)

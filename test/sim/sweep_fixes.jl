@@ -390,3 +390,9 @@ end
         v_post = Float32[], g = Float32[])
     @test s.LTPVars isa NoVariables
 end
+
+@testset "Time(time) for times that are not multiples of 0.125 ms" begin
+    T = SNNModels.Time(0.3; dt = 0.1f0)
+    @test get_time(T) ≈ 0.3f0 && get_step(T) == 3
+    @test get_step(SNNModels.Time(100.0)) == 800
+end
