@@ -1,5 +1,15 @@
 # SNNModels changelog (branch notes)
 
+## fix/sweep-bugs: membrane pair rule (1.9.0)
+- `AdExParameter`, `IFParameter`: `C`, `gl`, `R`, `τm` always consistent. Construction from a
+  pair (or the default pair); a single value is an error; more values must agree within 0.1 %.
+  One changed value follows a fixed rule (τm keeps gl; C keeps gl; gl/R keeps C) in `@update!`,
+  `setproperty!` (mutable AdEx), `with_membrane`, `make_heterogeneous`.
+- Reason: AdEx/IF integrate with τm, R; Tripod/BallAndStick with C, gl. `@update! adex.τm` had no
+  effect on Tripod; `IFParameter(τm = x)` silently combined with the default R.
+- `@snn_kw` keyword constructors pass their fields through `snn_kw_finalize(T, nt)` (identity by
+  default) before building the struct.
+
 ## core-clock-sparse
 
 ### `sparse_matrix` without a dense matrix

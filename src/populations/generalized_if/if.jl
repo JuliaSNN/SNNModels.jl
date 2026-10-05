@@ -1,13 +1,21 @@
 @doc raw"""
-    IFParameter{FT = Float32}(; C = -1pF, gl = -1nS, τm, Vt = -50mV, Vr = -60mV, El = -70mV,
-                               R, ΔT = 2mV, a = 0, b = 0, τw = 0)
+    IFParameter{FT = Float32}(; C, gl, τm, R, Vt = -50mV, Vr = -60mV, El = -70mV,
+                               ΔT = 2mV, a = 0, b = 0, τw = 0)
 
 Neuron parameters of the leaky integrate-and-fire model `IF`, with optional subthreshold and
 spike-triggered adaptation (adaptive IF when `τw > 0`).
 
-`C` and `gl` default to the sentinel value `-1`; they are only used to compute `τm` and `R`.
-If both are positive, `τm = C / gl` and `R = 1nS / gl`; otherwise `τm = 15ms` and
-`R = 0.06` (GΩ, i.e. 60 MΩ). `τm` and `R` can also be given directly.
+# Membrane parameters
+`C`, `gl`, `R` and `τm` satisfy `τm = C / gl` and `R = 1nS / gl`; the model integrates with
+`τm` and `R`. Give them as a pair of independent values, any of (C, gl), (C, R), (C, τm),
+(gl, τm), (R, τm), and the other two are derived; give none and the default pair `τm = 15ms`,
+`R = 0.06` (GΩ, i.e. 60 MΩ; then `gl ≈ 16.7nS`, `C = 250pF`) is used. A single value is an error:
+a given value is never combined with a default. More values are accepted if consistent. Changing
+one of them later (`@update!`, [`with_membrane`](@ref)) keeps the others consistent: `τm` keeps
+`gl` (changes `C`), `C` keeps `gl` (changes `τm`), `gl` or `R` keeps `C` (changes `τm`). See
+[`resolve_membrane`](@ref) and [`membrane_update`](@ref).
+Up to SNNModels 1.8.x a single value was combined with the defaults (e.g. `C` alone was ignored
+and `τm = 15ms`); since 1.9.0 it is an error.
 
 # Equations
 ```math
@@ -23,13 +31,13 @@ the external current (field `I` of the population). When ``v > V_t``: ``v \lefta
 The adaptation variable is integrated only if `τw > 0`.
 
 # Fields
-- `C::FT = -1pF`: membrane capacitance (pF); sentinel, only used to compute `τm`.
-- `gl::FT = -1nS`: leak conductance (nS); sentinel, only used to compute `τm` and `R`.
-- `τm::FT = C > 0 && gl > 0 ? C / gl : 15ms`: membrane time constant (ms).
+- `C::FT`: membrane capacitance (pF); default from the pair, 250 pF.
+- `gl::FT`: leak conductance (nS); default from the pair, 16.7 nS.
+- `τm::FT`: membrane time constant (ms); default 15 ms.
 - `Vt::FT = -50mV`: spike threshold (mV).
 - `Vr::FT = -60mV`: reset potential (mV).
 - `El::FT = -70mV`: leak reversal potential (mV).
-- `R::FT = gl > 0 ? 1nS / gl : 0.06`: membrane resistance (GΩ).
+- `R::FT`: membrane resistance (GΩ); default 0.06.
 - `ΔT::FT = 2mV`: slope factor (mV); not used by `IF`.
 - `a::FT = 0.0`: subthreshold adaptation conductance (nS).
 - `b::FT = 0.0`: spike-triggered adaptation increment (pA).
@@ -46,13 +54,13 @@ E = SNN.IF(N = 10, param = param)
 IFParameter
 
 @snn_kw struct IFParameter{FT = Float32} <: AbstractGeneralizedIFParameter
-    C::FT = -1pF        #(pF)
-    gl::FT = -1nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
-    τm::FT = C>0 && gl>0 ? C / gl : 15ms
+    C::FT = NaN32        #(pF)
+    gl::FT = NaN32         #(nS) leak conductance #BretteGerstner2005 says 30 nS
+    τm::FT = NaN32 # Membrane time constant (ms), τm = C / gl
     Vt::FT = -50mV # Membrane threshold potential
     Vr::FT = -60mV # Membrane reset potential
     El::FT = -70mV    # Membrane leak potential
-    R::FT = gl>0 ? 1nS / gl : 0.06 # Resistance
+    R::FT = NaN32 # Resistance (GΩ), R = 1nS / gl
     ΔT::FT = 2mV # Slope factor
     a::FT = 0.0 # Subthreshold adaptation parameter
     b::FT = 0.0 #80.5pA # 'sra' current increment

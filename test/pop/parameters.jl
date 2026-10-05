@@ -24,7 +24,7 @@ using Test
         @test p.Vt ≈ -50mV
         @test p.b  ≈ 80.5pA
 
-        p2 = AdExParameter(C = 200pF, b = 100pA, τw = 200ms, a = 2nS)
+        p2 = AdExParameter(C = 200pF, gl = 40nS, b = 100pA, τw = 200ms, a = 2nS)
         @test p2.C  ≈ 200pF
         @test p2.b  ≈ 100pA
         @test p2.τw ≈ 200ms

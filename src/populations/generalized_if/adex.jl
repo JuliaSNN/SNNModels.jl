@@ -1,7 +1,6 @@
 @doc raw"""
-    AdExParameter{FT = Float32}(; C = 281pF, gl = 40nS, Vt = -50mV, Vr = -70.6mV, El = -70.6mV,
-                                 τm = C / gl, R = nS / gl, ΔT = 2mV, τw = 144ms, a = 4nS,
-                                 b = 80.5pA)
+    AdExParameter{FT = Float32}(; C, gl, τm, R, Vt = -50mV, Vr = -70.6mV, El = -70.6mV,
+                                 ΔT = 2mV, τw = 144ms, a = 4nS, b = 80.5pA)
 
 Neuron parameters of the adaptive exponential integrate-and-fire model (`AdEx`), in the
 parameterisation of Brette and Gerstner (2005). The code comment notes that the original paper
@@ -10,15 +9,28 @@ uses a leak conductance of 30 nS; the default here is 40 nS.
 `AdExParameter` is mutable. With `FT = Vector{Float32}` (see `make_heterogeneous`) every
 parameter is per neuron and `AdEx` uses the heterogeneous method of `update_neuron!`.
 
+# Membrane parameters
+`C`, `gl`, `R` and `τm` satisfy `τm = C / gl` and `R = 1nS / gl`. `AdEx` integrates with `τm`
+and `R`; `Tripod` and `BallAndStick`, which hold an `AdExParameter` in their `adex` field,
+integrate with `C` and `gl`. Give them as a pair of independent values, any of (C, gl), (C, R),
+(C, τm), (gl, τm), (R, τm), and the other two are derived; give none and the default pair
+`C = 281pF`, `gl = 40nS` is used. A single value is an error: a given value is never combined with
+a default. More values are accepted if consistent. Changing one of them later (`@update!`,
+property assignment `p.τm = x`, [`with_membrane`](@ref), `make_heterogeneous`) keeps the
+others consistent: `τm` keeps `gl` (changes `C`), `C` keeps `gl` (changes `τm`), `gl` or `R`
+keeps `C` (changes `τm`). See [`resolve_membrane`](@ref) and [`membrane_update`](@ref).
+Up to SNNModels 1.8.x the four fields were independent after construction: setting `τm` had no
+effect on Tripod and BallAndStick, and `τm` alone was combined with the default `C`, `gl`.
+
 # Fields
-- `C::FT = 281pF`: membrane capacitance (pF); only used to compute `τm`.
-- `gl::FT = 40nS`: leak conductance (nS); only used to compute `τm` and `R`.
+- `C::FT`: membrane capacitance (pF); default 281 pF.
+- `gl::FT`: leak conductance (nS); default 40 nS.
 - `Vt::FT = -50mV`: threshold of the exponential term (rheobase threshold), also the resting
   value of the adaptive threshold ``θ`` (mV). It is not the spike-detection threshold (0 mV).
 - `Vr::FT = -70.6mV`: reset potential (mV).
 - `El::FT = -70.6mV`: leak reversal potential (mV).
-- `τm::FT = C / gl`: membrane time constant (ms), 7.025 ms with the defaults.
-- `R::FT = nS / gl`: membrane resistance (GΩ), 0.025 GΩ with the defaults.
+- `τm::FT`: membrane time constant (ms), `C / gl`, 7.025 ms with the defaults.
+- `R::FT`: membrane resistance (GΩ), `1nS / gl`, 0.025 GΩ with the defaults.
 - `ΔT::FT = 2mV`: slope factor of the exponential term (mV); a negative value removes the
   exponential term.
 - `τw::FT = 144ms`: adaptation time constant (ms).
@@ -39,13 +51,13 @@ E = SNN.AdEx(N = 10, param = param)
 """
 AdExParameter
 @snn_kw mutable struct AdExParameter{FT = Float32} <: AbstractGeneralizedIFParameter
-    C::FT = 281pF        #(pF)
-    gl::FT = 40nS         #(nS) leak conductance #BretteGerstner2005 says 30 nS
+    C::FT = NaN32 # Membrane capacitance (pF); default pair C = 281pF, gl = 40nS, see resolve_membrane
+    gl::FT = NaN32 # (nS) leak conductance #BretteGerstner2005 says 30 nS
     Vt::FT = -50mV # Membrane potential threshold
     Vr::FT = -70.6mV # Reset potential
     El::FT = -70.6mV # Resting membrane potential 
-    τm::FT = C / gl # Membrane time constant
-    R::FT = nS / gl # Resistance
+    τm::FT = NaN32 # Membrane time constant (ms), τm = C / gl
+    R::FT = NaN32 # Resistance (GΩ), R = 1nS / gl
     ΔT::FT = 2mV # Slope factor
     τw::FT = 144ms # Adaptation time constant (Spike-triggered adaptation time scale)
     a::FT = 4nS # Subthreshold adaptation parameter

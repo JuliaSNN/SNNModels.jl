@@ -97,6 +97,7 @@ include("synapse/synaptic_targets.jl")
 include("generalized_if/gif.jl")
 include("generalized_if/if.jl")
 include("generalized_if/adex.jl")
+include("generalized_if/membrane.jl")
 include("generalized_if/if_extended.jl")
 # include("generalized_if/if_CANAHP.jl")
 # include("adex/adex_multitimescale.jl")
@@ -184,7 +185,18 @@ function make_heterogeneous(
             het_dict[fields] = fill(getfield(param, fields), N)
         end
     end
-    # het_dict = het_dict |> dict2ntuple
+    # Sampled membrane parameters follow the pair rule (see `membrane_update`): the others are
+    # recomputed per neuron instead of being copied from `param`.
+    if param isa MembraneParameter
+        sampled = Tuple(k for k in keys(kwargs) if k in MEMBRANE_FIELDS)
+        if !isempty(sampled)
+            current = (; (k => het_dict[k] for k in MEMBRANE_FIELDS)...)
+            new = NamedTuple{sampled}(Tuple(het_dict[k] for k in sampled))
+            for (k, v) in pairs(membrane_update(current, new))
+                het_dict[k] = v
+            end
+        end
+    end
     return getfield(SNNModels, nameof(_type))(; het_dict..., FT = Vector{Float32})
 end
 

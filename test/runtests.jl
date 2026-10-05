@@ -48,6 +48,7 @@ end
 # ── Populations ───────────────────────────────────────────────────────────────
 @testset "Populations" verbose = true begin
     _ts("parameters",   "pop/parameters.jl")
+    _ts("membrane_pair", "pop/membrane_pair.jl")
     _ts("poisson",      "pop/poisson.jl")
     _ts("dendrite",     "pop/dendrite.jl")
     _ts("spiketime",    "pop/spiketime.jl")
