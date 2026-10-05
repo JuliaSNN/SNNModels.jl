@@ -1,10 +1,10 @@
 """
     FLSparseSynapseParameter()
 
-Parameter of the non-exported `FLSparseSynapse` (no fields; not a subtype of
+Parameter of the non-exported `FLSparseSynapse` (no fields; a subtype of
 `AbstractConnectionParameter`).
 """
-struct FLSparseSynapseParameter end
+struct FLSparseSynapseParameter <: AbstractConnectionParameter end
 
 @snn_kw mutable struct FLSparseSynapse{VFT = Vector{Float32},FT = Float32} <:
                        AbstractConnection
@@ -34,12 +34,13 @@ Sparse variant of `FLSynapse` (FORCE learning), not exported. Recurrent weights
 ``W = \mu X / \sqrt{p N_{pre}}`` with ``X`` = `sprandn(N_post, N_pre, p)`; ``P`` is stored
 only on the sparsity pattern of ``W`` and initialised to ``\alpha`` on the diagonal entries.
 
-Intended update: as `FLSynapse`, with ``q`` and ``P`` restricted to the stored synapses.
+Update: as `FLSynapse`, with ``q`` and ``P`` restricted to the stored synapses. `p` must be in
+`(0, 1]` (an `ArgumentError` is raised otherwise).
 
-# Status in SNNModels 1.8.4
-Not usable: the constructor fails (`2rand(post.N) - 1` subtracts a scalar from a vector), and
-`forward!`/`plasticity!` use `colptr` without unpacking it. `FLSparseSynapseParameter` is
-not a subtype of `AbstractConnectionParameter`.
+!!! note "Changed after SNNModels 1.8.4"
+    Up to SNNModels 1.8.4 the constructor always failed (`2rand(post.N) - 1`), `forward!` and
+    `plasticity!` used `colptr` without unpacking it, and the parameter type was not a subtype
+    of `AbstractConnectionParameter`.
 
 # References
 Sussillo D, Abbott LF (2009). Neuron 63:544-557 (linked in the code).
@@ -47,13 +48,14 @@ Sussillo D, Abbott LF (2009). Neuron 63:544-557 (linked in the code).
 FLSparseSynapse
 
 function FLSparseSynapse(pre, post; μ = 1.5, p = 0.0, α = 1, kwargs...)
+    0 < p <= 1 || throw(ArgumentError("FLSparseSynapse needs a connection probability 0 < p <= 1, got p = $p"))
     w = μ * 1 / √(p * pre.N) * sprandn(post.N, pre.N, p)
     rowptr, colptr, I, J, index, W = dsparse(w)
     rI, rJ, g = post.r, pre.r, post.g
     P = α .* (I .== J)
     q = zeros(post.N)
-    u = 2rand(post.N) - 1
-    w = 1 / √post.N * (2rand(post.N) - 1)
+    u = 2rand(post.N) .- 1
+    w = 1 / √post.N * (2rand(post.N) .- 1)
 
     targets = Dict{Symbol,Any}(
         :fire => pre.id,
@@ -71,7 +73,7 @@ function FLSparseSynapse(pre, post; μ = 1.5, p = 0.0, α = 1, kwargs...)
 end
 
 function forward!(c::FLSparseSynapse, param::FLSparseSynapseParameter)
-    @unpack W, rI, rJ, g, P, q, u, w, f, z = c
+    @unpack colptr, I, W, rI, rJ, g, P, q, u, w, f, z = c
     c.z = dot(w, rI)
     g .= c.z .* u
     fill!(q, zero(Float32))
@@ -91,7 +93,7 @@ function plasticity!(
     dt::Float32,
     T::Time,
 )
-    @unpack rI, P, q, w, f, z = c
+    @unpack colptr, I, rI, P, q, w, f, z = c
     C = 1 / (1 + dot(q, rI))
     BLAS.axpy!(C * (f - z), q, w)
     @inbounds for j = 1:(length(colptr)-1)

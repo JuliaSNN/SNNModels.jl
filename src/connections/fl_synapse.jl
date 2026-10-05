@@ -1,11 +1,11 @@
 """
     FLSynapseParameter()
 
-Parameter of `FLSynapse` (no fields). Note: it is not a subtype of
-`AbstractConnectionParameter`, so the generic `forward!(c, param, dt, T)` used by `sim!` and
-`train!` does not apply to it (see the `FLSynapse` docstring).
+Parameter of `FLSynapse` (no fields), a subtype of `AbstractConnectionParameter`: `sim!` calls
+`forward!(c, param)` through the generic four-argument method, `train!` also calls
+`plasticity!`.
 """
-struct FLSynapseParameter end
+struct FLSynapseParameter <: AbstractConnectionParameter end
 
 @snn_kw mutable struct FLSynapse{
     MFT = Matrix{Float32},
@@ -64,10 +64,10 @@ P \leftarrow P - C\, q\, q^\top
 - `pre` and `post` must have a rate field `r`, and `post` a target `:g` (e.g. `Rate`).
   ``P`` is `N_post x N_post` and multiplies ``r^{pre}``, so the connection only works for
   `pre.N == post.N` (recurrent use).
-- `FLSynapseParameter` is not a subtype of `AbstractConnectionParameter`; in SNNModels 1.8.4
-  `sim!`/`train!` raise a `MethodError` for this connection (no `forward!(c, param, dt, T)`
-  method). `forward!(c, c.param)` and `plasticity!(c, c.param, dt, T)` can be called
-  directly.
+- `sim!` applies `forward!` every step; `train!` also applies the RLS `plasticity!`. Set `c.f`
+  before each step (e.g. with a stimulus or a loop of one-step `train!` calls). Up to SNNModels
+  1.8.4 `FLSynapseParameter` was not a subtype of `AbstractConnectionParameter` and
+  `sim!`/`train!` raised a `MethodError`.
 
 # References
 Sussillo D, Abbott LF (2009). Generating coherent patterns of activity from chaotic neural

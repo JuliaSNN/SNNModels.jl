@@ -1,10 +1,10 @@
 """
     PINningSynapseParameter()
 
-Parameter of `PINningSynapse` (no fields). Not a subtype of `AbstractConnectionParameter`
-(see the `PINningSynapse` docstring).
+Parameter of `PINningSynapse` (no fields), a subtype of `AbstractConnectionParameter` (so
+`sim!` and `train!` dispatch on it).
 """
-struct PINningSynapseParameter end
+struct PINningSynapseParameter <: AbstractConnectionParameter end
 
 @snn_kw mutable struct PINningSynapse{MFT = Matrix{Float32},VFT = Vector{Float32}} <:
                        AbstractConnection
@@ -53,9 +53,8 @@ P \leftarrow P - C\, q\, q^\top
 # Notes
 - `pre` and `post` must have a rate field `r` and `post` a target `:g` (e.g. `Rate`);
   only `pre.N == post.N` works.
-- `PINningSynapseParameter` is not a subtype of `AbstractConnectionParameter`; in SNNModels
-  1.8.4 `sim!`/`train!` raise a `MethodError` for this connection. `forward!(c, c.param)` and
-  `plasticity!(c, c.param, dt, T)` can be called directly.
+- `sim!` applies `forward!`; `train!` also applies the RLS `plasticity!`. Up to SNNModels 1.8.4
+  the parameter type had no supertype and `sim!`/`train!` raised a `MethodError`.
 
 # References
 Rajan K, Harvey CD, Tank DW (2016). Recurrent network models of sequence generation and
