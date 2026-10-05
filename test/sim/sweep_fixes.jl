@@ -36,3 +36,24 @@ end
     end
     @test_throws ArgumentError SNNModels.FLSparseSynapse(R, R)
 end
+
+@testset "MorrisLecar, ExtendedIF, WilsonCowan receive connections" begin
+    E = Poisson(N = 50, param = PoissonParameter(50Hz))
+    M = MorrisLecar(N = 5)
+    X = ExtendedIF(N = 5)
+    sM = SpikingSynapse(E, M, :ge; conn = (p = 1.0, μ = 1.0))
+    sX = SpikingSynapse(E, X, :glu; conn = (p = 1.0, μ = 1.0))
+    sX2 = SpikingSynapse(E, X, :g_SST; conn = (p = 1.0, μ = 1.0))
+    @test sM.g === M.ge
+    @test sX.g === X.g_Exc && sX2.g === X.g_SST
+    monitor!(M, [:ge]); monitor!(X, [:g_Exc])
+    sim!([E, M, X], [sM, sX, sX2]; duration = 50ms)
+    @test maximum(getvariable(M, :ge)) > 0
+    @test maximum(getvariable(X, :g_Exc)) > 0
+    @test_throws ArgumentError SpikingSynapse(E, M, :g_SST; conn = (p = 1.0, μ = 1.0))
+    R = Rate(N = 10)
+    W = WilsonCowan(N = 10)
+    RW = RateSynapse(R, W; μ = 1.0, p = 0.5)
+    @test RW.g === W.g
+    @test sim!([R, W], [RW]; duration = 5ms) isa SNNModels.Time
+end

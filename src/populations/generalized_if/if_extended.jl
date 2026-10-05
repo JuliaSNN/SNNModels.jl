@@ -45,9 +45,11 @@ end
 Conductance-based integrate-and-fire population with excitatory (`g_Exc`), PV (`g_PV`) and SST
 (`g_SST`) conductances and an optional multiplicative interaction between excitation and SST
 inhibition. Unlike `IF` and `AdEx`, it has no `synapse` field: the conductances are fields of the
-population and decay exponentially. No `synaptic_target` method is defined for `ExtendedIF`
-in SNNModels 1.8.4, so `SpikingSynapse(pre, post::ExtendedIF, ...)` raises a `MethodError`;
-the conductances can only be driven by writing into `g_Exc`, `g_PV`, `g_SST` directly.
+population and decay exponentially. Connections
+target one of the conductances: `SpikingSynapse(pre, post, sym; conn)` with `sym` in `:g_Exc`,
+`:g_PV`, `:g_SST`; `:ge`/`:glu` are mapped to `:g_Exc` and `:gi`/`:gaba` to `:g_PV`. A spike of
+weight ``w`` (nS) increments the conductance by ``w``. (Up to SNNModels 1.8.4 there was no
+`synaptic_target` method and this raised a `MethodError`.)
 
 # Equations
 ```math
@@ -154,6 +156,21 @@ function update_synapses!(p::ExtendedIF, param::ExtendedIFParameter, dt::Float32
         g_PV[i] += dt * (-g_PV[i] / τi)
         g_SST[i] += dt * (-g_SST[i] / τi)
     end
+end
+
+function synaptic_target(
+    targets::Dict,
+    post::T,
+    sym::Symbol,
+    target = nothing,
+) where {T<:ExtendedIF}
+    sym = sym in (:ge, :glu) ? :g_Exc : sym in (:gi, :gaba) ? :g_PV : sym
+    sym in (:g_Exc, :g_PV, :g_SST) ||
+        throw(ArgumentError("ExtendedIF connections target :g_Exc, :g_PV or :g_SST, got :$sym"))
+    g = getfield(post, sym)
+    v_post = getfield(post, :v)
+    push!(targets, :sym => sym)
+    return g, v_post
 end
 
 export ExtendedIF, ExtendedIFParameter, update_neuron!, update_synapses!

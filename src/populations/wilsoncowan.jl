@@ -23,8 +23,8 @@ equations (no separate E and I variables, no refractory term, no sigmoid paramet
 - `id::String = randstring(12)`, `name::String = "WilsonCowan"`, `param::WCParameter`.
 - `N::Int32 = 100`; `x = 0.5randn(N)`; `r = tanh.(x)`; `g`, `I`: inputs, zeros; `records::Dict`.
 
-No `synaptic_target` method is defined for `WilsonCowan`, so `RateSynapse` cannot target it in
-SNNModels 1.8.4; `g` and `I` can be written directly.
+`RateSynapse` (and the FORCE connections) target `g`, as for `Rate` (any target symbol is mapped
+to `:g`). Up to SNNModels 1.8.4 there was no `synaptic_target` method for `WilsonCowan`.
 
 # References
 The canonical model is Wilson H. R., Cowan J. D. (1972). Excitatory and inhibitory interactions
@@ -60,6 +60,18 @@ function integrate!(p::WilsonCowan, param::WCParameter, dt::Float32)
         x[i] += dt * (-x[i] + g[i] + I[i])
         r[i] = tanh(x[i])
     end
+end
+
+function synaptic_target(
+    targets::Dict,
+    post::T,
+    sym = nothing,
+    target = nothing,
+) where {T<:WilsonCowan}
+    g = getfield(post, :g)
+    v_post = getfield(post, :r)
+    push!(targets, :sym => :g)
+    return g, v_post
 end
 
 export WilsonCowan

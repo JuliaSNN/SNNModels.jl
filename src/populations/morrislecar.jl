@@ -65,9 +65,10 @@ end
 
 Population of Morris-Lecar neurons (instantaneous calcium activation, slow potassium
 activation ``w``) with conductance-based exponential synapses `ge`, `gi`.
-No `synaptic_target` method is defined for `MorrisLecar` in SNNModels 1.8.4, so
-`SpikingSynapse(pre, post::MorrisLecar, :ge, ...)` raises a `MethodError`; `ge`, `gi` can be
-written directly.
+Connections target `ge` or `gi`: `SpikingSynapse(pre, post, :ge; conn)` (`:glu` is mapped to
+`:ge`, `:gaba` to `:gi`); a presynaptic spike of weight ``w`` (nS) increments the conductance by
+``w``. (Up to SNNModels 1.8.4 there was no `synaptic_target` method and this raised a
+`MethodError`.)
 
 # Equations
 ```math
@@ -180,6 +181,20 @@ function MorrisLecar_v_nullcline(v::Float32, I::Float32, param::MorrisLecarParam
 end
 
 function plasticity!(p::MorrisLecar, param::MorrisLecarParameter, dt::Float32, T::Time) end
+
+function synaptic_target(
+    targets::Dict,
+    post::T,
+    sym::Symbol,
+    target = nothing,
+) where {T<:MorrisLecar}
+    sym = sym == :glu ? :ge : sym == :gaba ? :gi : sym
+    sym in (:ge, :gi) || throw(ArgumentError("MorrisLecar connections target :ge or :gi, got :$sym"))
+    g = getfield(post, sym)
+    v_post = getfield(post, :v)
+    push!(targets, :sym => sym)
+    return g, v_post
+end
 
 export MorrisLecar
 
