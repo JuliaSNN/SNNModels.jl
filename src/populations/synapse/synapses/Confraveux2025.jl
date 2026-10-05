@@ -10,21 +10,26 @@ fixed mixture of the two. There is no magnesium block.
 
 # Equations
 ```math
-\frac{dg_{AMPA}}{dt} = -\frac{g_{AMPA}}{\tau_{AMPA}} + x_{glu}(t), \qquad
-\frac{dg_{GABA}}{dt} = -\frac{g_{GABA}}{\tau_{GABA}} + x_{gaba}(t), \qquad
+\frac{dg_{AMPA}}{dt} = -\frac{g_{AMPA}}{\tau_{AMPA}} + \sum_k w_k\,\delta(t - t_k), \qquad
+\frac{dg_{GABA}}{dt} = -\frac{g_{GABA}}{\tau_{GABA}} + \sum_k w_k\,\delta(t - t_k), \qquad
 \tau_{NMDA}\frac{dg_{NMDA}}{dt} = g_{AMPA} - g_{NMDA}
 ```
 ```math
 I_{syn} = \left(\alpha\, g_{AMPA} + (1-\alpha)\, g_{NMDA}\right)(V - E_e) + g_{GABA}\,(V - E_i)
 ```
-where ``x_{glu}``, ``x_{gaba}`` are the contents of the receptor buffers (sum of the weights
-of the spikes received in the step).
+where the sums run over the excitatory (resp. inhibitory) spikes received, with weights
+``w_k`` (nS): a spike of weight ``w`` increments the conductance by ``w``, as in the other
+synapse models.
 
 # Integration
-Forward Euler, in this order: `gAMPA += dt (-gAMPA/τAMPA + glu)`,
-`gGABA += dt (-gGABA/τGABA + gaba)`, `gNMDA += dt (gAMPA - gNMDA)/τNMDA` (with the updated
-`gAMPA`). Note that the input enters multiplied by `dt`: a spike of weight `w` increments
-`gAMPA` by `w dt`, unlike the other synapse models, where the increment is `w`.
+Forward Euler, in this order: `gAMPA += -dt gAMPA/τAMPA + glu`,
+`gGABA += -dt gGABA/τGABA + gaba` (`glu`, `gaba`: sum of the weights received in the step),
+`gNMDA += dt (gAMPA - gNMDA)/τNMDA` (with the updated `gAMPA`).
+
+!!! note "Changed after SNNModels 1.8.4"
+    Up to 1.8.4 the input entered multiplied by `dt` (`gAMPA += dt (-gAMPA/τAMPA + glu)`), so a
+    spike of weight `w` incremented the conductance by `w dt`: synaptic efficacy was
+    proportional to `dt` (8 times smaller than `w` at the default `dt = 0.125ms`).
 
 # Fields
 - `τAMPA::FT = 5ms`: decay time constant of the AMPA conductance (ms).
@@ -51,12 +56,12 @@ E = SNN.IF(N = 10, param = SNN.IFParameter(C = 281pF, gl = 40nS),
 Confavreux2025Synapse
 
 @snn_kw struct Confavreux2025Synapse{FT = Float32} <: AbstractConfavreux2025
-    τAMPA::FT = 5ms # Rise time for excitatory synapses
-    τNMDA::FT = 100ms # Decay time for excitatory synapses
-    τGABA::FT = 10ms # Rise time for inhibitory synapses
-    E_i::FT = -80mV # Reversal potential excitatory synapses
+    τAMPA::FT = 5ms # Decay time of the AMPA conductance
+    τNMDA::FT = 100ms # Time constant of the NMDA low-pass filter
+    τGABA::FT = 10ms # Decay time of the GABA conductance
+    E_i::FT = -80mV # Reversal potential inhibitory synapses
     E_e::FT = 0mV #Reversal potential excitatory synapses
-    α::FT = 0.23f0 # NMDA voltage dependence parameter
+    α::FT = 0.23f0 # AMPA fraction of the excitatory conductance
 end
 
 """
@@ -96,8 +101,8 @@ function update_synapses!(
     @unpack τAMPA, τNMDA, τGABA = synapse
     @unpack gaba, glu = receptors
     @inbounds @simd for i ∈ 1:N
-        gAMPA[i] += dt * (-gAMPA[i] / τAMPA + glu[i])
-        gGABA[i] += dt * (-gGABA[i] / τGABA + gaba[i])
+        gAMPA[i] += -dt * gAMPA[i] / τAMPA + glu[i]
+        gGABA[i] += -dt * gGABA[i] / τGABA + gaba[i]
         gNMDA[i] += dt * (gAMPA[i] - gNMDA[i])/ τNMDA
     end
     fill!(glu, 0.0f0)

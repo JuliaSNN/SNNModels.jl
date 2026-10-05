@@ -119,3 +119,14 @@ end
     S = SNNModels.SpikeRateSynapse(E, R; μ = 1.0, p = 0.5)
     @test train!([E, R], [S]; duration = 10ms) isa SNNModels.Time
 end
+
+@testset "Confavreux2025Synapse: a spike of weight w increments g by w" begin
+    for dt in (0.125f0, 0.05f0)
+        E = IF(N = 2, synapse = Confavreux2025Synapse())
+        E.receptors.glu .= [2.0f0, 0.0f0]
+        E.receptors.gaba .= [0.0f0, 3.0f0]
+        SNNModels.update_synapses!(E, E.synapse, E.receptors, E.synvars, dt)
+        @test E.synvars.gAMPA ≈ [2.0f0, 0.0f0]
+        @test E.synvars.gGABA ≈ [0.0f0, 3.0f0]
+    end
+end
