@@ -113,7 +113,7 @@ end
 end
 
 @testset "Dendritic models: invalid targets and DeltaSynapse" begin
-    E = Poisson(N = 5, param = PoissonParameter(10Hz))
+    E = SNNModels.Poisson(N = 5, param = PoissonParameter(10Hz))
     T = Tripod(N = 2)
     @test_throws ArgumentError SpikingSynapse(E, T, :glu, :d3; conn = (p = 1.0, μ = 1.0))
     @test SpikingSynapse(E, T, :glu, :d2; conn = (p = 1.0, μ = 1.0)) isa SpikingSynapse

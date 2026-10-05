@@ -38,7 +38,7 @@ end
 end
 
 @testset "MorrisLecar, ExtendedIF, WilsonCowan receive connections" begin
-    E = Poisson(N = 50, param = PoissonParameter(50Hz))
+    E = SNNModels.Poisson(N = 50, param = PoissonParameter(50Hz))
     M = MorrisLecar(N = 5)
     X = ExtendedIF(N = 5)
     sM = SpikingSynapse(E, M, :ge; conn = (p = 1.0, μ = 1.0))
@@ -115,7 +115,7 @@ end
         @test Q.x[1] ≈ 0.5f0
         @test Q.g[1] == 0
     end
-    E = Poisson(N = 10, param = PoissonParameter(50Hz))
+    E = SNNModels.Poisson(N = 10, param = PoissonParameter(50Hz))
     S = SNNModels.SpikeRateSynapse(E, R; μ = 1.0, p = 0.5)
     @test train!([E, R], [S]; duration = 10ms) isa SNNModels.Time
 end
