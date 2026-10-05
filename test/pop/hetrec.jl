@@ -1,6 +1,6 @@
 using SNNModels
 using Test
-using Distributions
+using Distributions, Random
 @load_units
 
 @testset "HetRec" begin
@@ -56,3 +56,22 @@ using Distributions
 
 end
 true
+
+@testset "HetRec — adaptive baseline and soma do not depend on dt" begin
+    # deterministic check without spikes (r = 0): integrate 200 ms at two dt
+    function run(dt)
+        p = HetRecParameter(Nd = 2, overlap = 0.5f0, rate = Uniform(0.0f0, 1.0f-9))
+        Random.seed!(3)
+        pop = Population(p; N = 5)
+        pop.v_d .= range(1.0f0, 10.0f0, length = length(pop.v_d))
+        pop.τd .= 1.0f6 # frozen dendrites
+        for _ = 1:round(Int, 200 / dt)
+            SNNModels.integrate!(pop, pop.param, Float32(dt))
+        end
+        copy(pop.v_s), copy(pop.trace)
+    end
+    vs1, tr1 = run(0.125)
+    vs2, tr2 = run(0.0625)
+    @test isapprox(vs1, vs2; rtol = 1e-2)
+    @test isapprox(tr1, tr2; rtol = 1e-2)
+end

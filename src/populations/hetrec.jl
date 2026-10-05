@@ -56,7 +56,8 @@ synaptic variables of the `CurrentSynapse`):
 ```math
 \begin{aligned}
 \tau_d\, \frac{dv_d}{dt} &= -v_d + g_E - g_I \\
-\tau_m\, \frac{dv_s^i}{dt} &\approx \sum_{d \in \mathcal{D}_i} \left(W_{id}\, v_d - v_s^i\right) \\
+\tau_m\, \frac{dv_s^i}{dt} &= \sum_{d \in \mathcal{D}_i} \left(W_{id}\, v_d - v_s^i\right) \\
+\tau_{rate}\, \frac{da_i}{dt} &= -a_i + [\text{not refractory}]\,(v_s^i - a_i) + \tau_{rate} \textstyle\sum_f \delta(t - t_i^f) \\
 P(\text{spike of } i \text{ in } [t, t + dt]) &= r_i\, \sigma\!\left(k\, (v_s^i - a_i)\right) dt
 \end{aligned}
 ```
@@ -66,12 +67,18 @@ by neuron ``i`` (its own `Nd` dendrites plus those of other neurons selected wit
 
 # Integration
 Per step: synapse update; dendrites `v_d += dt * (-v_d - is) / τd` with `is = -(g_E - g_I)`;
-for each neuron, the soma relaxes towards each connected dendrite in turn,
-`v_s += (W * v_d - v_s) * dt / τm` (one sequential update per connected dendrite, so with ``k``
-dendrites the effective time constant is about ``τ_m / k``); `tabs -= 1`, `fire = false`,
-`trace += dt * (-trace / τrate)`; if not refractory, `trace += (v_s - trace) / τrate`
-(no `dt` factor) and the neuron fires with the probability above, which sets
-`tabs = round(Int, τabs / dt)` and `trace += 1`.
+for each neuron, one forward-Euler step of the somatic equation,
+`v_s += dt / τm * Σ_d (W v_d - v_s)` (with ``k_i`` connected dendrites the soma relaxes to their
+mean with time constant ``τ_m / k_i``); `tabs -= 1`, `fire = false`,
+`trace += dt * (-trace / τrate)`; if not refractory, `trace += dt * (v_s - trace) / τrate` and
+the neuron fires with the probability above, which sets `tabs = round(Int, τabs / dt)` and
+`trace += 1`.
+
+!!! note "Changed after SNNModels 1.8.4"
+    Up to 1.8.4 the soma was updated once per connected dendrite in sequence (same equation,
+    but the result depended on the order of the dendrites) and the adaptive baseline was
+    updated with `trace += (v_s - trace) / τrate`, without `dt`, so its time constant was
+    `τrate * dt` (in steps) and results depended on `dt`.
 
 # Fields
 - `id`, `name = "HetRec"`, `N::Int32 = 100`, `param::HetRecParameter`.
@@ -203,14 +210,17 @@ function integrate!(p::HetRec, param::HetRecParameter, dt::Float32)
     @. v_d += dt * (-v_d - is) / τd
     rand!(randcache)
     @inbounds for i in 1:N
+        # τm dv_s/dt = Σ_d (W_id v_d - v_s), evaluated at the state of the beginning of the step
+        drive = 0.0f0
         @simd for s in colptr[i]:(colptr[i+1]-1)
-            v_s[i] += (W[s] * v_d[I[s]] - v_s[i]) * dt / τm
+            drive += W[s] * v_d[I[s]] - v_s[i]
         end
+        v_s[i] += drive * dt / τm
         tabs[i] -= 1
         fire[i] = false
         trace[i] += dt * (-trace[i]/τrate)
         tabs[i] > 0 && continue
-        trace[i] += (v_s[i]-trace[i])/τrate
+        trace[i] += dt * (v_s[i]-trace[i])/τrate
         if randcache[i] < r[i] * (1 / (1 + exp(-steepness * (v_s[i] - trace[i]))))  * dt
             fire[i] = true
             tabs[i] = round(Int, τabs/dt)
