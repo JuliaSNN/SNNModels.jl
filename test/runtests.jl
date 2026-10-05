@@ -93,6 +93,7 @@ end
 
 # ── Simulation control ────────────────────────────────────────────────────────
 _ts("sim_control", "sim/sim_control.jl")
+_ts("sweep_fixes", "sim/sweep_fixes.jl")
 
 # ── Networks ──────────────────────────────────────────────────────────────────
 @testset "Networks" verbose = true begin

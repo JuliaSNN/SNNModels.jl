@@ -5,9 +5,10 @@
 Parameters of the Izhikevich neuron model (`IZ`) with two conductance-based, exponentially
 decaying synapses.
 
-`IZParameter` is not a subtype of `AbstractPopulationParameter`, so the `train!` fallbacks
-(`update_traces!`, `plasticity!`) are not defined for `IZ`: an `IZ` population can be simulated
-with `sim!` but `train!` raises a `MethodError` in SNNModels 1.8.4.
+`IZParameter <: AbstractPopulationParameter`, so `IZ` populations run under both `sim!` and
+`train!` (the population has no plasticity of its own; `update_traces!` and `plasticity!` are
+the no-op fallbacks). Up to SNNModels 1.8.4 the type had no supertype and `train!` raised a
+`MethodError`.
 
 # Fields
 - `a::FT = 0.01`: time scale of the recovery variable ``u`` (1/ms).
@@ -27,7 +28,7 @@ Izhikevich, E. M. (2003). Simple model of spiking neurons. IEEE Transactions on 
 Networks, 14(6), 1569-1572.
 """
 IZParameter
-@snn_kw struct IZParameter{FT = Float32}
+@snn_kw struct IZParameter{FT = Float32} <: AbstractPopulationParameter
     a::FT = 0.01
     b::FT = 0.2
     c::FT = -65

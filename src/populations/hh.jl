@@ -16,13 +16,12 @@ specified as densities times a membrane area of 20000 μm²:
 - `τe::FT = 5ms`, `τi::FT = 10ms`: decay time constants of `ge`, `gi` (ms).
 - `Ee::FT = 0mV`, `Ei::FT = -80mV`: synaptic reversal potentials (mV).
 
-`HHParameter` is not a subtype of `AbstractPopulationParameter`, so `train!` raises a
-`MethodError` for `HH` populations in SNNModels 1.8.4 (no `update_traces!` fallback);
-use `sim!`.
+`HHParameter <: AbstractPopulationParameter`, so `HH` runs under `sim!` and `train!` (no-op
+`update_traces!`/`plasticity!` fallbacks). Up to SNNModels 1.8.4 `train!` raised a `MethodError`.
 """
 HHParameter
 
-@snn_kw struct HHParameter{FT = Float32}
+@snn_kw struct HHParameter{FT = Float32} <: AbstractPopulationParameter
     Cm::FT = 1uF * cm^(-2) * 20000um^2
     gl::FT = 5e-5siemens * cm^(-2) * 20000um^2
     El::FT = -65mV

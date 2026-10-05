@@ -1,8 +1,9 @@
 """
     EmptySynapse(; id = randstring(12), param = EmptyParam(), targets = Dict(), records = Dict())
 
-Connection that does nothing: its `forward!` is a no-op. It is the default connection list
-of `sim!` and `train!` (`C = [EmptySynapse()]`) when a network has no connections.
+Connection that does nothing: its `forward!`, `update_traces!` and `plasticity!` are no-ops. It
+is the default connection list of `sim!` and `train!` (`C = [EmptySynapse()]`) when a network
+has no connections, so both `sim!([pop]; duration)` and `train!([pop]; duration)` work.
 
 # Example
 ```julia
@@ -29,5 +30,7 @@ function forward!(
     T::Time,
 ) 
 end
+update_traces!(p::EmptySynapse, param::EmptyParam, dt::Float32, T::Time) = nothing
+plasticity!(p::EmptySynapse, param::EmptyParam, dt::Float32, T::Time) = nothing
 
 export EmptySynapse

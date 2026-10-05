@@ -20,12 +20,12 @@ NEST ode-toolbox test file `morris_lecar.json` (cited in the code).
 - `ϕ::FT = 25Hz`: rate scale of the potassium gating (0.025 per ms).
 - `Ee::FT = 0mV`, `Ei::FT = -75mV`: synaptic reversal potentials (mV).
 
-`MorrisLecarParameter` is not a subtype of `AbstractPopulationParameter`; `train!` raises a
-`MethodError` for `MorrisLecar` populations in SNNModels 1.8.4 (no `update_traces!` method).
+`MorrisLecarParameter <: AbstractPopulationParameter`, so `MorrisLecar` runs under `sim!` and
+`train!`. Up to SNNModels 1.8.4 `train!` raised a `MethodError` (no `update_traces!` method).
 """
 MorrisLecarParameter
 
-@snn_kw struct MorrisLecarParameter{FT = Float32}
+@snn_kw struct MorrisLecarParameter{FT = Float32} <: AbstractPopulationParameter
     Cm::FT = 6.69pF
     El::FT = -50mV
     EK::FT = -70mV
