@@ -1,5 +1,12 @@
 # SNNModels changelog (branch notes)
 
+## 1.9.1: recording buffers across chunks
+- `_extend_fire!` and `_extend_dense!` (called when a new `sim!`/`train!` chunk needs more room)
+  grew by exactly the missing amount, so a run of many chunks reallocated and copied the whole
+  buffer at almost every chunk (quadratic copying, garbage per chunk). They now grow
+  geometrically (`max(old + extra, 2 old)`), and warn once per recording, sharing the latch of
+  the mid-loop overflow path. Reported by SNN2AC.
+
 ## fix/sweep-bugs: membrane pair rule (1.9.0)
 - `AdExParameter`, `IFParameter`: `C`, `gl`, `R`, `τm` always consistent. Construction from a
   pair (or the default pair); a single value is an error; more values must agree within 0.1 %.

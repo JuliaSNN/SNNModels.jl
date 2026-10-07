@@ -333,12 +333,17 @@ function _extend_dense!(records, meta, key::Symbol, extra::Int)
     nd = ndims(buffer)
     old_cap = size(buffer, nd)
     write_ptr = old_cap - get(meta[:allocated], key, 0)
-    new_cap = old_cap + extra
+    # Geometric growth: chunked runs reallocate O(log n) times instead of once per chunk.
+    new_cap = max(old_cap + extra, 2 * old_cap)
     snap_size = size(buffer)[1:(nd-1)]
     new_buffer = Array{Float32}(undef, snap_size..., new_cap)
     write_ptr > 0 && (selectdim(new_buffer, nd, 1:write_ptr) .= selectdim(buffer, nd, 1:write_ptr))
     records[key] = new_buffer
     meta[:allocated][key] = new_cap - write_ptr
+    if !get(meta[:grew], key, false)
+        @warn "Dense recording buffer for $key extended across sim!/train! chunks to $new_cap slots (grows geometrically). Pass monitor_time= with the total duration to allocate it once."
+        meta[:grew][key] = true
+    end
     return
 end
 
@@ -365,7 +370,8 @@ end
 function _extend_fire!(fire, meta, extra::Int)
     old_cap = length(fire[:times_buf])
     write_ptr = old_cap - get(meta[:allocated], :fire, 0)
-    new_cap = old_cap + extra
+    # Geometric growth: chunked runs reallocate O(log n) times instead of once per chunk.
+    new_cap = max(old_cap + extra, 2 * old_cap)
     new_times = Vector{Float32}(undef, new_cap)
     new_neurons = Vector{Int}(undef, new_cap)
     write_ptr > 0 && copyto!(new_times, 1, fire[:times_buf], 1, write_ptr)
@@ -373,6 +379,11 @@ function _extend_fire!(fire, meta, extra::Int)
     fire[:times_buf] = new_times
     fire[:neurons_buf] = new_neurons
     meta[:allocated][:fire] = new_cap - write_ptr
+    # Same one-time latch as _grow_fire!: at most one warning per recording, whichever path grows first.
+    if !get(meta[:grew], :fire, false)
+        @warn "Fire COO buffer extended across sim!/train! chunks to $new_cap spike slots (grows geometrically). monitor_rate= sizes each chunk; spikes accumulate across chunks."
+        meta[:grew][:fire] = true
+    end
     return
 end
 
