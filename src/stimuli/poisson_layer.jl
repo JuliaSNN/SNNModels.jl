@@ -103,6 +103,13 @@ each spike, all its targets ``i`` are incremented:
 g_i \leftarrow g_i + W_{ij}
 ```
 
+# Sampling
+The spikes are sampled sparsely: the gap to the next firing neuron is drawn from the geometric
+distribution (`PoissonLayer`), or candidates are drawn at the largest probability and thinned
+(`PoissonLayerHet`), so that a step costs one random draw per spike instead of one per layer neuron.
+The probabilities and the independence across neurons are exactly those above; only the random
+number stream differs from SNNModels 1.9 (see [`stimulate!`](@ref)).
+
 # Fields
 - `N::Int`: number of layer neurons; `id`, `name = "Poisson"`
 - `param::PoissonLayerParameter`
@@ -111,8 +118,15 @@ g_i \leftarrow g_i + W_{ij}
   (`I` are postsynaptic indices, `W` the weights).
 - `fire::Vector{Bool}`: spikes of the layer neurons in the last step (can be recorded with
   `monitor!(stim, :fire)`).
-- `randcache::Vector{Float32}`: buffer of uniform random numbers.
+- `spikes::SpikeIndex`: the ascending list of the layer neurons that fired in the last step (fed by the
+  stimulus, so it is what `spike_index(stim)` returns for a connection that would read the layer).
+  The flags of `fire` are cleared through this list, not by a pass over `N`.
+- `inbox`: log of the neurons of `post` written in the current step (`TouchList`) if `post` has a sparse
+  update (`Identity`, see `attach_driver!`), `nothing` otherwise.
 - `records::Dict`, `targets::Dict`
+
+Up to SNNModels 1.9 the layer had a field `randcache` (one uniform number per neuron and step); the spikes are
+now sampled sparsely (see [`stimulate!`](@ref)): same statistics, other random numbers.
 
 `param` is required (the keyword struct constructor has no default for it).
 
@@ -128,7 +142,7 @@ SNN.sim!(; model, duration = 100ms)
 ```
 """
 PoissonStimulusLayer
-@snn_kw struct PoissonStimulusLayer{VFT = Vector{Float32},PT<:PoissonLayerParameter} <:
+@snn_kw struct PoissonStimulusLayer{VFT = Vector{Float32},PT<:PoissonLayerParameter,TLT = Nothing} <:
                AbstractStimulus
     N::Int
     id::String = randstring(12)
@@ -143,10 +157,11 @@ PoissonStimulusLayer
     index::VIT
     W::VFT
     fire::VBT = zeros(Bool, N)
+    spikes::SpikeIndex = fed_spike_index(N)  # ascending list of the layer neurons with fire[j]
     ##
-    randcache::VFT = rand(N) # random cache
     records::Dict = Dict()
     targets::Dict = Dict()
+    inbox::TLT = nothing  # log of the neurons of `post` written (TouchList), if post has a sparse update
 end
 
 
@@ -160,15 +175,20 @@ function PoissonStimulusLayer(
 ) where {T<:AbstractPopulation}
     # @warn "PoissonStimulusLayer is deprecated. Please use Stimulus(param, post, sym, comp; conn) instead."
 
-    w = sparse_matrix(param.N, post.N, conn)
-    rowptr, colptr, I, J, index, W = dsparse(w)
     targets = Dict(:pre => :PoissonStim, :post => post.id)
     g, _ = synaptic_target(targets, post, sym, comp)
+    FT = eltype(g)    # the stimulus has the precision of its target (`float_type`)
+    param = convert_precision(param, FT)
+    w = sparse_matrix(param.N, post.N, conn, FT)
+    rowptr, colptr, I, J, index, W = dsparse(w)
+    inbox = attach_driver!(post)
 
-    # Construct the SpikingSynapse instance
     return PoissonStimulusLayer(;
+        VFT = Vector{FT},
         param = param,
         PT = typeof(param),
+        inbox = inbox,
+        TLT = typeof(inbox),
         N = param.N,
         targets = targets,
         g = g,
@@ -186,15 +206,20 @@ function Stimulus(
     name::String = "Poisson",
 ) where {T<:AbstractPopulation}
 
-    w = sparse_matrix(param.N, post.N; conn...)
-    rowptr, colptr, I, J, index, W = dsparse(w)
     targets = Dict(:pre => :PoissonStim, :post => post.id)
     g, _ = synaptic_target(targets, post, sym, comp)
+    FT = eltype(g)    # the stimulus has the precision of its target (`float_type`)
+    param = convert_precision(param, FT)
+    w = sparse_matrix(param.N, post.N; conn..., FT)
+    rowptr, colptr, I, J, index, W = dsparse(w)
+    inbox = attach_driver!(post)
 
-    # Construct the SpikingSynapse instance
     return PoissonStimulusLayer(;
+        VFT = Vector{FT},
         param = param,
         PT = typeof(param),
+        inbox = inbox,
+        TLT = typeof(inbox),
         N = param.N,
         targets = targets,
         g = g,
@@ -204,57 +229,124 @@ function Stimulus(
 end
 
 
-"""
-    stimulate!(p::PoissonStimulusLayer, param::Union{PoissonLayer,PoissonLayerHet}, time::Time, dt::Float32)
-
-One step of a Poisson layer: each layer neuron `j` fires if a uniform draw is smaller than
-`rate * dt` (`rates[j] * dt` for `PoissonLayerHet`); for each firing neuron the weights of its
-outgoing connections are added to `p.g`. `p.fire` holds the layer spikes of this step. The
-layer does not fire while `param.active[1]` is `false`.
-"""
-function stimulate!(p::PoissonStimulusLayer, param::PoissonLayer, time::Time, dt::Float32)
-    @unpack N, randcache, fire, colptr, W, I, g = p
-    @unpack rate = param
-    if !param.active[1]
-        fill!(fire, false)
-        return
-    end
-    rand!(randcache)
-    @inbounds @simd for j = 1:N
-        if randcache[j] < rate * dt
-            fire[j] = true
-            @fastmath @simd for s ∈ colptr[j]:(colptr[j+1]-1)
-                g[I[s]] += W[s]
-            end
-        else
-            fire[j] = false
+# One layer neuron fires: flag it, list it, add its weights to the target, log the touched targets.
+@inline function _layer_fire!(p::PoissonStimulusLayer, j::Int)
+    @unpack colptr, W, I, g, fire, spikes, inbox = p
+    @inbounds begin
+        fire[j] = true
+        n = spikes.n + 1
+        spikes.n = n
+        spikes.idx[n] = j
+        @fastmath for s ∈ colptr[j]:(colptr[j+1]-1)
+            i = I[s]
+            g[i] += W[s]
+            _touch!(inbox, i)
         end
     end
+    return nothing
+end
+
+# Clear the flags set in the previous step (where they were set, not with a pass over `N`).
+@inline function _layer_clear!(p::PoissonStimulusLayer)
+    @unpack fire, spikes = p
+    @inbounds for q in 1:spikes.n
+        fire[spikes.idx[q]] = false
+    end
+    spikes.n = 0
+    return nothing
+end
+
+# Above this per-step probability sampling every neuron is cheaper than skipping.
+const _DENSE_SPIKE_P = 0.2
+
+"""
+    stimulate!(p::PoissonStimulusLayer, param::Union{PoissonLayer,PoissonLayerHet}, time::Time, dt)
+
+One step of a Poisson layer: layer neuron `j` fires with probability `rate * dt` (`rates[j] * dt`
+for `PoissonLayerHet`), independently, at most once per step; for each firing neuron the weights
+of its outgoing connections are added to `p.g`. `p.fire` holds the layer spikes of this step and
+`p.spikes` the ascending list of the firing neurons. The layer does not fire while
+`param.active[1]` is `false`.
+
+The spikes are sampled sparsely, without one random number per neuron and step.
+- `PoissonLayer` (one probability `p`): the index gap to the next spike of the Bernoulli(`p`)
+  sequence is geometric, `floor(log(1 - U) / log(1 - p))`; one logarithm and one uniform draw per spike.
+- `PoissonLayerHet`: rejection against the largest probability `pmax`: candidates are generated as above with
+  `pmax` and the candidate `j` is kept with probability `rates[j] * dt / pmax`. Each neuron then fires with
+  probability exactly `rates[j] * dt`, independently, also if `rates` is changed between steps. `pmax` is
+  recomputed at every step with one read-only pass over `rates` (no random numbers); the expected number of
+  candidates is `N * pmax`, so the cost grows with the largest rate, not the mean.
+- If the probability (`pmax`) exceeds $(_DENSE_SPIKE_P) every neuron is tested with one uniform draw (the skipping
+  sampler would be slower there).
+
+The marginal statistics are those of the dense sampler of SNNModels up to 1.9; the sequence of random
+numbers is different (global RNG, `Random.seed!`). Layer neurons are written to `p.fire` and `p.spikes`; if
+`post` has a sparse update (`Identity`), the targets written are logged in `p.inbox` (see `attach_driver!`).
+"""
+function stimulate!(p::PoissonStimulusLayer, param::PoissonLayer, time::Time, dt::AbstractFloat)
+    _layer_clear!(p)
+    param.active[1] || return nothing
+    pr = Float64(param.rate * dt)
+    _bernoulli_layer!(p, pr)
+    return nothing
 end
 
 function stimulate!(
     p::PoissonStimulusLayer,
     param::PoissonLayerHet,
     time::Time,
-    dt::Float32,
+    dt::AbstractFloat,
 )
-    @unpack N, randcache, fire, colptr, W, I, g = p
-    @unpack rates = param
-    if !param.active[1]
-        fill!(fire, false)
-        return
+    _layer_clear!(p)
+    param.active[1] || return nothing
+    rates = param.rates
+    length(rates) == p.N || throw(DimensionMismatch("rates must have one entry per layer neuron"))
+    rmax = eltype(rates)(-Inf)
+    @inbounds @fastmath for j in eachindex(rates)
+        rmax = max(rmax, rates[j])
     end
-    rand!(randcache)
-    @inbounds @simd for j = 1:N
-        if randcache[j] < rates[j] * dt
-            fire[j] = true
-            @fastmath @simd for s ∈ colptr[j]:(colptr[j+1]-1)
-                g[I[s]] += W[s]
-            end
-        else
-            fire[j] = false
+    pmax = Float64(rmax * dt)
+    pmax > 0 || return nothing
+    N = p.N
+    if pmax >= _DENSE_SPIKE_P
+        @inbounds for j in 1:N
+            rand() < Float64(rates[j] * dt) && _layer_fire!(p, j)
         end
+        return nothing
     end
+    lq = log1p(-pmax)
+    j = 0
+    @inbounds while true
+        x = log1p(-rand()) / lq
+        j + 1.0 + x >= N + 1.0 && break
+        j += 1 + floor(Int, x)
+        pj = Float64(rates[j] * dt)
+        (pj >= pmax || rand() * pmax < pj) && _layer_fire!(p, j)
+    end
+    return nothing
 end
+
+# Bernoulli(pr) trial for every layer neuron, by geometric skipping.
+function _bernoulli_layer!(p::PoissonStimulusLayer, pr::Float64)
+    pr > 0 || return nothing
+    N = p.N
+    if pr >= _DENSE_SPIKE_P
+        @inbounds for j in 1:N
+            rand() < pr && _layer_fire!(p, j)
+        end
+        return nothing
+    end
+    lq = log1p(-pr)
+    j = 0
+    @inbounds while true
+        x = log1p(-rand()) / lq
+        j + 1.0 + x >= N + 1.0 && break
+        j += 1 + floor(Int, x)
+        _layer_fire!(p, j)
+    end
+    return nothing
+end
+
+spike_index(p::PoissonStimulusLayer) = p.spikes
 
 export PoissonLayer, stimulate!, PoissonStimulusLayer, Stimulus, PoissonLayerHet

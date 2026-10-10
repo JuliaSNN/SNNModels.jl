@@ -36,11 +36,17 @@ P(\text{spike}) &= 1 - e^{-\nu_i dt}
 \end{aligned}
 ```
 with ``\tau_{rate}`` = `rate_timescale`; ``\rho_i`` (field `r`) is initialised to ``r_0``.
-The noise uses `randcache_β`, the spike draw uses `rand(Float32)` from the global RNG.
+The noise uses `randcache_β` (one uniform number per neuron and step). The spikes are sampled sparsely: every neuron
+fires with probability ``1 - e^{-\nu_i dt}`` independently, but the candidates are generated with the largest probability of the
+step by geometric skipping and thinned (see `Poisson`), so the spike draws cost one random number per spike instead of one per
+neuron (above a per-step probability of 3 % every neuron is tested with one vectorised uniform draw, as in SNNModels 1.9). The sequence of
+random numbers differs from SNNModels 1.9 (global RNG, `Random.seed!`).
 
 # Fields
-- `id`, `param`, `name = "InhomogeneousPoisson"`, `N::Int32 = 100`, `fire::BitVector`.
+- `id`, `param`, `name = "InhomogeneousPoisson"`, `N::Int32 = 100`, `fire::Vector{Bool}`.
 - `r::Vector{Float32}`: rate offsets ``\rho_i``; `noise::Vector{Float32}`: ``\eta_i``.
+- `pspike::Vector{Float32}`: spike probability ``1 - e^{-\nu_i dt}`` of each neuron in the last step.
+- `spikes::SpikeIndex`: the ascending list of the neurons that fired in the last step (fed by `integrate!`).
 - `randcache_β`; `records::Dict`; `targets::Dict` (unused).
 
 Reference not given in the code.
@@ -65,7 +71,8 @@ InhomogeneousPoisson
     fire::VBT = falses(N)
     r::VFT= ones(Float32, N) * param.r0
     noise::VFT = zeros(Float32, N)
-    # sparse connectivity
+    pspike::VFT = zeros(Float32, N)  # spike probability of each neuron in the last step
+    spikes::SpikeIndex = fed_spike_index(N)  # ascending list of the neurons with fire[j], fed by `integrate!`
     randcache_β::VFT = rand(N) # random cache
     records::Dict = Dict()
     targets::Dict = Dict()
@@ -76,27 +83,38 @@ function Population(p::InhomogeneousPoissonParam; kwargs...)
 end
 
 function integrate!(p::InhomogeneousPoisson, param::InhomogeneousPoissonParam, dt::Float32)
-    @unpack N, randcache_β, fire = p
+    @unpack N, randcache_β, fire, spikes, pspike = p
     ## Inhomogeneous Poisson process
     @unpack r0, β, τ, rate_timescale = param
     @unpack noise, r = p
-    R(x::Float32, v0::Float32 = 0.0f0) = x > 0.0f0 ? x : v0
+    _check_state_lengths(N, randcache_β, fire, pspike, noise, r)
 
-    re::Float32 = 0.0f0
-    cc::Float32 = 0.0f0
-    Erate::Float32 = 0.0f0
     rand!(randcache_β)
-    fire .= false
-    @inbounds @fastmath for i = 1:N
+    cc = 1.0f0 - dt / τ
+    pmax = 0.0f0
+    # rate of every neuron, vectorised: noise and rate offset as in SNNModels 1.9, and the spike probability of the step
+    @inbounds @simd for i = 1:N
         re = randcache_β[i] - 0.5f0
-        cc = 1.0f0 - dt / τ
-        noise[i] = (noise[i] - re) * cc + re
-        Erate = R(r0 ./ 2 * R(noise[i] * β, 1.0f0) + r[i], 0.0f0)
+        ni = (noise[i] - re) * cc + re
+        noise[i] = ni
+        x = ni * β
+        E = r0 / 2 * ifelse(x > 0.0f0, x, 1.0f0) + r[i]
+        Erate = ifelse(E > 0.0f0, E, 0.0f0)
         r[i] += (r0 - Erate) / rate_timescale * dt
-        @assert Erate >= 0
-        p_spike = 1f0 - exp(-Erate * dt)
-        fire[i] = rand(Float32) < p_spike
+        pi_ = 1.0f0 - @inline(exp(-Erate * dt))
+        pspike[i] = pi_
+        pmax = max(pmax, pi_)
     end
+    # sparse sampling of the spikes (see `Poisson`); the uniform cache is free again after the noise update
+    if pmax >= _POP_DENSE_SPIKE_P
+        _pop_dense!(j -> @inbounds(pspike[j]), fire, spikes, randcache_β, Int(N))
+    else
+        _pop_sparse_start!(fire, spikes)
+        _pop_thinned!(j -> Float64(@inbounds(pspike[j])), fire, spikes, Int(N), Float64(pmax))
+    end
+    return nothing
 end
+
+spike_index(p::InhomogeneousPoisson) = p.spikes
 
 export InhomogeneousPoisson, InhomogeneousPoissonParam, integrate!
