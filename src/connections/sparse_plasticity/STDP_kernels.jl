@@ -327,3 +327,148 @@ both passes before clamping, e.g. STDPMexicanHat and the structured rules).
     end
     return nothing
 end
+
+
+#=
+Threaded weight passes (partition by postsynaptic range)
+--------------------------------------------------------
+A synapse owns the weights of its entries; chunk `c` (the chunk of the postsynaptic population, see `ChunkPtr`) owns the entries whose post lies
+in its range. For a rule whose weight updates read only traces that are not modified during the passes (all the event-driven rules here), every
+chunk can run both passes on its own entries: the pre-spike pass over the sub-rows `ptr[c, j]:ptr[c+1, j]-1` of the spiking columns
+(`j` in the shared spike list, in order), the post-spike pass over the incoming synapses of the postsynaptic spikes that lie in its range
+(`rowptr`, `index`). A given weight is touched by at most one entry of each pass, and the pre pass precedes the post pass in the chunk as in the
+serial code, so every weight sees the same operations in the same order: bit-identical for any chunking. The trace updates stay serial (they are
+O(spikes)), the shared scales are scalars advanced serially before the fork.
+=#
+_chunkptr(::AbstractSparseSynapse) = nothing
+@inline _syn_chunk_ptr(::Nothing, args...) = nothing
+
+@inline function _pre_spike_pass_c!(f::F, W, I, ptr, ch, spikes, Wmin, Wmax) where {F}
+    @inbounds for j in spikes
+        for s = ptr[ch, j]:(ptr[ch+1, j]-1)
+            W[s] = clamp(W[s] + f(W[s], I[s], j), Wmin, Wmax)
+        end
+    end
+    return nothing
+end
+@inline function _post_spike_pass_c!(f::F, W, rowptr, index, J, spikes, lo, hi, Wmin, Wmax) where {F}
+    @inbounds for i in spikes
+        (lo <= i <= hi) || continue
+        for st = rowptr[i]:(rowptr[i+1]-1)
+            s = index[st]
+            W[s] = clamp(W[s] + f(W[s], i, J[s]), Wmin, Wmax)
+        end
+    end
+    return nothing
+end
+@inline function _pre_spike_add_c!(f::F, W, I, ptr, ch, spikes) where {F}
+    @inbounds for j in spikes
+        for s = ptr[ch, j]:(ptr[ch+1, j]-1)
+            W[s] += f(W[s], I[s], j)
+        end
+    end
+    return nothing
+end
+@inline function _post_spike_add_c!(f::F, W, rowptr, index, J, spikes, lo, hi) where {F}
+    @inbounds for i in spikes
+        (lo <= i <= hi) || continue
+        for st = rowptr[i]:(rowptr[i+1]-1)
+            s = index[st]
+            W[s] += f(W[s], i, J[s])
+        end
+    end
+    return nothing
+end
+@inline function _clamp_touched_c!(W, I, ptr, ch, rowptr, index, spikes_pre, spikes_post, lo, hi, Wmin, Wmax)
+    @inbounds for j in spikes_pre
+        for s = ptr[ch, j]:(ptr[ch+1, j]-1)
+            W[s] = clamp(W[s], Wmin, Wmax)
+        end
+    end
+    @inbounds for i in spikes_post
+        (lo <= i <= hi) || continue
+        for st = rowptr[i]:(rowptr[i+1]-1)
+            s = index[st]
+            W[s] = clamp(W[s], Wmin, Wmax)
+        end
+    end
+    return nothing
+end
+
+"""
+    _stdp_passes!(c, f_pre, f_post, spikes_pre, spikes_post, Wmin, Wmax)
+
+The clamped pre-spike pass followed by the clamped post-spike pass (`_pre_spike_pass!`, `_post_spike_pass!`), threaded by postsynaptic range
+when `c` has several chunks and enough work (see `ChunkPtr`). Bit-identical to the serial passes.
+"""
+@inline function _stdp_passes!(c, f_pre::F1, f_post::F2, spikes_pre, spikes_post, Wmin, Wmax) where {F1,F2}
+    @unpack rowptr, colptr, I, J, index, W = c
+    Npost = length(c.fireI)
+    ptr = _syn_chunk_ptr(_chunkptr(c), Npost, colptr, I, spikes_pre, _spike_ops(spikes_post, rowptr))
+    if ptr === nothing
+        _pre_spike_pass!(f_pre, W, colptr, I, spikes_pre, Wmin, Wmax)
+        _post_spike_pass!(f_post, W, rowptr, index, J, spikes_post, Wmin, Wmax)
+    else
+        foreach_chunk_c(Npost) do ch, rng
+            _pre_spike_pass_c!(f_pre, W, I, ptr, ch, spikes_pre, Wmin, Wmax)
+            _post_spike_pass_c!(f_post, W, rowptr, index, J, spikes_post, first(rng), last(rng), Wmin, Wmax)
+        end
+    end
+    return nothing
+end
+
+"""
+    _add_passes!(c, f_pre, f_post, spikes_pre, spikes_post, Wmin, Wmax)
+
+`_pre_spike_add!`, `_post_spike_add!` and `_clamp_touched!` in this order (the rules that clamp after both passes), threaded like `_stdp_passes!`.
+"""
+@inline function _add_passes!(c, f_pre::F1, f_post::F2, spikes_pre, spikes_post, Wmin, Wmax) where {F1,F2}
+    @unpack rowptr, colptr, I, J, index, W = c
+    Npost = length(c.fireI)
+    ptr = _syn_chunk_ptr(_chunkptr(c), Npost, colptr, I, spikes_pre, _spike_ops(spikes_post, rowptr))
+    if ptr === nothing
+        _pre_spike_add!(f_pre, W, colptr, I, spikes_pre)
+        _post_spike_add!(f_post, W, rowptr, index, J, spikes_post)
+        _clamp_touched!(W, colptr, rowptr, index, spikes_pre, spikes_post, Wmin, Wmax)
+    else
+        foreach_chunk_c(Npost) do ch, rng
+            _pre_spike_add_c!(f_pre, W, I, ptr, ch, spikes_pre)
+            _post_spike_add_c!(f_post, W, rowptr, index, J, spikes_post, first(rng), last(rng))
+            _clamp_touched_c!(W, I, ptr, ch, rowptr, index, spikes_pre, spikes_post, first(rng), last(rng), Wmin, Wmax)
+        end
+    end
+    return nothing
+end
+
+"""
+    _pre_pass!(c, f, spikes_pre, Wmin, Wmax)
+    _post_pass!(c, f, spikes_post, Wmin, Wmax)
+
+One clamped pass alone (rules with trace updates between the two passes, e.g. `iSTDPRate`), threaded like `_stdp_passes!`.
+"""
+@inline function _pre_pass!(c, f::F, spikes_pre, Wmin, Wmax) where {F}
+    @unpack colptr, I, W = c
+    Npost = length(c.fireI)
+    ptr = _syn_chunk_ptr(_chunkptr(c), Npost, colptr, I, spikes_pre)
+    if ptr === nothing
+        _pre_spike_pass!(f, W, colptr, I, spikes_pre, Wmin, Wmax)
+    else
+        foreach_chunk_c(Npost) do ch, rng
+            _pre_spike_pass_c!(f, W, I, ptr, ch, spikes_pre, Wmin, Wmax)
+        end
+    end
+    return nothing
+end
+@inline function _post_pass!(c, f::F, spikes_post, Wmin, Wmax) where {F}
+    @unpack rowptr, colptr, I, J, index, W = c
+    Npost = length(c.fireI)
+    ptr = _syn_chunk_ptr(_chunkptr(c), Npost, colptr, I, (), _spike_ops(spikes_post, rowptr))
+    if ptr === nothing
+        _post_spike_pass!(f, W, rowptr, index, J, spikes_post, Wmin, Wmax)
+    else
+        foreach_chunk_c(Npost) do ch, rng
+            _post_spike_pass_c!(f, W, rowptr, index, J, spikes_post, first(rng), last(rng), Wmin, Wmax)
+        end
+    end
+    return nothing
+end

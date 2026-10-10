@@ -299,8 +299,7 @@ then trace increment by 1 and exact decay (through `variables.scale`).
     # value = stored * scale; the value at the start of this step is the one read below
     spre, spost = _read_scale(scale, 1, tpre), _read_scale(scale, 2, tpost)
     # 1-2. weight updates, traces read before this step's spikes are added
-    _pre_spike_pass!((w, i, j) -> f_pre(w, tpost[i] * spost), W, colptr, I, spikes_pre, Wmin, Wmax)
-    _post_spike_pass!((w, i, j) -> f_post(w, tpre[j] * spre), W, rowptr, index, J, spikes_post, Wmin, Wmax)
+    _stdp_passes!(c, (w, i, j) -> f_pre(w, tpost[i] * spost), (w, i, j) -> f_post(w, tpre[j] * spre), spikes_pre, spikes_post, Wmin, Wmax)
     # 3. trace increment for the spikes of this step
     isempty(spikes_pre) || _spike_increment!(tpre, last_pre, spikes_pre, t, _write_inc(scale, 1, tpre))
     isempty(spikes_post) || _spike_increment!(tpost, last_post, spikes_post, t, _write_inc(scale, 2, tpost))
@@ -375,9 +374,7 @@ function plasticity!(
         xpre, xpost = tpre[j] * spre, tpost[i] * spost
         abs(xpost * xpre) > 0 ? A * MexicanHat(log(xpre / xpost)^2) : zero(xpre)
     end
-    _pre_spike_add!(f, W, colptr, I, spikes_pre)
-    _post_spike_add!(f, W, rowptr, index, J, spikes_post)
-    _clamp_touched!(W, colptr, rowptr, index, spikes_pre, spikes_post, Wmin, Wmax)
+    _add_passes!(c, f, f, spikes_pre, spikes_post, Wmin, Wmax)
     return nothing
 end
 

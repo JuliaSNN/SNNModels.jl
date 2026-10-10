@@ -74,17 +74,34 @@ end
     synvars::CurrentSynapseVars,
     dt::Float32,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractCurrentParameter,RECT<:NamedTuple}
+    update_synapses!(p, param, receptors, synvars, dt, 1:Int(input_N(p)))
+end
+
+# Chunk method: the neurons `rng` only; clears the spike buffers of the same neurons. `@noinline`: the `@fastmath` loop is compiled on its own,
+# as in SNNModels <= 1.9 (inlined into the chunk closure LLVM generates different last-bit results for some N).
+@noinline function update_synapses!(
+    p::P,
+    param::T,
+    receptors::RECT,
+    synvars::CurrentSynapseVars,
+    dt::Float32,
+    rng::UnitRange{Int},
+) where {P<:AbstractGeneralizedIF,T<:AbstractCurrentParameter,RECT<:NamedTuple}
     @unpack glu, gaba = receptors
     @unpack N, ge, gi = synvars
     @unpack τe, τi = param
-    @fastmath @inbounds @simd for i ∈ 1:input_N(p)
+    @fastmath @inbounds @simd for i ∈ rng
         ge[i] += glu[i]
         gi[i] += gaba[i]
         ge[i] += dt * (-ge[i] / τe)
         gi[i] += dt * (-gi[i] / τi)
     end
-    fill!(glu, 0.0f0)
-    fill!(gaba, 0.0f0)
+    # the buffers are cleared in a loop of their own: stores to them inside the `@fastmath` loop above change the code LLVM generates for
+    # its arithmetic (last-bit differences from the loop of SNNModels <= 1.9)
+    @inbounds @simd for i ∈ rng
+        glu[i] = 0.0f0
+        gaba[i] = 0.0f0
+    end
 end
 
 @inline function synaptic_current!(
@@ -105,6 +122,7 @@ end
     synvars::AbstractSynapseVariable,
     v::VT1, # membrane potential
     syncurr::VT2, # synaptic current
+    rng::UnitRange{Int} = 1:Int(input_N(p)),
 ) where {
     P<:AbstractGeneralizedIF,
     T<:AbstractCurrentParameter,
@@ -112,10 +130,11 @@ end
     VT2<:AbstractVector,
 }
     @unpack ge, gi = synvars
-    @unpack N = p
-    @inbounds @simd for i ∈ 1:input_N(p)
+    @inbounds @simd for i ∈ rng
         syncurr[i] = -(ge[i] - gi[i])
     end
 end
+
+_chunk_synapse(::AbstractCurrentParameter) = true
 
 export CurrentSynapse

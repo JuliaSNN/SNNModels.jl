@@ -90,19 +90,32 @@ function update_synapses!(
     synvars::DoubleExpSynapseVars,
     dt::AbstractFloat,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractDoubleExpParameter,RECT<:NamedTuple}
-    @unpack N, ge, gi, he, hi = synvars
+    update_synapses!(p, synapse, receptors, synvars, dt, 1:Int(synvars.N))
+end
+
+# Chunk method: the neurons `rng` only; clears the spike buffers of the same neurons.
+function update_synapses!(
+    p::P,
+    synapse::T,
+    receptors::RECT,
+    synvars::DoubleExpSynapseVars,
+    dt::AbstractFloat,
+    rng::UnitRange{Int},
+) where {P<:AbstractGeneralizedIF,T<:AbstractDoubleExpParameter,RECT<:NamedTuple}
+    @unpack ge, gi, he, hi = synvars
     @unpack τde, τre, τdi, τri = synapse
     @unpack gaba, glu = receptors
-    @inbounds @simd for i ∈ 1:N
+    z = zero(eltype(glu))
+    @inbounds @simd for i ∈ rng
         he[i] += glu[i]
         hi[i] += gaba[i]
         ge[i] += dt * (-ge[i] / τde + he[i])
         he[i] += dt * (-he[i] / τre)
         gi[i] += dt * (-gi[i] / τdi + hi[i])
         hi[i] += dt * (-hi[i] / τri)
+        glu[i] = z
+        gaba[i] = z
     end
-    fill!(glu, zero(eltype(glu)))
-    fill!(gaba, zero(eltype(gaba)))
 end
 
 
@@ -112,13 +125,15 @@ end
     synvars::DoubleExpSynapseVars,
     v::VT1, # membrane potential
     syncurr::VT2, # synaptic current
+    rng::UnitRange{Int} = 1:Int(p.N),
 ) where {T<:AbstractPopulation,VT1<:AbstractVector,VT2<:AbstractVector}
     @unpack gsyn_e, gsyn_i, E_e, E_i = synapse
-    @unpack N = p
     @unpack ge, gi = synvars
-    @inbounds @simd for i ∈ 1:N
+    @inbounds @simd for i ∈ rng
         syncurr[i] = ge[i] * (v[i] - E_e) * gsyn_e + gi[i] * (v[i] - E_i) * gsyn_i
     end
 end
+
+_chunk_synapse(::AbstractDoubleExpParameter) = true
 
 export DoubleExpSynapse

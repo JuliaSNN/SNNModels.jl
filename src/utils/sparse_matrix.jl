@@ -680,6 +680,7 @@ end
 # Reorder / resize the per-synapse arrays of `c` after a rebuild of its sparse storage:
 # `perm[s]` is the old position of the synapse now stored at `s` (0 for a new synapse).
 function _remap_synapse_state!(c, perm::AbstractVector{<:Integer})
+    hasfield(typeof(c), :chunkptr) && invalidate_chunk_ptr!(c.chunkptr)   # the sub-row pointers of the threaded forward!/plasticity
     if hasfield(typeof(c), :ρ)
         old = copy(c.ρ)
         resize!(c.ρ, length(perm))

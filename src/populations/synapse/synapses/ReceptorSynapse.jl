@@ -194,12 +194,26 @@ end
     synvars::ReceptorSynapseVars,
     dt::Float32,
 ) where {P<:AbstractPopulation,RECT<:NamedTuple}
+    update_synapses!(p, synapse, receptors, synvars, dt, 1:Int(synvars.N))
+    fill!(receptors.glu, 0.0f0)     # the whole buffers (the chunk method clears its neurons only)
+    fill!(receptors.gaba, 0.0f0)
+end
+
+# Chunk method: the neurons `rng` only, and the input buffers `glu`, `gaba` are cleared on `rng` only.
+@inline function update_synapses!(
+    p::P,
+    synapse::ReceptorSynapse,
+    receptors::RECT,
+    synvars::ReceptorSynapseVars,
+    dt::Float32,
+    rng::UnitRange{Int},
+) where {P<:AbstractPopulation,RECT<:NamedTuple}
     @unpack glu_receptors, gaba_receptors = synapse
-    @unpack N, g, h = synvars
+    @unpack g, h = synvars
     @unpack glu, gaba = receptors
     @inbounds for n in glu_receptors
         @unpack τr⁻, τd⁻, α = synapse.syn[n]
-        @turbo for i ∈ 1:N
+        @turbo for i ∈ rng
             h[i, n] += glu[i] * α
             g[i, n] = exp64(-dt * τd⁻) * (g[i, n] + dt * h[i, n])
             h[i, n] = exp64(-dt * τr⁻) * (h[i, n])
@@ -207,14 +221,16 @@ end
     end
     @simd for n in gaba_receptors
         @unpack τr⁻, τd⁻, α = synapse.syn[n]
-        @turbo for i ∈ 1:N
+        @turbo for i ∈ rng
             h[i, n] += gaba[i] * α
             g[i, n] = exp64(-dt * τd⁻) * (g[i, n] + dt * h[i, n])
             h[i, n] = exp64(-dt * τr⁻) * (h[i, n])
         end
     end
-    fill!(glu, 0.0f0)
-    fill!(gaba, 0.0f0)
+    @inbounds for i in rng
+        glu[i] = 0.0f0
+        gaba[i] = 0.0f0
+    end
 end
 
 @inline function update_synapses!(
@@ -224,13 +240,31 @@ end
     synvars::ReceptorSynapseVars,
     dt::Float32,
 ) where {P<:AbstractPopulation,RECT<:NamedTuple}
+    update_synapses!(p, synapse, receptors, synvars, dt, 1:Int(synvars.N))
+    for name in keys(receptors)
+        fill!(getfield(receptors, name), 0.0f0)
+    end
+end
+
+# Chunk method: the neurons `rng` only (the input buffers are cleared on `rng` only).
+@inline function update_synapses!(
+    p::P,
+    synapse::MultiReceptorSynapse,
+    receptors::RECT,
+    synvars::ReceptorSynapseVars,
+    dt::Float32,
+    rng::UnitRange{Int},
+) where {P<:AbstractPopulation,RECT<:NamedTuple}
     for name in keys(synapse.receptors)
         @inbounds for n in synapse.receptors[name]
-            update_receptor!(synvars, synapse.syn[n], getfield(receptors, name), n, dt)
+            update_receptor!(synvars, synapse.syn[n], getfield(receptors, name), n, dt, rng)
         end
     end
     for name in keys(receptors)
-        fill!(getfield(receptors, name), 0.0f0)
+        buf = getfield(receptors, name)
+        @inbounds for i in rng
+            buf[i] = 0.0f0
+        end
     end
 end
 
@@ -240,6 +274,7 @@ end
     target::Vector{Float32},
     n::Int,
     dt::Float32,
+    rng::UnitRange{Int} = 1:Int(synvars.N),
 ) where {T<:AbstractReceptorVariable}
     @unpack N, g, h = synvars
     @unpack τr⁻, τd⁻, α = receptor
@@ -247,16 +282,14 @@ end
         throw(DimensionMismatch("receptor state of $(size(g)) / $(size(h)) or input buffer of length $(length(target)) too small for N = $N receptors $n"))
     ed = exp64(-dt * τd⁻)    # loop invariants
     er = exp64(-dt * τr⁻)
-    @inbounds @simd for i ∈ 1:N
+    @inbounds @simd for i ∈ rng
         h[i, n] += target[i] * α
         g[i, n] = ed * (g[i, n] + dt * h[i, n])
         h[i, n] = er * (h[i, n])
     end
 end
 
-
-
-
+_chunk_synapse(::AbstractReceptorParameter) = true
 
 @inline function synaptic_current!(
     p::T,
@@ -278,17 +311,45 @@ end
     (length(v) >= N && length(syncurr) >= N && size(g, 1) >= N && size(g, 2) >= length(syn)) ||
         throw(DimensionMismatch("membrane potential, current or conductance matrix too small for N = $N and $(length(syn)) receptors"))
     fill!(syncurr, 0.0f0)
+    _synaptic_current_rng!(synapse, synvars, v, syncurr, 1:Int(N))
+end
+
+# Chunk method of the six-argument form: the neurons `rng` only (clears `syncurr` on `rng` only).
+@inline function synaptic_current!(
+    p::T,
+    synapse::P,
+    synvars::S,
+    v::VT1,
+    syncurr::VT2,
+    rng::UnitRange{Int},
+) where {
+    T<:AbstractGeneralizedIF,
+    P<:AbstractReceptorParameter,
+    S<:AbstractReceptorVariable,
+    VT1<:AbstractVector,
+    VT2<:AbstractVector,
+}
+    @inbounds for i in rng
+        syncurr[i] = 0.0f0
+    end
+    _synaptic_current_rng!(synapse, synvars, v, syncurr, rng)
+end
+
+@inline function _synaptic_current_rng!(synapse, synvars, v, syncurr, rng::UnitRange{Int})
+    @unpack g, h = synvars
+    @unpack syn, NMDA = synapse
+    @unpack mg, b, k = NMDA
     mgb = mg / b    # loop invariant
     # Receptor by receptor, so every neuron accumulates in the same order as the scalar loop of SNNModels <= 1.9 (bit-identical).
     # The voltage-dependent factor is only evaluated for the NMDA receptors (the multiplication by 1 of the others is exact).
     for n in eachindex(syn)
         @unpack gsyn, E_rev, nmda = syn[n]
         if nmda == 0.0f0
-            @inbounds @simd for neuron ∈ 1:N
+            @inbounds @simd for neuron ∈ rng
                 syncurr[neuron] += gsyn * g[neuron, n] * (v[neuron] - E_rev)
             end
         else
-            @inbounds @simd for neuron ∈ 1:N
+            @inbounds @simd for neuron ∈ rng
                 syncurr[neuron] +=
                     gsyn *
                     g[neuron, n] *

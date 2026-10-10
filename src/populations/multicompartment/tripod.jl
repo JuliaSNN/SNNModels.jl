@@ -98,7 +98,7 @@ between spikes.
 ## Work arrays
 - `Δv`, `Δv_temp::MFT` (`N x 4`): derivatives of `(v_s, v_d1, v_d2, w_s)` at the two Heun stages.
 - `is::MFT` (`N x 3`): synaptic currents of soma, d1, d2; `ic::VFT` (length 2): axial currents
-  soma -> dendrite (pA) of the last evaluated stage; `v_pred::MFT` (`N x 3`): stage potentials
+  soma -> dendrite (pA) of the last evaluated stage (the threaded update gives every chunk its own two-element slot, `SCRATCH_STRIDE` floats apart, and grows `ic` to `SCRATCH_STRIDE * nchunks` elements on first threaded use); `v_pred::MFT` (`N x 3`): stage potentials
   of soma, d1, d2 (mV).
 
 # References
@@ -185,44 +185,85 @@ integrate the membrane equations with the Heun method and handle spikes and refr
 (see `Tripod`).
 """
 function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
-    @unpack N, v_s, w_s, v_d1, v_d2 = p
-    @unpack fire, θ, tabs = p
-    @unpack Δv, Δv_temp, is = p
-
-    @unpack synvars_s, synvars_d1, synvars_d2, d1, d2, I_d = p
-    @unpack receptors_d1, receptors_d2, receptors_s = p
-
-    @unpack spike, adex, soma_syn, dend_syn, Vspike = p
-    @unpack AP_membrane, up, τabs, At, τA = spike
-    @unpack Vr, Vt, b = adex
+    N = Int(p.N)
+    @unpack spike, adex, soma_syn, dend_syn = p
+    @unpack τabs, up = spike
     # refractory counters in steps; each period lasts at least one step
     n_abs = max(1, round(Int, τabs / dt))
     n_ref = max(1, round(Int, up / dt)) + n_abs
+    _check_state_lengths(N, p.v_s, p.w_s, p.v_d1, p.v_d2, p.fire, p.θ, p.tabs, p.d1.gax, p.d1.C, p.d2.gax, p.d2.C)
+    (size(p.Δv, 1) >= N && size(p.Δv, 2) >= 4 && size(p.Δv_temp, 1) >= N && size(p.Δv_temp, 2) >= 4) ||
+        throw(DimensionMismatch("Δv and Δv_temp must have N rows and 4 columns"))
+    if _chunk_synapse(soma_syn) && _chunk_synapse(dend_syn)
+        # All the stages are per-neuron: one fork/join per population and step, every chunk with its own scratch slot of `ic`
+        # (the shared two-element vector of the serial loop). `foreach_chunk_c` runs the one chunk `1:N` on the calling thread when there is one chunk or one thread.
+        nc = nchunks(N, _BPC[])
+        (nc > 1 && Threads.nthreads() > 1 && length(p.ic) < SCRATCH_STRIDE * nc) && resize!(p.ic, SCRATCH_STRIDE * nc)   # serial: the two-element `ic` as before
+        foreach_chunk_c(N) do c, rng
+            _tripod_chunk!(p, param, dt, rng, (c - 1) * SCRATCH_STRIDE, n_abs, n_ref)
+        end
+    else
+        # synapse models without chunk methods: the stages one after the other over the whole population
+        _tripod_serial!(p, param, dt, n_abs, n_ref)
+    end
+end
 
-    # Update all synaptic conductance
-    update_synapses!(p, soma_syn, receptors_s, synvars_s, dt)
-    update_synapses!(p, dend_syn, receptors_d1, synvars_d1, dt)
-    update_synapses!(p, dend_syn, receptors_d2, synvars_d2, dt)
+# one chunk: synapses, the two Heun stages and the state update of the neurons `rng`, `ico` = offset of the scratch slot in `p.ic`
+function _tripod_chunk!(p::Tripod, param::DendNeuronParameter, dt::Float32, rng::UnitRange{Int}, ico::Int, n_abs::Int, n_ref::Int)
+    @unpack Δv, Δv_temp, fire = p
+    @unpack soma_syn, dend_syn = p
+    update_synapses!(p, soma_syn, p.receptors_s, p.synvars_s, dt, rng)
+    update_synapses!(p, dend_syn, p.receptors_d1, p.synvars_d1, dt, rng)
+    update_synapses!(p, dend_syn, p.receptors_d2, p.synvars_d2, dt, rng)
+    @inbounds for k in 1:4
+        @simd ivdep for i in rng
+            Δv[i, k] = 0.0f0
+            Δv_temp[i, k] = 0.0f0
+        end
+    end
+    @inbounds for i in rng
+        fire[i] = false
+    end
+    update_neuron!(p, param, Δv, dt, rng, ico)
+    @inbounds for k in 1:4
+        @simd ivdep for i in rng
+            Δv_temp[i, k] = Δv[i, k]
+        end
+    end
+    update_neuron!(p, param, Δv, dt, rng, ico)
+    _tripod_state!(p, dt, rng, n_abs, n_ref)
+end
 
-    ## Heun integration
+# the same stages over the whole population, for synapse models that have no chunk methods
+function _tripod_serial!(p::Tripod, param::DendNeuronParameter, dt::Float32, n_abs::Int, n_ref::Int)
+    @unpack Δv, Δv_temp, fire = p
+    @unpack soma_syn, dend_syn = p
+    update_synapses!(p, soma_syn, p.receptors_s, p.synvars_s, dt)
+    update_synapses!(p, dend_syn, p.receptors_d1, p.synvars_d1, dt)
+    update_synapses!(p, dend_syn, p.receptors_d2, p.synvars_d2, dt)
     fill!(Δv, 0.0f0)
     fill!(Δv_temp, 0.0f0)
     fill!(fire, false)
-
     update_neuron!(p, param, Δv, dt)
     Δv_temp .= Δv
     update_neuron!(p, param, Δv, dt)
-    # @show Δv.+Δv_temp
+    _tripod_state!(p, dt, 1:Int(p.N), n_abs, n_ref)
+end
 
-    _check_state_lengths(N, v_s, w_s, v_d1, v_d2, fire, θ, tabs, d1.gax, d1.C, d2.gax, d2.C)
-    (size(Δv, 1) >= N && size(Δv, 2) >= 4 && size(Δv_temp, 1) >= N && size(Δv_temp, 2) >= 4) ||
-        throw(DimensionMismatch("Δv and Δv_temp must have N rows and 4 columns"))
+# state update after the Heun stages (spike detection, refractoriness, clamping), neurons `rng`
+function _tripod_state!(p::Tripod, dt::Float32, rng::UnitRange{Int}, n_abs::Int, n_ref::Int)
+    @unpack v_s, w_s, v_d1, v_d2, fire, θ, tabs, Δv, Δv_temp, d1, d2 = p
+    @unpack spike, adex, Vspike = p
+    @unpack AP_membrane, At, τA = spike
+    @unpack Vr, Vt, b = adex
     gax1, C1, gax2, C2 = d1.gax, d1.C, d2.gax, d2.C
     nabs_f = convert(eltype(tabs), n_abs)    # the counters are `Float32`: compare and store without mixing types
     nref_f = convert(eltype(tabs), n_ref)
     # Branchless (`ifelse`) and vectorised, bit-identical to the branching loop of SNNModels <= 1.9 (backpropagation period,
     # absolute refractory period, free integration or spike): all the cases are evaluated and the one that applies is kept.
-    @inbounds @simd for i ∈ 1:N
+    # `ivdep`: with a chunk range that does not start at 1 LLVM cannot exclude that the store to `Δv[i, 1]` overlaps the loads of the other columns
+    # of `Δv` and does not vectorise (5x slower); they never overlap (distinct matrix entries).
+    @inbounds @simd ivdep for i ∈ rng
         t1 = tabs[i] - 1
         th1 = θ[i] + dt * (Vt - θ[i]) / τA
         bp = t1 > nabs_f                 # backpropagation period
@@ -265,6 +306,18 @@ end
     Δv::Matrix{Float32},
     dt::Float32,
 )
+    update_neuron!(p, param, Δv, dt, 1:Int(p.N), 0)
+end
+
+# One Heun stage for the neurons `rng`; `ico` is the offset of this chunk's two-element scratch slot in `p.ic` (0: the serial one).
+@inline function update_neuron!(
+    p::Tripod,
+    param::DendNeuronParameter,
+    Δv::Matrix{Float32},
+    dt::Float32,
+    rng::UnitRange{Int},
+    ico::Int,
+)
     @unpack v_d1, v_d2, v_s, I_d, I, w_s, θ = p
     @unpack d1, d2 = p
     @unpack is, ic, v_pred = p
@@ -280,36 +333,42 @@ end
     _check_state_lengths(N, v_s, v_d1, v_d2, w_s, θ, I, I_d, d1gax, d1gm, d1El, d1C, d2gax, d2gm, d2El, d2C)
     (size(Δv, 1) >= N && size(Δv, 2) >= 4 && size(is, 1) >= N && size(is, 2) >= 3 && size(v_pred, 1) >= N && size(v_pred, 2) >= 3) ||
         throw(DimensionMismatch("Δv, is and v_pred must have N rows (4, 3 and 3 columns)"))
+    (last(rng) <= N && ico + 2 <= length(ic)) || throw(BoundsError(ic, ico + 2))
 
-    @inbounds @simd for i ∈ 1:N
+    @inbounds @simd ivdep for i ∈ rng
         v_pred[i, 1] = v_s[i] + Δv[i, 1] * dt
         v_pred[i, 2] = v_d1[i] + Δv[i, 2] * dt
         v_pred[i, 3] = v_d2[i] + Δv[i, 3] * dt
     end
 
-    @views synaptic_current!(p, soma_syn, synvars_s, v_pred[:, 1], is[:, 1])
-    @views synaptic_current!(p, dend_syn, synvars_d1, v_pred[:, 2], is[:, 2])
-    @views synaptic_current!(p, dend_syn, synvars_d2, v_pred[:, 3], is[:, 3])
-    clamp!(is, -1500, 1500)
+    @views _synaptic_current!(p, soma_syn, synvars_s, v_pred[:, 1], is[:, 1], rng)
+    @views _synaptic_current!(p, dend_syn, synvars_d1, v_pred[:, 2], is[:, 2], rng)
+    @views _synaptic_current!(p, dend_syn, synvars_d2, v_pred[:, 3], is[:, 3], rng)
+    @inbounds for k in 1:3
+        @simd ivdep for i in rng
+            is[i, k] = clamp(is[i, k], -1500.0f0, 1500.0f0)
+        end
+    end
 
     # This `@fastmath` loop is kept as it was (scalar, `ic` stored and reloaded). Its floating-point result depends on how LLVM reassociates the
     # fast-math expression: with the axial currents in registers (which lets it vectorise, about 5x faster) the derivatives
     # differ from this loop in the last bit (1 ulp in `Δv`), so the vectorised variant is not used (see the changelog).
-    @fastmath @inbounds for i ∈ 1:N
+    # `ic` is per chunk (slot at `ico`), so chunks do not share it.
+    @fastmath @inbounds for i ∈ rng
         vs = v_pred[i, 1]
         vd1 = v_pred[i, 2]
         vd2 = v_pred[i, 3]
         ws = w_s[i] + Δv[i, 4] * dt
-        ic[1] = (vs - vd1) * d1gax[i] # axial current soma -> d1
-        ic[2] = (vs - vd2) * d2gax[i] # axial current soma -> d2
-        Δv[i, 2] = ((d1El[i] - vd1) * d1gm[i] - is[i, 2] + ic[1] + I_d[i]) / d1C[i]
-        Δv[i, 3] = ((d2El[i] - vd2) * d2gm[i] - is[i, 3] + ic[2] + I_d[i]) / d2C[i]
+        ic[ico+1] = (vs - vd1) * d1gax[i] # axial current soma -> d1
+        ic[ico+2] = (vs - vd2) * d2gax[i] # axial current soma -> d2
+        Δv[i, 2] = ((d1El[i] - vd1) * d1gm[i] - is[i, 2] + ic[ico+1] + I_d[i]) / d1C[i]
+        Δv[i, 3] = ((d2El[i] - vd2) * d2gm[i] - is[i, 3] + ic[ico+2] + I_d[i]) / d2C[i]
         Δv[i, 1] =
             (
                 gl * (El - vs) +
                 gl * ΔT * exp256((vs - θ[i]) / ΔT) - ws  # adaptation
                 - is[i, 1]   # synapses
-                - ic[1] - ic[2] # axial currents
+                - ic[ico+1] - ic[ico+2] # axial currents
                 + I[i]  # external current
             ) / C
         Δv[i, 4] = (a * (vs - El) - ws) / τw

@@ -31,6 +31,8 @@ plasticity, metaplasticity components).
   `perturbation!(; P, C, S, t, dt, start_time)`.
 - `pbar = false`: show a progress bar with the running firing rates of the populations that
   record `:fire`.
+- `neurons_per_thread = nothing`: chunk size of the threaded population updates for the duration of the run (`nothing`: keep
+  the current setting, default 0: threading off; a positive value such as 512 turns it on, `0` or `Inf` off). See [`neurons_per_thread`](@ref) and [`foreach_chunk`](@ref).
 
 Recording buffers are sized before the loop from `duration` (see `monitor!`). If the model
 time is 0, a first sample of every record is taken before the first step.
@@ -59,6 +61,7 @@ function train!(
     time = Time{_model_float(P)}(),
     perturbation! = nothing,
     pbar = false,
+    neurons_per_thread = nothing,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
     FT = eltype(time.t)
     dt = FT(dt)
@@ -68,6 +71,7 @@ function train!(
     start_time = get_time(time)
     firing_rates = Dict{String, Float32}(p.name => 0.f0 for p in P if haskey(p.records, :fire))
     τ_rate = 100.0f0
+    with_neurons_per_thread(neurons_per_thread) do
     for t in iter
         if pbar
             map(P) do p
@@ -86,6 +90,7 @@ function train!(
             perturbation!(;P, C, S, t=t, dt=dt, start_time = start_time)
         end
         train!(P, C, S, dt, time)
+    end
     end
     return time
 end
@@ -222,6 +227,8 @@ or `STPParam`. Use [`train!`](@ref) for plastic networks.
   `perturbation!(; P, C, S, t, dt, start_time)`.
 - `pbar = false`: show a progress bar with the running firing rates of the populations that
   record `:fire`.
+- `neurons_per_thread = nothing`: chunk size of the threaded population updates for the duration of the run (`nothing`: keep
+  the current setting, default 0: threading off; a positive value such as 512 turns it on, `0` or `Inf` off). See [`neurons_per_thread`](@ref) and [`foreach_chunk`](@ref).
 
 Recording buffers are sized before the loop (see `monitor!`). If the model time is 0, a first
 sample of every record is taken before the first step. Simulations can be continued by
@@ -252,6 +259,7 @@ function sim!(
     pbar = false,
     time = Time{_model_float(P)}(),
     perturbation! = nothing,
+    neurons_per_thread = nothing,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
     FT = eltype(time.t)
     dt = FT(dt)
@@ -262,6 +270,7 @@ function sim!(
     start_time = get_time(time)
     firing_rates = Dict{String, Float32}(p.name => 0.f0 for p in P if haskey(p.records, :fire))
     τ_rate = 100.0f0
+    with_neurons_per_thread(neurons_per_thread) do
     for t in iter
         if pbar
             map(P) do p
@@ -280,6 +289,7 @@ function sim!(
             perturbation!(; P, C, S, t=t, dt=dt, start_time=start_time)
         end
         sim!(P, C, S, dt, time)
+    end
     end
     return time
 end

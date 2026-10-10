@@ -98,14 +98,16 @@ function _integrate_dense!(p::Identity)
     z = zero(eltype(spikecount))
     (length(h) == n && length(fire) == n && length(spikecount) == n) ||
         throw(DimensionMismatch("Identity state vectors must have the same length"))
-    # branchless: the neuron fires on any positive input, spikecount is that input
-    @inbounds @simd for i in 1:n
-        gi = g[i]
-        pos = gi > 0
-        h[i] += gi
-        fire[i] = pos
-        spikecount[i] = ifelse(pos, gi, z)
-        g[i] = 0
+    # branchless: the neuron fires on any positive input, spikecount is that input; per neuron, so it runs in chunks (`foreach_chunk`)
+    foreach_chunk(n) do rng
+        @inbounds @simd for i in rng
+            gi = g[i]
+            pos = gi > 0
+            h[i] += gi
+            fire[i] = pos
+            spikecount[i] = ifelse(pos, gi, z)
+            g[i] = 0
+        end
     end
 end
 

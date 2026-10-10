@@ -138,10 +138,9 @@ function plasticity!(
 
     # 1. pre spike of j onto i: LTD, o1[i] * (A2- + A3- * r2[j]) (r2 before increment)
     f_pre = (w, i, j) -> -(o1[i] * s_o1) * (A2_minus + A3_minus * (r2[j] * s_r2))
-    _pre_spike_pass!(f_pre, W, colptr, I, spikes_pre, Wmin, Wmax)
     # 2. post spike of i from j: LTP, r1[j] * (A2+ + A3+ * o2[i]) (o2 before increment)
     f_post = (w, i, j) -> (r1[j] * s_r1) * (A2_plus + A3_plus * (o2[i] * s_o2))
-    _post_spike_pass!(f_post, W, rowptr, index, J, spikes_post, Wmin, Wmax)
+    _stdp_passes!(c, f_pre, f_post, spikes_pre, spikes_post, Wmin, Wmax)
 
     # 3. trace increments (last spike time stored once per neuron)
     if !isempty(spikes_pre)

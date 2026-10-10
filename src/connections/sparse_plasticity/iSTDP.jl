@@ -230,7 +230,7 @@ function plasticity!(
     α = 2 * r * τy
     # 1. presynaptic spikes read the postsynaptic trace of the previous step (value = stored * scale)
     spost = _read_scale(scale, 2, tpost)
-    _pre_spike_pass!((w, i, j) -> η * (tpost[i] * spost - α), W, colptr, I, spikes_pre, Wmin, Wmax)
+    _pre_pass!(c, (w, i, j) -> η * (tpost[i] * spost - α), spikes_pre, Wmin, Wmax)
     # 2. Euler decay (one scalar per trace type), then +1 for this step's spikes
     _advance_scale!(scale, 1, tpre, f)
     _advance_scale!(scale, 2, tpost, f)
@@ -242,7 +242,7 @@ function plasticity!(
     end
     # 3. postsynaptic spikes read the presynaptic trace of this step (decayed, with this step's spikes added)
     spre = _read_scale(scale, 1, tpre)
-    _post_spike_pass!((w, i, j) -> η * (tpre[j] * spre), W, rowptr, index, J, spikes_post, Wmin, Wmax)
+    _post_pass!(c, (w, i, j) -> η * (tpre[j] * spre), spikes_post, Wmin, Wmax)
     return nothing
 end
 

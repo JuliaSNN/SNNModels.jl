@@ -196,8 +196,8 @@ end
     spikes_pre, spikes_post = presynaptic_spikes(c), postsynaptic_spikes(c)
     _initial_clamp!(W, initialized, Wmin, Wmax)
     # weight passes: traces of the previous step (value = stored * scale), no clamp between the passes
-    _pre_spike_add!(f_pre, W, colptr, I, spikes_pre)
-    _post_spike_add!(f_post, W, rowptr, index, J, spikes_post)
+    # (the clamp of the touched weights, which follows the trace update in the serial code, does not read the traces: it is done with the passes)
+    _add_passes!(c, f_pre, f_post, spikes_pre, spikes_post, Wmin, Wmax)
     # decay, then +1 for this step's spikes
     for (x, k, spikes, f) in traces
         _advance_scale!(scale, k, x, f)
@@ -206,7 +206,6 @@ end
             x[n] += a
         end
     end
-    _clamp_touched!(W, colptr, rowptr, index, spikes_pre, spikes_post, Wmin, Wmax)
     return nothing
 end
 

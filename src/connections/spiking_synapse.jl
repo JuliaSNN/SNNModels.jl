@@ -82,6 +82,7 @@ end
     records::Dict = Dict()
     pre_spikes::SpikeIndex = SpikeIndex(length(fireJ)) # indices of the presynaptic spikes of the step
     post_spikes::SpikeIndex = SpikeIndex(length(fireI)) # indices of the postsynaptic spikes of the step
+    chunkptr::ChunkPtr = ChunkPtr() # sub-row pointers for the threaded forward!/plasticity (built on first use)
 end
 
 @doc raw"""
@@ -139,10 +140,20 @@ rule types are `LTPParameter` and `STPParameter`.
 - `LTPParam`, `STPParam`, `LTPVars`, `STPVars`: plasticity rules and their state.
 - `targets::Dict`: ids of `pre`/`post`, target symbol, connection type.
 - `records::Dict`: recorded variables.
+- `chunkptr::ChunkPtr`: cache of the sub-row pointers of the threaded `forward!`/plasticity (see Threading).
 - `pre_spikes`, `post_spikes`: `SpikeIndex` scratch lists of the neurons that fired in the current step,
   built from `fireJ`/`fireI` once per step and shared by `forward!` and the event-driven rules. If `pre` (or
   `post`) keeps its own list up to date (`Identity` driven by `SpikeTimeStimulus`), the synapse shares it and never
   scans the flags.
+
+# Threading
+With `neurons_per_thread > 0` (see `set_neurons_per_thread!`) and more than one Julia thread, `forward!` (with and without delays), the pair, triplet,
+weight-dependent, structured and inhibitory event-driven STDP rules and the event-driven STP efficacy update are partitioned by postsynaptic range, with the
+same chunks as the postsynaptic population: chunk `c` adds to `g[post chunk c]` (and the delay buffer rows of that range) and updates the weights of the
+synapses that end there, using the sub-row pointers `chunkptr` (built on first use, 4 (nchunks + 1) bytes per presynaptic neuron, invalidated by
+`update_sparse_matrix!`). Every target receives its additions in the order of the serial loop, so the results are bit-identical for any chunking and any
+number of threads. Synapses with less work than `SNNModels.SYN_MIN_OPS[]` operations per step run on the calling thread. The voltage-based vSTDP, CaRule and
+`iSTDPPotential` plasticity stays serial.
 
 # Notes
 - Precision. The synapse has the floating-point type of the variable it writes into, i.e. of the target
@@ -345,13 +356,32 @@ targets ``i`` (no delay).
 """
 function forward!(c::SpikingSynapse, param::SpikingSynapseParameter, dt::AbstractFloat, T::Time)
     @unpack colptr, I, W, g, ρ = c
-    @inbounds for j ∈ presynaptic_spikes(c) # loop on presynaptic neurons that fired
-        @inbounds @fastmath @simd for s ∈ colptr[j]:(colptr[j+1]-1)
+    spikes = presynaptic_spikes(c)
+    Npost = length(c.fireI)
+    ptr = _syn_chunk_ptr(c.chunkptr, Npost, colptr, I, spikes)
+    if ptr === nothing
+        @inbounds for j ∈ spikes # loop on presynaptic neurons that fired
+            @inbounds @fastmath @simd for s ∈ colptr[j]:(colptr[j+1]-1)
+                g[I[s]] += W[s] * ρ[s]
+            end
+        end
+    else
+        # partition by postsynaptic range: chunk `ch` handles the entries of every spiking column whose post lies in its range
+        foreach_chunk_c(Npost) do ch, rng
+            _forward_chunk!(g, W, ρ, I, ptr, ch, spikes)
+        end
+    end
+end
+
+@inline function _forward_chunk!(g, W, ρ, I, ptr, ch, spikes)
+    @inbounds for j ∈ spikes
+        @inbounds @fastmath @simd for s ∈ ptr[ch, j]:(ptr[ch+1, j]-1)
             g[I[s]] += W[s] * ρ[s]
         end
     end
 end
 
+_chunkptr(c::SpikingSynapse) = c.chunkptr
 presynaptic_spikes(c::SpikingSynapse) = spike_list!(c.pre_spikes, c.fireJ)
 postsynaptic_spikes(c::SpikingSynapse) = spike_list!(c.post_spikes, c.fireI)
 prepare_spikes!(c::SpikingSynapse) = (_arm!(c.pre_spikes); _arm!(c.post_spikes))
@@ -369,23 +399,48 @@ increments that arrive in the current step and clear them.
 """
 function forward!(c::SpikingSynapse, param::SpikingSynapseDelayParameter, dt::AbstractFloat, T::Time)
     @unpack colptr, I, W, g, ρ = c
-    _delay_steps!(param, dt, length(c.fireI))
+    Npost = length(c.fireI)
+    _delay_steps!(param, dt, Npost)
     @unpack delaysteps, buffer = param
     nslots = size(buffer, 2)
     pos = param.pos[1]
-    @inbounds for j ∈ presynaptic_spikes(c) # loop on presynaptic neurons that fired
-        for s ∈ colptr[j]:(colptr[j+1]-1)
+    spikes = presynaptic_spikes(c)
+    # the arrival pass over the Npost targets counts as Npost / 4 operations
+    ptr = _syn_chunk_ptr(c.chunkptr, Npost, colptr, I, spikes, Npost >> 2)
+    if ptr === nothing
+        @inbounds for j ∈ spikes # loop on presynaptic neurons that fired
+            for s ∈ colptr[j]:(colptr[j+1]-1)
+                slot = pos + delaysteps[s]
+                slot >= nslots && (slot -= nslots)
+                buffer[I[s], slot+1] += W[s] * ρ[s]
+            end
+        end
+        # arrivals of this step
+        @inbounds @simd for i ∈ axes(buffer, 1)
+            g[i] += buffer[i, pos+1]
+            buffer[i, pos+1] = 0
+        end
+    else
+        # chunk `ch` owns the rows `rng` of the ring buffer (its targets): it adds the increments of its sub-rows and then the arrivals of its targets
+        foreach_chunk_c(Npost) do ch, rng
+            _delay_chunk!(g, W, ρ, I, ptr, ch, rng, spikes, delaysteps, buffer, pos, nslots)
+        end
+    end
+    param.pos[1] = pos + 1 == nslots ? 0 : pos + 1
+end
+
+@inline function _delay_chunk!(g, W, ρ, I, ptr, ch, rng, spikes, delaysteps, buffer, pos, nslots)
+    @inbounds for j ∈ spikes
+        for s ∈ ptr[ch, j]:(ptr[ch+1, j]-1)
             slot = pos + delaysteps[s]
             slot >= nslots && (slot -= nslots)
             buffer[I[s], slot+1] += W[s] * ρ[s]
         end
     end
-    # arrivals of this step
-    @inbounds @simd for i ∈ axes(buffer, 1)
+    @inbounds @simd for i ∈ rng
         g[i] += buffer[i, pos+1]
         buffer[i, pos+1] = 0
     end
-    param.pos[1] = pos + 1 == nslots ? 0 : pos + 1
 end
 
 

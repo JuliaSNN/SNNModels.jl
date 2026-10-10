@@ -78,17 +78,32 @@ function update_synapses!(
     synvars::SingleExpSynapseVars,
     dt::Float32,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractSinExpParameter,RECT<:NamedTuple}
-    @unpack N, ge, gi = synvars
+    update_synapses!(p, synapse, receptors, synvars, dt, 1:Int(synvars.N))
+end
+
+# Chunk method: the neurons `rng` only; clears the spike buffers of the same neurons. `@noinline` and a separate clearing loop keep the `@fastmath`
+# loop compiled as in SNNModels <= 1.9 (inlined, or with the stores in the loop, LLVM generates different last-bit results for some N).
+@noinline function update_synapses!(
+    p::P,
+    synapse::T,
+    receptors::RECT,
+    synvars::SingleExpSynapseVars,
+    dt::Float32,
+    rng::UnitRange{Int},
+) where {P<:AbstractGeneralizedIF,T<:AbstractSinExpParameter,RECT<:NamedTuple}
+    @unpack ge, gi = synvars
     @unpack τe, τi = synapse
     @unpack glu, gaba = receptors
-    @fastmath @inbounds for i ∈ 1:N
+    @fastmath @inbounds for i ∈ rng
         ge[i] += glu[i]
         gi[i] += gaba[i]
         ge[i] += dt * (-ge[i] / τe)
         gi[i] += dt * (-gi[i] / τi)
     end
-    fill!(glu, 0.0f0)
-    fill!(gaba, 0.0f0)
+    @inbounds for i ∈ rng
+        glu[i] = 0.0f0
+        gaba[i] = 0.0f0
+    end
 end
 
 @inline function synaptic_current!(
@@ -97,6 +112,7 @@ end
     synvars::SingleExpSynapseVars,
     v::VT1, # membrane potential
     syncurr::VT2, # synaptic current
+    rng::UnitRange{Int} = 1:Int(p.N),
 ) where {
     P<:AbstractGeneralizedIF,
     T<:AbstractSinExpParameter,
@@ -104,11 +120,12 @@ end
     VT2<:AbstractVector,
 }
     @unpack gsyn_e, gsyn_i, E_e, E_i = synapse
-    @unpack N, = p
     @unpack ge, gi = synvars
-    @inbounds @simd for i ∈ 1:N
+    @inbounds @simd for i ∈ rng
         syncurr[i] = ge[i] * (v[i] - E_e) * gsyn_e + gi[i] * (v[i] - E_i) * gsyn_i
     end
 end
+
+_chunk_synapse(::AbstractSinExpParameter) = true
 
 export SingleExpSynapse

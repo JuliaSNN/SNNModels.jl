@@ -238,6 +238,34 @@ current_value(v::MarkramSTPVariables, param::MarkramSTPParameterTimestep, key::S
 _relax_event(y, last_spike, target, τ, t::Real) =
     target .- (target .- y) .* exp.(-max.(t .- last_spike, zero(eltype(y))) ./ τ)
 
+# Efficacy of the synapses of the neurons that spiked: `ρ[s] = _ρ[j]` for every outgoing synapse `s` of each spiking `j`. The per-neuron
+# state (`u`, `x`, `_ρ`) is updated once, serially, by the callers (it is per presynaptic neuron and O(spikes)); this fan-out copy is
+# partitioned by postsynaptic range like `forward!`, so the chunk that reads `ρ[s]` in `forward!` is the one that wrote it.
+function _set_efficacy!(c, spikes, _ρ)
+    @unpack colptr, I, ρ = c
+    Npost = length(c.fireI)
+    ptr = _syn_chunk_ptr(_chunkptr(c), Npost, colptr, I, spikes)
+    if ptr === nothing
+        @inbounds for j in spikes
+            @simd for s = colptr[j]:(colptr[j+1]-1)
+                ρ[s] = _ρ[j]
+            end
+        end
+    else
+        foreach_chunk_c(Npost) do ch, rng
+            _set_efficacy_chunk!(ρ, _ρ, ptr, ch, spikes)
+        end
+    end
+    return nothing
+end
+@inline function _set_efficacy_chunk!(ρ, _ρ, ptr, ch, spikes)
+    @inbounds for j in spikes
+        @simd for s = ptr[ch, j]:(ptr[ch+1, j]-1)
+            ρ[s] = _ρ[j]
+        end
+    end
+end
+
 function update_traces!(
     c::PT,
     param::MarkramSTPParameterEvent,
@@ -263,11 +291,9 @@ function update_traces!(
         # Mongillo, Barak & Tsodyks 2008: u jumps first; release and depletion both use u+
         u[j] += U * (1 - u[j])
         _ρ[j] = u[j] * x[j]
-        @turbo for s = colptr[j]:(colptr[j+1]-1)
-            ρ[s] = _ρ[j]
-        end
         x[j] -= u[j] * x[j]
     end
+    _set_efficacy!(c, presynaptic_spikes(c), _ρ)
 end
 
 function update_traces!(
@@ -295,11 +321,9 @@ function update_traces!(
         # Mongillo, Barak & Tsodyks 2008: u jumps first; release and depletion both use u+
         u[j] += U[j] * (1 - u[j])
         _ρ[j] = u[j] * x[j]
-        @turbo for s = colptr[j]:(colptr[j+1]-1)
-            ρ[s] = _ρ[j]
-        end
         x[j] -= u[j] * x[j]
     end
+    _set_efficacy!(c, presynaptic_spikes(c), _ρ)
 end
 
 
@@ -345,11 +369,9 @@ function update_traces!(
     @inbounds for j in presynaptic_spikes(c)
         u[j] += U * (1 - u[j])
         _ρ[j] = u[j] * x[j]
-        @simd for s = colptr[j]:(colptr[j+1]-1)
-            ρ[s] = _ρ[j]
-        end
         x[j] -= u[j] * x[j]
     end
+    _set_efficacy!(c, presynaptic_spikes(c), _ρ)
 end
 
 

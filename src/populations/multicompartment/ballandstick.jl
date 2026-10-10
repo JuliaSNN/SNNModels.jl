@@ -173,40 +173,72 @@ Advance a `BallAndStick` population by `dt` (synapses, Heun step of soma and den
 and refractoriness; see `BallAndStick`).
 """
 function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
-    @unpack N, v_s, w_s, v_d = p
-    @unpack fire, θ, tabs = p
-    @unpack Δv, Δv_temp, is = p
-
-    @unpack synvars_s, synvars_d, d = p
-    @unpack receptors_d, receptors_s = p
-
-    @unpack spike, adex, soma_syn, dend_syn, Vspike = p
-    @unpack AP_membrane, up, τabs, At, τA = spike
-    @unpack Vr, Vt, b = adex
+    N = Int(p.N)
+    @unpack spike, soma_syn, dend_syn = p
+    @unpack τabs, up = spike
     # refractory counters in steps; each period lasts at least one step
     n_abs = max(1, round(Int, τabs / dt))
     n_ref = max(1, round(Int, up / dt)) + n_abs
-
-    update_synapses!(p, soma_syn, receptors_s, synvars_s, dt)
-    update_synapses!(p, dend_syn, receptors_d, synvars_d, dt)
-
-    ## Heun integration
-    fill!(Δv, 0.0f0)
-    fill!(Δv_temp, 0.0f0)
-    fill!(fire, false)
-    update_neuron!(p, param, Δv, dt)
-    Δv_temp .= Δv
-    update_neuron!(p, param, Δv, dt)
-
-    _check_state_lengths(N, v_s, w_s, v_d, fire, θ, tabs, d.gax, d.C)
-    (size(Δv, 1) >= N && size(Δv, 2) >= 3 && size(Δv_temp, 1) >= N && size(Δv_temp, 2) >= 3) ||
+    _check_state_lengths(N, p.v_s, p.w_s, p.v_d, p.fire, p.θ, p.tabs, p.d.gax, p.d.C)
+    (size(p.Δv, 1) >= N && size(p.Δv, 2) >= 3 && size(p.Δv_temp, 1) >= N && size(p.Δv_temp, 2) >= 3) ||
         throw(DimensionMismatch("Δv and Δv_temp must have N rows and 3 columns"))
+    if _chunk_synapse(soma_syn) && _chunk_synapse(dend_syn)
+        # one fork/join per population and step, every chunk with its own scratch slot of `ic` (see `Tripod`)
+        nc = nchunks(N, _BPC[])
+        (nc > 1 && Threads.nthreads() > 1 && length(p.ic) < SCRATCH_STRIDE * nc) && resize!(p.ic, SCRATCH_STRIDE * nc)   # serial: the two-element `ic` as before
+        foreach_chunk_c(N) do c, rng
+            _bas_chunk!(p, param, dt, rng, (c - 1) * SCRATCH_STRIDE, n_abs, n_ref)
+        end
+    else
+        update_synapses!(p, soma_syn, p.receptors_s, p.synvars_s, dt)
+        update_synapses!(p, dend_syn, p.receptors_d, p.synvars_d, dt)
+        fill!(p.Δv, 0.0f0)
+        fill!(p.Δv_temp, 0.0f0)
+        fill!(p.fire, false)
+        update_neuron!(p, param, p.Δv, dt)
+        p.Δv_temp .= p.Δv
+        update_neuron!(p, param, p.Δv, dt)
+        _bas_state!(p, dt, 1:N, n_abs, n_ref)
+    end
+end
+
+function _bas_chunk!(p::BallAndStick, param::DendNeuronParameter, dt::Float32, rng::UnitRange{Int}, ico::Int, n_abs::Int, n_ref::Int)
+    @unpack Δv, Δv_temp, fire = p
+    @unpack soma_syn, dend_syn = p
+    update_synapses!(p, soma_syn, p.receptors_s, p.synvars_s, dt, rng)
+    update_synapses!(p, dend_syn, p.receptors_d, p.synvars_d, dt, rng)
+    @inbounds for k in 1:3
+        @simd ivdep for i in rng
+            Δv[i, k] = 0.0f0
+            Δv_temp[i, k] = 0.0f0
+        end
+    end
+    @inbounds for i in rng
+        fire[i] = false
+    end
+    update_neuron!(p, param, Δv, dt, rng, ico)
+    @inbounds for k in 1:3
+        @simd ivdep for i in rng
+            Δv_temp[i, k] = Δv[i, k]
+        end
+    end
+    update_neuron!(p, param, Δv, dt, rng, ico)
+    _bas_state!(p, dt, rng, n_abs, n_ref)
+end
+
+function _bas_state!(p::BallAndStick, dt::Float32, rng::UnitRange{Int}, n_abs::Int, n_ref::Int)
+    @unpack v_s, w_s, v_d, fire, θ, tabs, Δv, Δv_temp, d = p
+    @unpack spike, adex, Vspike = p
+    @unpack AP_membrane, At, τA = spike
+    @unpack Vr, Vt, b = adex
     gax, Cd = d.gax, d.C
     nabs_f = convert(eltype(tabs), n_abs)    # the counters are `Float32`: compare and store without mixing types
     nref_f = convert(eltype(tabs), n_ref)
     # Branchless (`ifelse`) and vectorised, bit-identical to the branching loop of SNNModels <= 1.9 (backpropagation period,
     # absolute refractory period, free integration or spike): all the cases are evaluated and the one that applies is kept.
-    @inbounds @simd for i ∈ 1:N
+    # `ivdep`: with a chunk range that does not start at 1 LLVM cannot exclude that the store to `Δv[i, 1]` overlaps the loads of the other columns
+    # of `Δv` and does not vectorise (5x slower); they never overlap (distinct matrix entries).
+    @inbounds @simd ivdep for i ∈ rng
         t1 = tabs[i] - 1
         th1 = θ[i] + dt * (Vt - θ[i]) / τA
         bp = t1 > nabs_f                # backpropagation period
@@ -246,6 +278,18 @@ end
     Δv::Matrix{Float32},
     dt::Float32,
 )
+    update_neuron!(p, param, Δv, dt, 1:Int(p.N), 0)
+end
+
+# One Heun stage for the neurons `rng`; `ico` = offset of this chunk's scratch slot in `p.ic` (0: the serial one)
+@inline function update_neuron!(
+    p::BallAndStick,
+    param::DendNeuronParameter,
+    Δv::Matrix{Float32},
+    dt::Float32,
+    rng::UnitRange{Int},
+    ico::Int,
+)
     @unpack v_d, v_s, w_s, θ, Is, Id = p
     @unpack d = p
     @unpack is, ic, v_pred = p
@@ -260,32 +304,37 @@ end
     _check_state_lengths(N, v_s, v_d, w_s, θ, Is, Id, dgax, dgm, dEl, dC)
     (size(Δv, 1) >= N && size(Δv, 2) >= 3 && size(is, 1) >= N && size(is, 2) >= 2 && size(v_pred, 1) >= N && size(v_pred, 2) >= 2) ||
         throw(DimensionMismatch("Δv, is and v_pred must have N rows (3, 2 and 2 columns)"))
+    (last(rng) <= N && ico + 1 <= length(ic)) || throw(BoundsError(ic, ico + 1))
 
-    @inbounds @simd for i ∈ 1:N
+    @inbounds @simd ivdep for i ∈ rng
         v_pred[i, 1] = v_s[i] + Δv[i, 1] * dt
         v_pred[i, 2] = v_d[i] + Δv[i, 2] * dt
     end
 
-    @views synaptic_current!(p, soma_syn, synvars_s, v_pred[:, 1], is[:, 1])
-    @views synaptic_current!(p, dend_syn, synvars_d, v_pred[:, 2], is[:, 2])
-    clamp!(is, -1000, 1000)
+    @views _synaptic_current!(p, soma_syn, synvars_s, v_pred[:, 1], is[:, 1], rng)
+    @views _synaptic_current!(p, dend_syn, synvars_d, v_pred[:, 2], is[:, 2], rng)
+    @inbounds for k in 1:2
+        @simd ivdep for i in rng
+            is[i, k] = clamp(is[i, k], -1000.0f0, 1000.0f0)
+        end
+    end
 
     # This `@fastmath` loop is kept as it was (scalar, `ic` stored and reloaded), see `Tripod`: with the axial current in a register it vectorises
-    # (about 5x faster) but the derivatives differ in the last bit.
-    @fastmath @inbounds for i ∈ 1:N
+    # (about 5x faster) but the derivatives differ in the last bit. `ic` is per chunk (slot at `ico`).
+    @fastmath @inbounds for i ∈ rng
         vs = v_pred[i, 1]
         vd = v_pred[i, 2]
         ws = w_s[i] + Δv[i, 3] * dt
-        ic[1] = (vs - vd) * dgax[i] # axial current soma -> d
+        ic[ico+1] = (vs - vd) * dgax[i] # axial current soma -> d
         Δv[i, 1] =
             (
                 gl * (El - vs) +
                 gl * ΔT * exp256((vs - θ[i]) / ΔT) - ws  # adaptation
                 - is[i, 1]   # synapses
-                - ic[1] # axial current
+                - ic[ico+1] # axial current
                 + Is[i]  # external current
             ) / C
-        Δv[i, 2] = ((dEl[i] - vd) * dgm[i] - is[i, 2] + ic[1] + Id[i]) / dC[i]
+        Δv[i, 2] = ((dEl[i] - vd) * dgm[i] - is[i, 2] + ic[ico+1] + Id[i]) / dC[i]
         Δv[i, 3] = (a * (vs - El) - ws) / τw
     end
 end

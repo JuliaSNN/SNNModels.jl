@@ -194,10 +194,15 @@ end
 # SNNModels <= 1.9 (every value that is kept goes through the same floating-point operations in the same order).
 # The exponential term does not depend on the neuron through anything but `v` and `θ`; for a refractory neuron it may overflow to `Inf`,
 # which is discarded. Hoisted out of the loop: `round(Int, τabs / dt)` and the test `ΔT < 0`.
+function update_neuron!(p::P, param::T, dt::Float32) where {P<:AdEx,T<:AdExParameter}
+    update_neuron!(p, param, dt, 1:Int(p.N))
+end
+
 function update_neuron!(
     p::P,
     param::T,
     dt::Float32,
+    rng::UnitRange{Int},
 ) where {P<:AdEx,T<:AdExParameter{Float32}}
     @unpack N, v, w, fire, θ, I, tabs, syn_curr = p
     @unpack τm, Vt, Vr, El, R, ΔT, τw, a, b = param
@@ -206,7 +211,7 @@ function update_neuron!(
     nabs = round(Int, τabs / dt)    # refractory steps, loop invariant
     useexp = !(ΔT < 0.0f0)          # the exponential term is removed by a negative slope factor
 
-    @inbounds @simd for i ∈ 1:N
+    @inbounds @simd for i ∈ rng
         vi = ifelse(fire[i], Vr, v[i])      # reset after the spike of the previous step
         ti = tabs[i] - 1
         act = ti <= 0                       # not refractory
@@ -240,6 +245,7 @@ function update_neuron!(
     p::P,
     param::T,
     dt::Float32,
+    rng::UnitRange{Int},
 ) where {P<:AdEx,T<:AdExParameter{Vector{Float32}}}
     @unpack N, v, w, fire, θ, I, tabs, syn_curr = p
     @unpack τm, Vt, Vr, El, R, ΔT, τw, a, b = param
@@ -247,7 +253,7 @@ function update_neuron!(
     _check_state_lengths(N, v, w, fire, θ, I, tabs, syn_curr, τm, Vt, Vr, El, R, ΔT, τw, a, b)
     nabs = round(Int, τabs / dt)
 
-    @inbounds @simd for i ∈ 1:N
+    @inbounds @simd for i ∈ rng
         vi = ifelse(fire[i], Vr[i], v[i])
         ti = tabs[i] - 1
         act = ti <= 0
@@ -276,5 +282,7 @@ function update_neuron!(
     end
 end
 
+
+_chunk_population(::AdEx) = true
 
 export AdEx, AdExParameter

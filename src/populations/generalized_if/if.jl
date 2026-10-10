@@ -204,6 +204,16 @@ function update_neuron!(
     param::T,
     dt::AbstractFloat,
 ) where {T<:AbstractGeneralizedIFParameter}
+    update_neuron!(p, param, dt, 1:Int(p.N))
+end
+
+# Chunk method: the neurons `rng` only (see `foreach_chunk`); the neurons are independent, so the result does not depend on the split.
+function update_neuron!(
+    p::IF,
+    param::T,
+    dt::AbstractFloat,
+    rng::UnitRange{Int},
+) where {T<:AbstractGeneralizedIFParameter}
     @unpack N, v, w, I, tabs, fire, syn_curr = p
     @unpack τm, El, R, Vt, Vr = param
     @unpack τabs = p.spike
@@ -213,7 +223,7 @@ function update_neuron!(
 
     # Branchless: the membrane update is evaluated for every neuron and discarded for the refractory ones,
     # which keeps the loop free of control flow so that it vectorises.
-    @inbounds @simd for i = 1:N
+    @inbounds @simd for i in rng
         ti = tabs[i]
         vi = v[i]
         refr = ti > 0
@@ -228,7 +238,7 @@ function update_neuron!(
     # Adaptation current
     if (hasfield(typeof(param), :τw) && param.τw > 0)
         @unpack a, b, τw = param
-        @inbounds @simd for i = 1:N
+        @inbounds @simd for i in rng
             w[i] = ifelse(fire[i], w[i] + b, w[i])
             (w[i] += dt * (a * (v[i] - El) - w[i]) / τw)
         end
@@ -248,6 +258,7 @@ end
     throw(DimensionMismatch("population state vector of length $L is shorter than N = $N"))
 end
 
+_chunk_population(::IF) = true
 _float64_supported(p::IF) = p.synapse isa DoubleExpSynapse
 
 # one precision per population: the parameter objects must have the type of the state arrays (`float_type`)
