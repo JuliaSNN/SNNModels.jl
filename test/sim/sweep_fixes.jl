@@ -76,7 +76,8 @@ end
     end
     H = HH(N = 1); H.ge .= 0; H.gi .= 0
     nf, np = flags_and_peaks(H, 500.0f0, 0.01f0, 200.0f0)
-    @test np > 2 && nf == np
+    # the initial membrane potential is random: a spike flagged in the last step may not have reached its maximum yet (at most one)
+    @test np > 2 && abs(nf - np) <= 1
     # Default MorrisLecar fires once and then stays depolarised under a constant current:
     # use three current pulses separated by pauses.
     M = MorrisLecar(N = 1)

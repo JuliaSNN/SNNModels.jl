@@ -172,6 +172,10 @@ SNN.sim!(; model, duration = 100ms)
 """
 PoissonStimulus
 
+# Does `stimulate!` of the `PoissonStimulus` with this parameter log the neurons it writes in `inbox`? True for the built-in parameters.
+_logs_writes(::PoissonStimulusParameter) = false
+_logs_writes(::Union{PoissonFixed,PoissonVariable,PoissonInterval}) = true
+
 @snn_kw struct PoissonStimulus{VFT = Vector{Float32},PT <: PoissonStimulusParameter,TLT = Nothing} <: AbstractStimulus
     id::String = randstring(12)
     name::String = "Poisson"
@@ -210,7 +214,9 @@ function PoissonStimulus(
         end
     end
 
-    inbox = attach_driver!(post)
+    # only the built-in parameters log the neurons they write; a user-defined parameter with its own `stimulate!` does not, so the
+    # target keeps its dense update (see `attach_driver!`)
+    inbox = _logs_writes(param) ? attach_driver!(post) : nothing
     return PoissonStimulus(;
         VFT = Vector{eltype(g)},
         param = param,

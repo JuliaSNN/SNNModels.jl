@@ -593,6 +593,34 @@ end
         @test sum(abs, a1[1]) > 0
     end
 
+    @testset "a PoissonStimulus with a user-defined parameter keeps the dense update of an Identity target" begin
+        # a `stimulate!` written by the user does not log the neurons it writes, so the target must not rely on a log
+        @eval SNNModels begin
+            @snn_kw struct _TestCustomPoisson <: PoissonStimulusParameter
+                rate::Float32 = 100Hz
+                active::VBT = [true]
+            end
+            function stimulate!(p::PoissonStimulus, param::_TestCustomPoisson, time::Time, dt::Float32)
+                @inbounds for n in p.neurons
+                    rand() < param.rate * dt && (p.g[n] += 1.0f0)
+                end
+            end
+        end
+        neuron = Identity(N = 50)
+        stim = Stimulus(SNNModels._TestCustomPoisson(rate = 200Hz), neuron, :g)
+        @test stim.inbox === nothing
+        nsp = 0
+        Random.seed!(4)
+        T = Time()
+        for n in 1:5000
+            update_time!(T, dt)
+            stimulate!(stim, stim.param, T, dt)
+            SNNModels.integrate!(neuron, neuron.param, dt)
+            nsp += count(neuron.fire)
+        end
+        @test nsp > 0.9 * 50 * 5000 * 200Hz * dt && nsp < 1.1 * 50 * 5000 * 200Hz * dt
+    end
+
     @testset "no allocation per step" begin
         function allocs(stim, T, dt)
             stimulate!(stim, stim.param, T, dt)
