@@ -40,6 +40,7 @@ _suite_t0 = time()
     _ts("record_extend",  "utils/record_extend_test.jl")
     _ts("structs",        "utils/structs_test.jl")
     _ts("util",           "utils/util_test.jl")
+    _ts("inline_math",    "utils/inline_math_test.jl")
     _ts("io",             "utils/io_test.jl")
     _ts("sparse_matrix",  "utils/sparse_matrix_test.jl")
     _ts("sparse_gen",     "utils/sparse_matrix_gen_test.jl")
@@ -57,6 +58,12 @@ end
     _ts("wilsoncowan",  "pop/wilsoncowan.jl")
     _ts("hetrec",       "pop/hetrec.jl")
     _inc("if_neuron",    "pop/if_neuron.jl")
+    _inc("if_update_loop", "pop/if_update_loop.jl")
+    _inc("adex_update_loop", "pop/adex_update_loop.jl")
+    _inc("extendedif_update_loop", "pop/extendedif_update_loop.jl")
+    _inc("hh_iz_update_loop", "pop/hh_iz_update_loop.jl")
+    _inc("ml_rate_update_loop", "pop/ml_rate_update_loop.jl")
+    _inc("multicompartment_update_loop", "pop/multicompartment_update_loop.jl")
     _inc("adex_neuron",  "pop/adex_neuron.jl")
     _inc("iz_neuron",    "pop/iz_neuron.jl")
     _inc("hh_neuron",    "pop/hh_neuron.jl")
@@ -69,6 +76,8 @@ end
 @testset "Stimuli" verbose = true begin
     _ts("poisson",        "stim/poisson.jl")
     _ts("poisson_layer",  "stim/poisson_layer.jl")
+    _ts("poisson_sparse", "stim/poisson_sparse.jl")
+    _ts("poisson_pop_sparse", "stim/poisson_pop_sparse.jl")
     _ts("current",        "stim/current.jl")
     _ts("current_subset", "stim/current_subset_and_receptors.jl")
     _ts("timed",          "stim/timed.jl")
@@ -82,6 +91,13 @@ end
     _ts("with_plasticity",   "syn/with_plasticity.jl")
     _ts("float32",           "syn/float32.jl")
     _ts("stdp_event",        "syn/stdp_event.jl")
+    _ts("spike_index",       "syn/spike_index.jl")
+    _ts("spike_handoff",     "syn/spike_handoff.jl")
+    _ts("lazy_traces",       "syn/lazy_traces.jl")
+    _ts("lazy_traces_euler", "syn/lazy_traces_euler.jl")
+    _ts("vstdp",       "syn/vstdp.jl")
+    _ts("lazy_weights", "syn/lazy_weights.jl")
+    _ts("precision",   "syn/precision.jl")
     _ts("istdp_kernel",      "syn/istdp_kernel.jl")
     _ts("stp_mongillo",      "syn/stp_mongillo.jl")
     _ts("metaplasticity",    "syn/metaplasticity.jl")
@@ -108,6 +124,12 @@ _ts("sweep_fixes", "sim/sweep_fixes.jl")
     _inc("oja",        "network/oja.jl")
     _inc("rate_net",   "network/rate_net.jl")
     _inc("stdp_demo",  "network/stdp_demo.jl")
+end
+
+# ── Threading (off by default; the checks that need workers run with `julia -t N`, N > 1) ──
+@testset "Threading" verbose = true begin
+    _ts("threading",           "threading.jl")
+    _ts("threading_synapses",  "threading_synapses.jl")
 end
 
 # ── Timing report ─────────────────────────────────────────────────────────────
