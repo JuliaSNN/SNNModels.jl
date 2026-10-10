@@ -40,7 +40,9 @@ Build a [`SpikeTimeStimulusParameter`](@ref).
 - `SpikeTimeParameter(st::Spiketimes)` (and `Vector{Vector{Float64}}`): flattens one vector of
   spike times per input neuron (`st[i]` are the times of neuron `i`) and sorts by time.
 - The keyword form `SpikeTimeParameter(; neurons, spiketimes)` passes the vectors to the
-  struct unchanged: it does NOT sort, so the spike times must already be sorted.
+  struct unchanged: it does NOT sort, so the spike times must already be sorted, and it keeps their type: pass
+  `Float64` times (sorted) to have them exactly in a `Float64` network (the stimulus converts the parameter to the
+  precision of its target population, `float_type`; the other forms round the times to `Float32` first).
 
 # Example
 ```julia
@@ -111,6 +113,9 @@ the first step whose end time is ``\ge t_k``; the timing resolution is `dt`.
 - `fire::Vector{Bool}`: input neurons that fired in the last step (recordable with
   `monitor!(stim, :fire)`).
 - `records::Dict`, `targets::Dict`
+- `spiking`: the input neurons flagged in `fire` (so that the next step clears only those flags).
+- `inbox`: the log of the neurons of `post` written in the current step (`TouchList`) if `post` has a
+  sparse update (`Identity`), `nothing` otherwise.
 
 To reuse the stimulus with new spikes call `update_spikes!` or `shift_spikes!`, which also
 rewind `next_index`/`next_spike`.
@@ -128,11 +133,11 @@ SNN.sim!(; model, duration = 50ms)
 """
 SpikeTimeStimulus
 
-@snn_kw struct SpikeTimeStimulus{VFT = Vector{Float32}} <: AbstractStimulus
+@snn_kw struct SpikeTimeStimulus{VFT = Vector{Float32},PT <: SpikeTimeStimulusParameter,TLT = Nothing} <: AbstractStimulus
     N::Int
     name::String = "SpikeTime"
     id::String = randstring(12)
-    param::SpikeTimeStimulusParameter
+    param::PT = SpikeTimeStimulusParameter()
     rowptr::VIT # row pointer of sparse W
     colptr::VIT # column pointer of sparse W
     I::VIT      # postsynaptic index of W
@@ -145,6 +150,8 @@ SpikeTimeStimulus
     fire::VBT = falses(N)
     records::Dict = Dict()
     targets::Dict = Dict()
+    spiking::TouchList = TouchList(0) # input neurons flagged in `fire` in the last step (TouchList used as a growing list)
+    inbox::TLT = nothing              # log of the neurons of `post` written (TouchList), if post has a sparse update
 end
 
 function SpikeTimeStimulus(
@@ -160,19 +167,26 @@ function SpikeTimeStimulus(
     # set the synaptic weight matrix
     N = isnothing(N) ? max_neuron(param) : N
 
-    w = sparse_matrix(N, post.N, conn)
-    rowptr, colptr, I, J, index, W = dsparse(w)
-
     targets = Dict(:pre => :SpikeTimeStim, :post => post.id)
     g, _ = synaptic_target(targets, post, sym, comp)
 
-    next_spike = zeros(Float32, 1)
+    # the stimulus has the precision of the variable it writes into (see `float_type`): weights and spike times follow
+    FT = eltype(g)
+    param = convert_precision(param, FT)
+    w = sparse_matrix(N, post.N, conn, FT)
+    rowptr, colptr, I, J, index, W = dsparse(w)
+
+    next_spike = zeros(FT, 1)
     next_index = zeros(Int, 1)
     next_spike[1] = isempty(param.spiketimes) ? Inf : param.spiketimes[1]
     next_index[1] = isempty(param.spiketimes) ? -1 : 1
+    inbox = attach_driver!(post)
 
     return SpikeTimeStimulus(;
+        VFT = Vector{FT},
         N = N,
+        inbox = inbox,
+        TLT = typeof(inbox),
         param = param,
         next_spike = next_spike,
         next_index = next_index,
@@ -228,26 +242,38 @@ function Stimulus(
 end
 
 """
-    stimulate!(s::SpikeTimeStimulus, param::SpikeTimeStimulusParameter, time::Time, dt::Float32)
+    stimulate!(s::SpikeTimeStimulus, param::SpikeTimeStimulusParameter, time::Time, dt)
 
-Clear `s.fire`, then deliver every pending spike with time `<= get_time(time)`: mark its
-input neuron in `s.fire`, add the weights of its outgoing connections to `s.g`, and advance
-`next_index`/`next_spike` (set to `-1`/`Inf` after the last spike). `dt` is unused.
+Clear the flags of `s.fire` set in the previous step, then deliver every pending spike with time
+`<= get_time(time)`: mark its input neuron in `s.fire`, add the weights of its outgoing
+connections to `s.g`, and advance `next_index`/`next_spike` (set to `-1`/`Inf` after the last
+spike). `dt` is unused.
+
+The flags are cleared where they were set (`s.spiking`), not by a pass over all `N` inputs. If
+the target population has a sparse update (`Identity`, see `attach_driver!`), every neuron whose
+input is incremented is also logged in `s.inbox`, so the population does not have to scan its
+input.
 """
 function stimulate!(
     s::SpikeTimeStimulus,
     param::SpikeTimeStimulusParameter,
     time::Time,
-    dt::Float32,
+    dt::AbstractFloat,
 )
-    @unpack colptr, I, W, fire, g, next_spike, next_index = s
+    @unpack colptr, I, W, fire, g, next_spike, next_index, spiking, inbox = s
     @unpack spiketimes, neurons = param
-    fill!(fire, false)
+    @inbounds for q in 1:spiking.n
+        fire[spiking.idx[q]] = false
+    end
+    spiking.n = 0
     while next_spike[1] <= get_time(time)
         j = neurons[next_index[1]] # loop on presynaptic neurons
         fire[j] = true
-        @inbounds @simd for s ∈ colptr[j]:(colptr[j+1]-1)
-            g[I[s]] += W[s]
+        _push!(spiking, j)
+        @inbounds for s ∈ colptr[j]:(colptr[j+1]-1)
+            i = I[s]
+            g[i] += W[s]
+            _touch!(inbox, i)
         end
         if next_index[1] < length(spiketimes)
             next_index[1] += 1

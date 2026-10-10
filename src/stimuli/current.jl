@@ -141,6 +141,7 @@ function CurrentStimulus(
     end
     targets =
         Dict(:pre => :Current, :post => post.id, :sym => :soma, :type=>:CurrentStimulus)
+    _require_float32("CurrentStimulus", getfield(post, sym))
     return CurrentStimulus(
         neurons = neurons,
         I = getfield(post, sym),

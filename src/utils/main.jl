@@ -56,13 +56,14 @@ function train!(
     S::Vector{TS} = [EmptyStimulus()];
     dt = 0.125ms,
     duration = 10ms,
-    time = Time(),
+    time = Time{_model_float(P)}(),
     perturbation! = nothing,
     pbar = false,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
-    dt = Float32(dt)
-    _allocate_records!(P, C, S, dt, Float32(duration))
-    dts = 0.0f0:dt:(duration-dt)
+    FT = eltype(time.t)
+    dt = FT(dt)
+    _allocate_records!(P, C, S, Float32(dt), Float32(duration))
+    dts = zero(FT):dt:(duration-dt)
     iter = pbar ? ProgressBar(dts, printing_delay=0.1) : dts
     start_time = get_time(time)
     firing_rates = Dict{String, Float32}(p.name => 0.f0 for p in P if haskey(p.records, :fire))
@@ -138,32 +139,45 @@ function train!(
     P::Vector{TP},
     C::Vector{TC},
     S::Vector{TS},
-    dt::Float32,
+    dt::AbstractFloat,
     T::Time,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
     record_zero!(P, C, S, T)
     update_time!(T, dt)
+    # every component gets `dt` in its own precision (float_type): a Float32 population in a Float64 model runs in Float32
     for s in S
-        stimulate!(s, getfield(s, :param), T, dt)
+        dts = _step_dt(s, dt)
+        stimulate!(s, getfield(s, :param), T, dts)
         record!(s, T)
     end
     for p in P
-        update_traces!(p, p.param, dt, T)
-        integrate!(p, p.param, dt)
-        plasticity!(p, p.param, dt, T)
+        dtp = _step_dt(p, dt)
+        update_traces!(p, p.param, dtp, T)
+        integrate!(p, p.param, dtp)
+        plasticity!(p, p.param, dtp, T)
         record!(p, T)
     end
     for c in C
-        update_traces!(c, c.param, dt, T)
-        forward!(c, c.param, dt, T)
-        plasticity!(c, c.param, dt, T)
+        dtc = _step_dt(c, dt)
+        prepare_spikes!(c)
+        update_traces!(c, c.param, dtc, T)
+        forward!(c, c.param, dtc, T)
+        plasticity!(c, c.param, dtc, T)
         record!(c, T)
+        release_spikes!(c)
     end
     # flush(stdout)  # removed from hot path: flushed every dt, ~10k calls/s
 end
 
-function record_zero!(P, C, S, T)
-    get_time(T) > 0.0f0 && return
+# `dt` in the precision of the component (a no-op when they agree)
+@inline _step_dt(c, dt::AbstractFloat) = convert(float_type(typeof(c)), dt)
+
+@inline function record_zero!(P, C, S, T)
+    get_time(T) > 0 && return nothing
+    return _record_zero!(P, C, S, T)
+end
+
+function _record_zero!(P, C, S, T)
     for p in P
         record!(p, T)
     end
@@ -236,13 +250,14 @@ function sim!(
     dt = 0.125f0,
     duration = 10.0f0,
     pbar = false,
-    time = Time(),
+    time = Time{_model_float(P)}(),
     perturbation! = nothing,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
-    dt = Float32(dt)
-    duration = Float32(duration)
-    _allocate_records!(P, C, S, dt, duration)
-    dts = 0.0f0:dt:(duration-dt)
+    FT = eltype(time.t)
+    dt = FT(dt)
+    duration = FT(duration)
+    _allocate_records!(P, C, S, Float32(dt), Float32(duration))
+    dts = zero(FT):dt:(duration-dt)
     iter = pbar ? ProgressBar(dts, printing_delay=0.1) : dts
     start_time = get_time(time)
     firing_rates = Dict{String, Float32}(p.name => 0.f0 for p in P if haskey(p.records, :fire))
@@ -288,22 +303,24 @@ function sim!(
     P::Vector{TP},
     C::Vector{TC},
     S::Vector{TS},
-    dt::Float32,
+    dt::AbstractFloat,
     T::Time,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
     record_zero!(P, C, S, T)
     update_time!(T, dt)
     for s in S
-        stimulate!(s, getfield(s, :param), T, dt)
+        stimulate!(s, getfield(s, :param), T, _step_dt(s, dt))
         record!(s, T)
     end
     for p in P
-        integrate!(p, getfield(p, :param), dt)
+        integrate!(p, getfield(p, :param), _step_dt(p, dt))
         record!(p, T)
     end
     for c in C
-        forward!(c, getfield(c, :param), dt, T)
+        prepare_spikes!(c)
+        forward!(c, getfield(c, :param), _step_dt(c, dt), T)
         record!(c, T)
+        release_spikes!(c)
     end
     # flush(stdout)
 end

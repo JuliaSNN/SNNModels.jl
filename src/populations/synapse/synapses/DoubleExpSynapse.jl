@@ -73,20 +73,14 @@ State variables of `DoubleExpSynapse`, created by `synaptic_variables(::DoubleEx
 DoubleExpSynapseVars
 @snn_kw struct DoubleExpSynapseVars{VFT = Vector{Float32}} <: AbstractSynapseVariable
     N::Int = 100
-    ge::VFT = zeros(Float32, N)
-    gi::VFT = zeros(Float32, N)
-    he::VFT = zeros(Float32, N)
-    hi::VFT = zeros(Float32, N)
+    ge::VFT = zeros(eltype(VFT), N)
+    gi::VFT = zeros(eltype(VFT), N)
+    he::VFT = zeros(eltype(VFT), N)
+    hi::VFT = zeros(eltype(VFT), N)
 end
 
-function synaptic_variables(synapse::DoubleExpSynapse, N::Int)
-    return DoubleExpSynapseVars(;
-        N = N,
-        ge = zeros(Float32, N),
-        gi = zeros(Float32, N),
-        he = zeros(Float32, N),
-        hi = zeros(Float32, N),
-    )
+function synaptic_variables(synapse::DoubleExpSynapse{FT}, N::Int) where {FT}
+    return DoubleExpSynapseVars(; N = N, VFT = Vector{FT})
 end
 
 function update_synapses!(
@@ -94,7 +88,7 @@ function update_synapses!(
     synapse::T,
     receptors::RECT,
     synvars::DoubleExpSynapseVars,
-    dt::Float32,
+    dt::AbstractFloat,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractDoubleExpParameter,RECT<:NamedTuple}
     @unpack N, ge, gi, he, hi = synvars
     @unpack τde, τre, τdi, τri = synapse
@@ -107,8 +101,8 @@ function update_synapses!(
         gi[i] += dt * (-gi[i] / τdi + hi[i])
         hi[i] += dt * (-hi[i] / τri)
     end
-    fill!(glu, 0.0f0)
-    fill!(gaba, 0.0f0)
+    fill!(glu, zero(eltype(glu)))
+    fill!(gaba, zero(eltype(gaba)))
 end
 
 

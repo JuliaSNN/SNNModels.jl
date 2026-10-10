@@ -53,16 +53,18 @@ end
 
 """
     Time(; t = [0.0f0], tt = Int32[0], dt = 0.125f0)
+    Time{FT}(; t = [zero(FT)], tt = Int32[0], dt = FT(0.125))
 
-Mutable simulation clock shared by all components of a model.
+Mutable simulation clock shared by all components of a model. `Time()` is a `Time{Float32}`; a model
+whose populations are `Float64` (see [`float_type`](@ref)) gets a `Time{Float64}` from `compose`.
 
 The values are stored in one-element vectors so that the clock can be shared and updated in place
 by `update_time!`. Use `get_time`, `get_step`, `get_dt` and `reset_time!` to read or reset it.
 
 # Fields
-- `t::Vector{Float32} = [0.0f0]`: current time (ms), `t[1]`.
+- `t::Vector{FT} = [0.0f0]`: current time (ms), `t[1]`.
 - `tt::Vector{Int32} = Int32[0]`: number of integration steps performed, `tt[1]`.
-- `dt::Float32 = 0.125f0`: time step (ms) of the last update.
+- `dt::FT = 0.125f0`: time step (ms) of the last update.
 
 # Example
 ```julia
@@ -73,17 +75,22 @@ SNN.get_time(T)   # 0.0f0
 """
 Time
 
-@kwdef mutable struct Time
-    t::Vector{Float32} = [0.0f0]
-    tt::Vector{Int32} = Int32[0]
-    dt::Float32 = 0.125f0
+mutable struct Time{FT<:AbstractFloat}
+    t::Vector{FT}
+    tt::Vector{Int32}
+    dt::FT
 end
+
+Time{FT}(; t = [zero(FT)], tt = Int32[0], dt = FT(0.125)) where {FT<:AbstractFloat} =
+    Time{FT}(Vector{FT}(t), Vector{Int32}(tt), FT(dt))
+Time(; kwargs...) = Time{Float32}(; kwargs...)
 
 """
     Time(time::Number; dt = 0.125f0)
+    Time{FT}(time::Number; dt = 0.125)
 
 Create a clock set at `time` (ms), with time step `dt` and step counter
-`tt = round(time / dt)`. (Up to SNNModels 1.8.4 `dt` was fixed to 0.125 ms and a `time` that
+`tt = round(time / dt)` (`Float32` unless `FT` is given). (Up to SNNModels 1.8.4 `dt` was fixed to 0.125 ms and a `time` that
 was not a multiple of it threw an `InexactError`.)
 
 # Example
@@ -92,12 +99,50 @@ using SpikingNeuralNetworks
 T = SNN.Time(100.0)   # t = 100 ms, tt = 800
 ```
 """
-function Time(time::Number; dt::Real = 0.125f0)
-    tts = round(Int32, Float32(time) / Float32(dt))
-    return Time([Float32(time)], Int32[tts], Float32(dt))
+function Time{FT}(time::Number; dt::Real = 0.125) where {FT<:AbstractFloat}
+    tts = round(Int32, FT(time) / FT(dt))
+    return Time{FT}([FT(time)], Int32[tts], FT(dt))
+end
+Time(time::Number; dt::Real = 0.125f0) = Time{Float32}(time; dt)
+
+"""
+    float_type(x)
+
+Floating-point element type of a model object: `Float32` or `Float64`. The precision of a model is chosen once, on
+its populations (a population built with `Vector{Float64}` state, for example `Identity(N = 10, VFT = Vector{Float64})`), and every
+connection and stimulus built on a population takes the type of the arrays it writes into (the target `g` of
+the population): `float_type(c) = eltype(c.W)` for a sparse synapse, `eltype(g)` for a stimulus. The state of the
+plasticity rules, the delay buffers, the caches and the clock follow. For a type it is the first type parameter that
+is a floating-point type or a vector of one (`Identity{Vector{Float64},Int32}` gives `Float64`), `Float32` if there is none.
+For a network (a `NamedTuple` as returned by `compose`) it is the promotion of the types of the populations.
+"""
+# generated: the answer is a constant of the type, so a call with a known type costs nothing in the step loop
+@generated float_type(::Type{T}) where {T} = (R = something(_float_type(T), Float32); :($R))
+float_type(x) = float_type(typeof(x))
+_float_type(::Type{T}) where {T<:AbstractFloat} = T
+_float_type(::Type{<:AbstractArray{T}}) where {T<:AbstractFloat} = T
+function _float_type(::Type{P}) where {P}
+    ps = P isa DataType ? P.parameters : ()
+    for p in ps   # a float, or a vector of floats, among the type parameters
+        p isa Type && (p <: AbstractFloat || p <: AbstractArray{<:AbstractFloat}) && return _float_type(p)
+    end
+    for p in ps   # parameters that are themselves parametric (PostSpike{Float32}, ...)
+        if p isa DataType && !isempty(p.parameters)
+            T = _float_type(p)
+            isnothing(T) || return T
+        end
+    end
+    return nothing
 end
 
-export Spiketimes, Time, NetworkModel
+# Components whose model is only implemented in Float32 refuse a target of another precision at construction (their
+# `VFT = Vector{Float32}` would otherwise copy the target variable and silently stop writing into it).
+_require_float32(what, arrays...) = all(a -> eltype(a) === Float32, arrays) ? nothing : throw(ArgumentError(
+    "$what is only implemented for Float32 (the variable it acts on has element type $(eltype(first(arrays)))). " *
+    "Float64 is implemented for: populations Identity, IF; connections SpikingSynapse (all plasticity rules), " *
+    "AggregateScaling, SynapseNormalization; stimuli SpikeTimeStimulus, PoissonStimulus, PoissonStimulusLayer. See `float_type`."))
+
+export Spiketimes, Time, NetworkModel, float_type, convert_precision
 export AbstractParameter,
     AbstractComponent,
     AbstractConnectionParameter,

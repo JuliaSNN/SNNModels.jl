@@ -139,10 +139,12 @@ function AggregateScaling(N, synapses; param::AggregateScalingParameter, kwargs.
     if !isa(N, Int)
         @unpack N = N
     end
-    WT = zeros(Float32, N)
-    Wt = zeros(Float32, N)
-    y = zeros(Float32, N)
-    μ = zeros(Float32, N)
+    FT = eltype(synapses[1].W)       # the precision of the synapses (see `float_type`)
+    param = convert_precision(param, FT)
+    WT = zeros(FT, N)
+    Wt = zeros(FT, N)
+    y = zeros(FT, N)
+    μ = zeros(FT, N)
     # populate the post-synaptic weight array
     fire = synapses[1].fireI
     for syn in synapses
@@ -156,18 +158,18 @@ function AggregateScaling(N, synapses; param::AggregateScalingParameter, kwargs.
             end
         end
     end
-    AggregateScaling(; N = Int32(N), @symdict(param, Wt, WT, y, μ, fire, synapses)..., targets, kwargs...)
+    AggregateScaling(; VFT = Vector{FT}, N = Int32(N), @symdict(param, Wt, WT, y, μ, fire, synapses)..., targets, kwargs...)
 end
 
 
 
 """
-    forward!(c::AggregateScaling, param::AggregateScalingParameter, dt::Float32, T::Time)
+    forward!(c::AggregateScaling, param::AggregateScalingParameter, dt::AbstractFloat, T::Time)
 
 Update the rate estimate `y` (see `AggregateScaling`). Runs at every step of `sim!` and
 `train!`.
 """
-function forward!(c::AggregateScaling, param::AggregateScalingParameter, dt::Float32, T::Time)
+function forward!(c::AggregateScaling, param::AggregateScalingParameter, dt::AbstractFloat, T::Time)
     @unpack y, fire = c
     @unpack τa = param
     @inbounds @simd for i in eachindex(fire)
@@ -176,7 +178,7 @@ function forward!(c::AggregateScaling, param::AggregateScalingParameter, dt::Flo
 end
 
 """
-    plasticity!(c::AggregateScaling, param::AggregateScalingParameter, dt::Float32, T::Time)
+    plasticity!(c::AggregateScaling, param::AggregateScalingParameter, dt::AbstractFloat, T::Time)
 
 Update the target summed weight `WT` and, when `get_step(T)` is a multiple of
 `max(1, round(Int, param.τ / dt))`, rescale the incoming weights (see `AggregateScaling`).
@@ -185,7 +187,7 @@ Called only by `train!`.
 function plasticity!(
     c::AggregateScaling,
     param::AggregateScalingParameter,
-    dt::Float32,
+    dt::AbstractFloat,
     T::Time,
 )
     @unpack y, WT = c
@@ -208,7 +210,8 @@ Rescale the incoming weights immediately: `W ← W μ + Wmin` with
 function plasticity!(c::AggregateScaling, param::AggregateScalingParameter)
     @unpack Wt, WT, μ, synapses, y = c
     @unpack τe, Y, Wmin = param
-    fill!(Wt, 0.0f0)
+    foreach(sync_weights!, synapses)   # the rescaling acts on the current weights (deferred updates are materialised)
+    fill!(Wt, zero(eltype(Wt)))
     nsyn = zeros(Int, length(Wt))
     for syn in synapses
         @unpack rowptr = syn
@@ -218,7 +221,7 @@ function plasticity!(c::AggregateScaling, param::AggregateScalingParameter)
     end
     for syn in synapses
         @unpack rowptr, W, index = syn
-        Threads.@threads for i = 1:(length(rowptr)-1) # Iterate over all postsynaptic neuron
+        for i = 1:(length(rowptr)-1) # Iterate over all postsynaptic neuron
             @inbounds @fastmath @simd for j = rowptr[i]:(rowptr[i+1]-1) # all presynaptic neurons of i
                 Wt[i] += W[index[j]]
             end
@@ -228,12 +231,12 @@ function plasticity!(c::AggregateScaling, param::AggregateScalingParameter)
 
     @inbounds for i in eachindex(μ)
         # neurons without input weight cannot be rescaled
-        μ[i] = Wt[i] > 0 ? max(WT[i] - nsyn[i] * Wmin, 0.0f0) / Wt[i] : 1.0f0
+        μ[i] = Wt[i] > 0 ? max(WT[i] - nsyn[i] * Wmin, zero(eltype(Wt))) / Wt[i] : one(eltype(μ))
     end
     # apply
     for syn in synapses
         @unpack rowptr, W, index = syn
-        Threads.@threads for i = 1:(length(rowptr)-1) # Iterate over all postsynaptic neuron
+        for i = 1:(length(rowptr)-1) # Iterate over all postsynaptic neuron
             @inbounds @fastmath @simd for j = rowptr[i]:(rowptr[i+1]-1) # all presynaptic neurons connected to neuron i
                 Wt[i] > 0 && (W[index[j]] = W[index[j]] * μ[i] + Wmin)
             end

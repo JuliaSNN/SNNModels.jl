@@ -115,10 +115,9 @@ end
 Switch a stimulus on or off by writing `stim.param.active[1] = active`. Warns and does
 nothing if the parameter has no `active` field.
 
-Only the `stimulate!` methods of `PoissonStimulus` (all `PoissonStimulusParameter`s) read
-the flag. `PoissonLayer` and `PoissonLayerHet` have an `active` field but their
-`stimulate!` ignores it (SNNModels 1.8.4), so `set_active!(stim, false)` does not silence a
-`PoissonStimulusLayer`.
+The `stimulate!` methods of `PoissonStimulus` (all `PoissonStimulusParameter`s) and of
+`PoissonStimulusLayer` (`PoissonLayer`, `PoissonLayerHet`) read the flag. (Up to SNNModels 1.8.4 the
+layer methods ignored it.)
 """
 function set_active!(stim::G, active::Bool) where {G<:AbstractStimulus}
     if hasfield(typeof(stim), :param) && hasfield(typeof(stim.param), :active)
@@ -129,3 +128,4 @@ function set_active!(stim::G, active::Bool) where {G<:AbstractStimulus}
 end
 
 export set_variable!, set_active!, set_intervals!, neurons, AbstractStimulus, AbstractStimulusParameter, Stimulus, StimulusGroup, stimulate!
+

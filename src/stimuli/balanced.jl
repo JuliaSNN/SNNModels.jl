@@ -111,6 +111,7 @@ function BalancedStimulus(
     targets = Dict(:pre => :BalancedStim, :post => post.id)
     ge, _ = synaptic_target(targets, post, sym_e, target)
     gi, _ = synaptic_target(targets, post, sym_i, target)
+    _require_float32("BalancedStimulus", ge, gi)
 
     if typeof(param) <: Real
         param = BalancedParameter(r0 = Float32(param))

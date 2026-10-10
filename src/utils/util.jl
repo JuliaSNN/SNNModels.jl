@@ -83,6 +83,32 @@ Inputs below `-10` are replaced by `-256`, so that the result is exactly `0`.
     return x
 end
 
+# `tanh` and `cosh` of a `Float32` with the `exp` call inlined. They are the algorithms of `Base.tanh` / `Base.cosh`
+# (same constants, same operations, so the same bits for every argument: see test/utils/inline_math_test.jl), but because
+# the exponential is inlined a loop that uses them vectorises (`@simd`); the `Base` functions call an out-of-line `exp`.
+@inline function _tanh_inl(x::Float32)
+    abs2x = abs(2x)
+    abs2x >= Base.Math.TANH_LARGE_X(Float32) && return copysign(one(Float32), x)
+    abs2x <= Base.Math.TANH_SMALL_X(Float32) && return x * Base.Math.tanh_kernel(x * x)
+    k = @inline exp(abs2x)
+    return copysign(1 - 2 / (k + 1), x)
+end
+
+@inline _tanh_inl(x::AbstractFloat) = tanh(x)     # other precisions: Base
+@inline _cosh_inl(x::AbstractFloat) = cosh(x)
+
+@inline function _cosh_inl(x::Float32)
+    absx = abs(x)
+    if absx <= Base.Math.COSH_SMALL_X(Float32)
+        return Base.Math.cosh_kernel(x * x)
+    elseif absx >= Base.Math.H_LARGE_X(Float32)
+        E = @inline exp(0.5f0 * absx)
+        return 0.5f0 * E * E
+    end
+    E = @inline exp(absx)
+    return 0.5f0 * (E + 1 / E)
+end
+
 """
     name(pre, post, k=nothing)
 
@@ -132,7 +158,7 @@ str_name(pre::String, k = nothing) = isnothing(k) ? "$pre" : "$(pre)_$(k)"
 
 
 """
-    compose(args...; name = randstring(10), silent = false, time = Time(), kwargs...)
+    compose(args...; name = randstring(10), silent = false, time = nothing, kwargs...)
 
 Assemble populations, connections and stimuli (or whole models) into one network model.
 
@@ -149,7 +175,7 @@ Returns the `NamedTuple` `(pop = ..., syn = ..., stim = ..., name = name, time =
   into without prefixing and the key `:name` is skipped.
 - `name`: model name (default: random 10-character string).
 - `silent = false`: if `false`, print the model summary with `print_model`.
-- `time = Time()`: the simulation clock of the new model. The clocks of merged models are
+- `time = nothing`: the simulation clock of the new model; by default a new `Time{FT}()` where `FT` is the promotion of the `float_type`s of the populations (`Float32` unless a population is `Float64`). The clocks of merged models are
   not reused: pass `time = model.time` to keep one.
 
 Components are classified by type (`AbstractPopulation`, `AbstractConnection`,
@@ -169,7 +195,7 @@ keys(model2.pop)   # (:E, :I, :extra_A)
 sim!(model, 100ms)
 ```
 """
-function compose(args...; name = randstring(10), silent = false, time = Time(), kwargs...)
+function compose(args...; name = randstring(10), silent = false, time = nothing, kwargs...)
     pop = Dict{Symbol,Any}()
     syn = Dict{Symbol,Any}()
     stim = Dict{Symbol,Any}()
@@ -186,6 +212,7 @@ function compose(args...; name = randstring(10), silent = false, time = Time(), 
     pop = DrWatson.dict2ntuple(sort(pop, by = x -> x))
     syn = DrWatson.dict2ntuple(sort(syn, by = x -> x))
     stim = DrWatson.dict2ntuple(sort(stim, by = x -> stim[x].name))
+    time = isnothing(time) ? Time{_model_float(values(pop))}() : time
     model = (pop = pop, syn = syn, stim = stim, name = name, time = time)
     if !silent
         print_model(model)
@@ -342,7 +369,7 @@ function extract_items(
     pop::Dict{Symbol,Any},
     syn::Dict{Symbol,Any},
     stim::Dict{Symbol,Any},
-    time::Time,
+    time,
 )
     function special_key(k)
         k == :pop || k == :syn || k == :stim
@@ -449,3 +476,7 @@ export compose,
     exp256,
     name,
     str_name
+
+
+# precision of a set of populations: the promotion of their float types (Float32 for none)
+_model_float(pops) = reduce(promote_type, (float_type(p) for p in pops); init = Float32)

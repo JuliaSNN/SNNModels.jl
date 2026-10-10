@@ -103,7 +103,8 @@ Allocate the spike-input buffers of a population: a `NamedTuple` of `Vector{Floa
 weights into these buffers and `update_synapses!` empties them at every step.
 """
 function synaptic_receptors(synapse::AbstractSynapseParameter, N::Int)
-    return (glu = zeros(Float32, N), gaba = zeros(Float32, N))
+    FT = float_type(synapse)
+    return (glu = zeros(FT, N), gaba = zeros(FT, N))
     # error("synaptic_receptors not implemented for synapse type $(typeof(synapse))")
 end
 

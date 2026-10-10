@@ -16,7 +16,7 @@ include("pinning_sparse_synapse.jl")
 include("spike_rate_synapse.jl")
 
 @doc raw"""
-    forward!(c::AbstractConnection, param::AbstractConnectionParameter, dt::Float32, T::Time)
+    forward!(c::AbstractConnection, param::AbstractConnectionParameter, dt::AbstractFloat, T::Time)
     forward!(c, param)
 
 Propagate the activity of the presynaptic population of connection `c` to its
@@ -40,12 +40,12 @@ What is added to the target depends on the connection type:
 The parameter type of a connection must be a subtype of `AbstractConnectionParameter` for the
 generic four-argument method to apply.
 """
-forward!(c::C, param::P, dt::Float32, T::Time) where {C<:AbstractConnection, P<:AbstractConnectionParameter} = forward!(c, param)
+forward!(c::C, param::P, dt::AbstractFloat, T::Time) where {C<:AbstractConnection, P<:AbstractConnectionParameter} = forward!(c, param)
 
 update_traces!(
     p::C,
     param::P,
-    dt::Float32,
+    dt::AbstractFloat,
     T::Time,
 ) where {C<:AbstractConnection, P<:AbstractConnectionParameter} = nothing
 
@@ -65,6 +65,28 @@ abstract type AbstractSparseSynapse <: AbstractConnection end
 Sparse connections driven by presynaptic spikes (`SpikingSynapse`).
 """
 abstract type AbstractSpikingSynapse <: AbstractSparseSynapse end
+
+"""
+    prepare_spikes!(c::AbstractConnection)
+    release_spikes!(c::AbstractConnection)
+
+Called by `train!` and `sim!` around the update of every connection: `prepare_spikes!` lets
+the connection reuse one index list of the spiking neurons for all its consumers during the
+step, `release_spikes!` drops it. No-op for connections without spike index lists.
+"""
+prepare_spikes!(c::AbstractConnection) = nothing
+release_spikes!(c::AbstractConnection) = nothing
+
+"""
+    presynaptic_spikes(c)
+    postsynaptic_spikes(c)
+
+Ascending `Int32` indices of the presynaptic (`c.fireJ`) and postsynaptic (`c.fireI`) neurons
+that fired in this step. `SpikingSynapse` serves them from its `SpikeIndex` lists; the generic
+methods (synapse types without the lists) scan the firing vector and allocate.
+"""
+presynaptic_spikes(c::AbstractSparseSynapse) = Int32[j for j in eachindex(c.fireJ) if c.fireJ[j]]
+postsynaptic_spikes(c::AbstractSparseSynapse) = Int32[i for i in eachindex(c.fireI) if c.fireI[i]]
 
 """
     AbstractSpikingSynapseParameter <: AbstractConnectionParameter
@@ -99,6 +121,35 @@ SNNModels 1.8.4; connectivity is passed as `conn::Union{NamedTuple,AbstractMatri
 """
 abstract type AbstractConnectivity end
 Connectivity = Union{NamedTuple,AbstractMatrix}
+
+"""
+    convert_precision(x, ::Type{T})
+
+Copy of the parameter object `x` (a plasticity rule, a metaplasticity parameter, a stimulus parameter, ...) with its floating
+point fields and type parameters converted to `T`; `x` itself if it already has type `T`. Used by the connection and
+stimulus constructors to bring a rule to the precision of the population it acts on, so a rule built with the default
+`Float32` parameters works on a `Float64` population (the values are those of the `Float32` numbers: build the rule with
+`FT = Float64`, for example `STDPGerstner(FT = Float64, A_pre = 1e-4)`, to have the `Float64` values) and a `Float64`
+rule on a `Float32` population is rounded to `Float32`. Fields that are not floating point (flags, integers) are kept
+(shared, not copied).
+"""
+convert_precision(x, ::Type{T}) where {T<:AbstractFloat} = x
+function convert_precision(x::P, ::Type{T}) where {P<:Union{AbstractParameter,PlasticityParameter},T<:AbstractFloat}
+    ps = P.parameters
+    isempty(ps) && return x
+    any(_is_float_param, ps) || return x
+    _float_type(P) === T && return x
+    newps = map(p -> _convert_param(p, T), ps)
+    vals = map(f -> _convert_value(getfield(x, f), T), fieldnames(P))
+    return Base.typename(P).wrapper{newps...}(vals...)
+end
+_is_float_param(p) = p isa Type && (p <: AbstractFloat || p <: AbstractArray{<:AbstractFloat} || p <: AbstractVector{<:AbstractVector{<:AbstractFloat}})
+_convert_param(p, ::Type{T}) where {T} = !(p isa Type) ? p : p <: AbstractFloat ? T : p <: AbstractArray{<:AbstractFloat} ? Vector{T} :
+    p <: AbstractVector{<:AbstractVector{<:AbstractFloat}} ? Vector{Vector{T}} : p
+_convert_value(v::AbstractFloat, ::Type{T}) where {T} = T(v)
+_convert_value(v::AbstractArray{<:AbstractFloat}, ::Type{T}) where {T} = convert(Vector{T}, v)
+_convert_value(v::AbstractVector{<:AbstractVector{<:AbstractFloat}}, ::Type{T}) where {T} = Vector{T}[convert(Vector{T}, x) for x in v]
+_convert_value(v, ::Type{T}) where {T} = v
 
 include("sparse_plasticity.jl")
 include("spiking_synapse.jl")

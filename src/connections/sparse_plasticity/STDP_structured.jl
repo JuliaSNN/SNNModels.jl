@@ -35,8 +35,9 @@ by 1 at a spike:
 
 # Integration
 `plasticity!` (only under `train!`): (1) pre-spike pass, (2) post-spike pass, both reading
-the traces before this step's spikes are added; (3) forward-Euler decay of all traces, then
-+1 for the neurons that fired; (4) clamp to `[Wmin, Wmax]` of the touched weights (all
+the traces before this step's spikes are added; (3) forward-Euler decay of all traces (factor
+`1 - dt/τ`), then +1 for the neurons that fired (the traces are stored lazily, one scale per trace type and
+no pass over the neurons: the stored vectors are not the values, read them with `trace_values`); (4) clamp to `[Wmin, Wmax]` of the touched weights (all
 weights once at the first step).
 
 # Fields
@@ -132,142 +133,117 @@ Traces of `STDPSymmetric` / `STDPAntiSymmetric`: `to_x`, `to_y` are postsynaptic
 (length `Npost`, time constants `τ_x`, `τ_y`), `tr_x`, `tr_y` presynaptic traces (length
 `Npre`). `STDPAntiSymmetric` uses only `tr_x` and `to_y`. `initialized` marks the one-off
 clamp of all weights; `active` enables the rule.
+
+!!! warning "The stored traces are not the trace values"
+    The Euler decay is lazy: the value of `to_x` is `to_x * scale[1]`, of `to_y` `to_y * scale[2]`,
+    of `tr_x` `tr_x * scale[3]`, of `tr_y` `tr_y * scale[4]`; `decay` caches `dt`, `τ_x`, `τ_y` and their
+    factors `1 - dt/τ`. Read values with `trace_values(syn, :to_x)`, `sync_traces!(syn)` first, or the recorder.
 """
 STDPStructuredVariables
 
-@snn_kw struct STDPStructuredVariables{VFT = Vector{Float32},IT = Int} <:
-               PlasticityVariables
+@snn_kw struct STDPStructuredVariables{VFT = Vector{Float32},IT = Int,VDT = Vector{Float64}} <:
+               LTPVariables
     Npost::IT                      # Number of post-synaptic neurons
     Npre::IT                       # Number of pre-synaptic neurons
-    to_x::VFT = zeros(Npost)        # post-synaptic spike trace, τ_x
-    to_y::VFT = zeros(Npost)        # post-synaptic spike trace, τ_y
-    tr_x::VFT = zeros(Npre)         # pre-synaptic spike trace, τ_x
-    tr_y::VFT = zeros(Npre)         # pre-synaptic spike trace, τ_y
+    to_x::VFT = zeros(Npost)        # STORED post-synaptic spike trace, τ_x (value = to_x * scale[1])
+    to_y::VFT = zeros(Npost)        # STORED post-synaptic spike trace, τ_y (times scale[2])
+    tr_x::VFT = zeros(Npre)         # STORED pre-synaptic spike trace, τ_x (times scale[3])
+    tr_y::VFT = zeros(Npre)         # STORED pre-synaptic spike trace, τ_y (times scale[4])
     initialized::VBT = [false]      # one-off clamp of all weights done
     active::VBT = [true]
+    scale::VDT = ones(4)            # factors of the stored traces (to_x, to_y, tr_x, tr_y)
+    decay::VDT = fill(NaN, 5)       # cached dt, τ_x, τ_y and their Euler factors 1 - dt/τ
 end
 
 function plasticityvariables(param::T, Npre, Npost) where {T<:STDPStructuredParameter}
-    return STDPStructuredVariables(Npre = Npre, Npost = Npost)
+    return STDPStructuredVariables(Npre = Npre, Npost = Npost, VFT = _vft(param))
 end
 
+const _STRUCTURED_SCALE = (to_x = 1, to_y = 2, tr_x = 3, tr_y = 4)
+
+function sync_traces!(v::STDPStructuredVariables)
+    for key in keys(_STRUCTURED_SCALE)
+        k = _STRUCTURED_SCALE[key]
+        v.scale[k] == 1.0 || (_rescale!(getfield(v, key), eltype(getfield(v, key))(v.scale[k])); v.scale[k] = 1.0)
+    end
+    return v
+end
+
+function trace_values(v::STDPStructuredVariables, key::Symbol)
+    x = getfield(v, key)
+    k = get(_STRUCTURED_SCALE, key, 0)
+    return (k == 0 || v.scale[k] == 1.0) ? x : x .* eltype(x)(v.scale[k])
+end
+
+lazy_variables(::STDPStructuredVariables) = (:to_x, :to_y, :tr_x, :tr_y)
+
+current_value(v::STDPStructuredVariables, param, key::Symbol, t::Real) = trace_values(v, key)
+
+# Euler traces (x <- x (1 - dt/τ), then +1 for the spikes of the step, AFTER the weight passes: the passes read the
+# traces of the previous step, spikes included). Stored lazily, with the Euler factor `1 - dt/τ` as the per-step
+# factor of the scale. Order inside one trace type: decay first (`_advance_scale!`), then the increment
+# `1/scale` (value `x f + 1`), unlike the exponential pair rules.
+@inline function _structured_prepare!(plasticity::STDPStructuredVariables, dt::AbstractFloat, τ_x, τ_y)
+    # a new dt or τ: bring the stored traces to their values before the factors change
+    _decay_stale(plasticity.decay, dt, τ_x, τ_y) && sync_traces!(plasticity)
+    return _euler_factors!(plasticity.decay, dt, τ_x, τ_y)
+end
+
+# `traces`: tuple of (stored trace, index in `scale`, spike list, one-step factor)
+@inline function _structured_step!(c, plasticity::STDPStructuredVariables, f_pre, f_post, traces::Tuple, Wmin, Wmax)
+    @unpack rowptr, colptr, I, J, index, W = c
+    @unpack initialized, scale = plasticity
+    spikes_pre, spikes_post = presynaptic_spikes(c), postsynaptic_spikes(c)
+    _initial_clamp!(W, initialized, Wmin, Wmax)
+    # weight passes: traces of the previous step (value = stored * scale), no clamp between the passes
+    _pre_spike_add!(f_pre, W, colptr, I, spikes_pre)
+    _post_spike_add!(f_post, W, rowptr, index, J, spikes_post)
+    # decay, then +1 for this step's spikes
+    for (x, k, spikes, f) in traces
+        _advance_scale!(scale, k, x, f)
+        a = _write_inc(scale, k, x)
+        @inbounds for n in spikes
+            x[n] += a
+        end
+    end
+    _clamp_touched!(W, colptr, rowptr, index, spikes_pre, spikes_post, Wmin, Wmax)
+    return nothing
+end
 
 # SymmetricSTDP and AntiSymmetricSTDP
 function plasticity!(
     c::PT,
     param::STDPAntiSymmetric,
     plasticity::STDPStructuredVariables,
-    dt::Float32,
+    dt::AbstractFloat,
     T::Time,
 ) where {PT<:AbstractSparseSynapse}
-    @unpack rowptr, colptr, I, J, index, W, fireJ, fireI, g, index = c
-    @unpack tr_x, to_y = plasticity
+    @unpack tr_x, to_y, scale = plasticity
     @unpack A_x, A_y, τ_x, τ_y, Wmax, Wmin, αpre, αpost = param
-    # Update weights based on pre-post spike timing
-    @inbounds @fastmath begin
-
-        for j = 1:(length(colptr)-1) # loop over post-synaptic neurons
-            if fireJ[j]
-                @turbo for s = colptr[j]:(colptr[j+1]-1)
-                    i = I[s]
-                    # @info "Pre synaptic firing, time: $(get_time(T)) trace: $(to_y[i])"
-                    W[s] += αpre - A_y / τ_y * to_y[i]  # pre spike
-                end
-            end
-        end
-
-        for i = 1:(length(rowptr)-1) # loop over post-synaptic neurons
-            if fireI[i]
-                @turbo for st = rowptr[i]:(rowptr[i+1]-1)
-                    j = J[index[st]]
-                    s = index[st]
-                    # @info "Post synaptic firing, time: $(get_time(T)) trace: $(tr_x[j])"
-                    W[s] += αpost + A_x / τ_x * tr_x[j]  # post spike
-                end
-            end
-        end
-
-        # Update traces based on pre synpatic firing
-        @turbo for i in eachindex(fireI)
-            to_y[i] += dt * (-to_y[i]) / τ_y
-        end
-        @simd for i in findall(fireI)
-            to_y[i] += 1
-        end
-
-        # Update traces based on pre synpatic firing
-        @turbo for j in eachindex(fireJ)
-            tr_x[j] += dt * (-tr_x[j]) / τ_x
-        end
-        @simd for j in findall(fireJ)
-            tr_x[j] += 1
-        end
-
-    end
-    # Clamp the weights touched in this step (all weights once, on the first step)
-    _initial_clamp!(W, plasticity.initialized, Wmin, Wmax)
-    _clamp_touched!(W, colptr, rowptr, index, fireJ, fireI, Wmin, Wmax)
+    fx, fy = _structured_prepare!(plasticity, dt, τ_x, τ_y)
+    s_toy, s_trx = _read_scale(scale, 2, to_y), _read_scale(scale, 3, tr_x)
+    f_pre = (w, i, j) -> αpre - A_y / τ_y * (to_y[i] * s_toy)       # pre spike
+    f_post = (w, i, j) -> αpost + A_x / τ_x * (tr_x[j] * s_trx)     # post spike
+    sp, sq = presynaptic_spikes(c), postsynaptic_spikes(c)
+    _structured_step!(c, plasticity, f_pre, f_post, ((tr_x, 3, sp, fx), (to_y, 2, sq, fy)), Wmin, Wmax)
 end
 
 function plasticity!(
     c::PT,
     param::STDPSymmetric,
     plasticity::STDPStructuredVariables,
-    dt::Float32,
+    dt::AbstractFloat,
     T::Time,
 ) where {PT<:AbstractSparseSynapse}
-    @unpack rowptr, colptr, I, J, index, W, fireJ, fireI, g, index = c
-    @unpack to_x, tr_x, to_y, tr_y = plasticity
+    @unpack to_x, tr_x, to_y, tr_y, scale = plasticity
     @unpack A_x, A_y, τ_x, τ_y, Wmax, Wmin, αpre, αpost = param
-
-
-    # Update weights based on pre-post spike timing
-    @inbounds @fastmath begin
-        # for i in 1:length(rowptr)-1 # loop over post-synaptic neurons
-        for j = 1:(length(colptr)-1) # loop over post-synaptic neurons
-            if fireJ[j]
-                @turbo for s = colptr[j]:(colptr[j+1]-1)
-                    i = I[s]
-                    W[s] += αpre + (A_x / 2τ_x * to_x[i] - A_y / 2τ_y * to_y[i])  # pre spike
-                end
-            end
-        end
-
-        # Update weights based on pre-post spike timing
-        # for j in 1:length(colptr)-1 # loop over pre-synaptic neurons
-        for i = 1:(length(rowptr)-1) # loop over post-synaptic neurons
-            if fireI[i]
-                @turbo for st = rowptr[i]:(rowptr[i+1]-1)
-                    j = J[index[st]]
-                    s = index[st]
-                    W[s] += αpost + (A_x / 2τ_x * tr_x[j] - A_y / 2τ_y * tr_y[j])  # post spike
-                end
-            end
-        end
-        @turbo for i in eachindex(fireI)
-            to_x[i] += dt * (-to_x[i]) / τ_x
-            to_y[i] += dt * (-to_y[i]) / τ_y
-        end
-        @simd for i in findall(fireI)
-            to_x[i] += 1
-            to_y[i] += 1
-        end
-
-        @turbo for j in eachindex(fireJ)
-            tr_x[j] += dt * (-tr_x[j]) / τ_x
-            tr_y[j] += dt * (-tr_y[j]) / τ_y
-        end
-
-        @simd for j in findall(fireJ)
-            tr_x[j] += 1
-            tr_y[j] += 1
-        end
-
-    end
-    # Clamp the weights touched in this step (all weights once, on the first step)
-    _initial_clamp!(W, plasticity.initialized, Wmin, Wmax)
-    _clamp_touched!(W, colptr, rowptr, index, fireJ, fireI, Wmin, Wmax)
+    fx, fy = _structured_prepare!(plasticity, dt, τ_x, τ_y)
+    s_tox, s_toy, s_trx, s_try = _read_scale(scale, 1, to_x), _read_scale(scale, 2, to_y), _read_scale(scale, 3, tr_x), _read_scale(scale, 4, tr_y)
+    f_pre = (w, i, j) -> αpre + (A_x / 2τ_x * (to_x[i] * s_tox) - A_y / 2τ_y * (to_y[i] * s_toy))      # pre spike
+    f_post = (w, i, j) -> αpost + (A_x / 2τ_x * (tr_x[j] * s_trx) - A_y / 2τ_y * (tr_y[j] * s_try))    # post spike
+    sp, sq = presynaptic_spikes(c), postsynaptic_spikes(c)
+    _structured_step!(c, plasticity, f_pre, f_post,
+                      ((tr_x, 3, sp, fx), (tr_y, 4, sp, fy), (to_x, 1, sq, fx), (to_y, 2, sq, fy)), Wmin, Wmax)
 end
-# Function to implement STDP update rule
 
 export STDPSymmetric, STDPAntiSymmetric

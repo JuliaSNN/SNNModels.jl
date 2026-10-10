@@ -187,8 +187,18 @@ State of the Markram STP rules, one entry per presynaptic neuron. Created by
 - `Npost`, `Npre`: number of postsynaptic and presynaptic neurons.
 - `u`: utilisation of each presynaptic neuron.
 - `x`: fraction of available resources of each presynaptic neuron.
-- `_ρ`: efficacy ``u x`` of each presynaptic neuron, copied to the synapse vector `c.ρ`.
+- `_ρ`: efficacy ``u x`` that the last spike of each presynaptic neuron transmitted, copied to the synapse vector `c.ρ`.
 - `last_spike`: time of the previous spike (ms), used by the event-driven rules.
+
+!!! warning "Stored `u` and `x` are the values at the last spike"
+    With the event-driven rules (`MarkramSTPParameterEvent`, `MarkramSTPParameterHet`) `u` and `x` are
+    updated only when the presynaptic neuron spikes (right after the spike: ``u^+`` and the depleted
+    ``x``); between spikes they are NOT relaxed. Their value at time `t` is
+    `U - (U - u) exp(-(t - last_spike)/τF)` and `1 - (1 - x) exp(-(t - last_spike)/τD)`. Direct access
+    (`syn.STPVars.u`) returns the stored values; use `plasticity_value(syn, :STPVars, :u, t)`
+    (state unchanged). `monitor!(syn, [:u, :x], :STPVars)` records the values at the sampling time.
+    `_ρ` and `last_spike` are event quantities and are exact as stored. `MarkramSTPParameterTimestep`
+    relaxes `u` and `x` at every step, so its stored values are the values.
 - `active`: the rule is applied only if `any(active)`; see `set_STP!`.
 """
 MarkramSTPVariables
@@ -205,7 +215,7 @@ MarkramSTPVariables
 end
 
 function plasticityvariables(param::T, Npre, Npost) where {T<:AbstractMarkramSTPParameter}
-    variables = MarkramSTPVariables(Npre = Npre, Npost = Npost)
+    variables = MarkramSTPVariables(Npre = Npre, Npost = Npost, VFT = _vft(param))
     ## initialize variables
     variables.u .= param.U
     variables.x .= 1.0
@@ -213,11 +223,26 @@ function plasticityvariables(param::T, Npre, Npost) where {T<:AbstractMarkramSTP
     return variables
 end
 
+lazy_variables(::MarkramSTPVariables) = (:u, :x)
+
+# Values of the event-updated variables at time t: exact relaxation from the last spike of each neuron
+# (the same expression as in update_traces!); U, τF, τD are scalars or vectors over the presynaptic neurons.
+function current_value(v::MarkramSTPVariables, param::AbstractMarkramSTPParameterEvent, key::Symbol, t::Real)
+    key === :u && return _relax_event(v.u, v.last_spike, param.U, param.τF, t)
+    key === :x && return _relax_event(v.x, v.last_spike, one(eltype(v.x)), param.τD, t)
+    return getfield(v, key)
+end
+# the clock-driven rule relaxes u and x at every step: the stored values are the values
+current_value(v::MarkramSTPVariables, param::MarkramSTPParameterTimestep, key::Symbol, t::Real) = getfield(v, key)
+
+_relax_event(y, last_spike, target, τ, t::Real) =
+    target .- (target .- y) .* exp.(-max.(t .- last_spike, zero(eltype(y))) ./ τ)
+
 function update_traces!(
     c::PT,
     param::MarkramSTPParameterEvent,
     variables::MarkramSTPVariables,
-    dt::Float32,
+    dt::AbstractFloat,
     T::Time,
 ) where {PT<:AbstractSparseSynapse}
     @unpack rowptr, colptr, I, J, index, W, v_post, fireJ, g, ρ, index = c
@@ -225,23 +250,23 @@ function update_traces!(
     @unpack U, τF, τD = param
 
     # @inbounds @simd 
-    ΔT::Float32 = 0.f0
-    for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
-        if fireJ[j]
-            ΔT = get_time(T) > variables.last_spike[j] ? get_time(T) - variables.last_spike[j] : 0.f0
-            variables.last_spike[j] = get_time(T)
-            # update u and x based on time since last spike
-            # relax u and x over the interval since the previous spike (exact solution)
-            u[j] = U - (U - u[j]) * exp(-ΔT / τF)
-            x[j] = 1 - (1 - x[j]) * exp(-ΔT / τD)
-            # Mongillo, Barak & Tsodyks 2008: u jumps first; release and depletion both use u+
-            u[j] += U * (1 - u[j])
-            _ρ[j] = u[j] * x[j]
-            @turbo for s = colptr[j]:(colptr[j+1]-1)
-                ρ[s] = _ρ[j]
-            end
-            x[j] -= u[j] * x[j]
+    FT = eltype(u)
+    tnow = FT(get_time(T))
+    ΔT = zero(FT)
+    for j in presynaptic_spikes(c) # Iterate over the presynaptic neurons that fired
+        ΔT = tnow > variables.last_spike[j] ? tnow - variables.last_spike[j] : zero(FT)
+        variables.last_spike[j] = tnow
+        # update u and x based on time since last spike
+        # relax u and x over the interval since the previous spike (exact solution)
+        u[j] = U - (U - u[j]) * exp(-ΔT / τF)
+        x[j] = 1 - (1 - x[j]) * exp(-ΔT / τD)
+        # Mongillo, Barak & Tsodyks 2008: u jumps first; release and depletion both use u+
+        u[j] += U * (1 - u[j])
+        _ρ[j] = u[j] * x[j]
+        @turbo for s = colptr[j]:(colptr[j+1]-1)
+            ρ[s] = _ρ[j]
         end
+        x[j] -= u[j] * x[j]
     end
 end
 
@@ -249,7 +274,7 @@ function update_traces!(
     c::PT,
     param::MarkramSTPParameterHet,
     variables::MarkramSTPVariables,
-    dt::Float32,
+    dt::AbstractFloat,
     T::Time,
 ) where {PT<:AbstractSparseSynapse}
     @unpack rowptr, colptr, I, J, index, W, v_post, fireJ, g, ρ, index = c
@@ -257,23 +282,23 @@ function update_traces!(
     @unpack U, τF, τD = param
 
     # @inbounds @simd 
-    ΔT::Float32 = 0.f0
-    for j in eachindex(fireJ) # Iterate over all columns, j: presynaptic neuron
-        if fireJ[j]
-            ΔT = get_time(T) > variables.last_spike[j] ? get_time(T) - variables.last_spike[j] : 0.f0
-            variables.last_spike[j] = get_time(T)
-            # update u and x based on time since last spike
-            # relax u and x over the interval since the previous spike (exact solution)
-            u[j] = U[j] - (U[j] - u[j]) * exp(-ΔT / τF[j])
-            x[j] = 1 - (1 - x[j]) * exp(-ΔT / τD[j])
-            # Mongillo, Barak & Tsodyks 2008: u jumps first; release and depletion both use u+
-            u[j] += U[j] * (1 - u[j])
-            _ρ[j] = u[j] * x[j]
-            @turbo for s = colptr[j]:(colptr[j+1]-1)
-                ρ[s] = _ρ[j]
-            end
-            x[j] -= u[j] * x[j]
+    FT = eltype(u)
+    tnow = FT(get_time(T))
+    ΔT = zero(FT)
+    for j in presynaptic_spikes(c) # Iterate over the presynaptic neurons that fired
+        ΔT = tnow > variables.last_spike[j] ? tnow - variables.last_spike[j] : zero(FT)
+        variables.last_spike[j] = tnow
+        # update u and x based on time since last spike
+        # relax u and x over the interval since the previous spike (exact solution)
+        u[j] = U[j] - (U[j] - u[j]) * exp(-ΔT / τF[j])
+        x[j] = 1 - (1 - x[j]) * exp(-ΔT / τD[j])
+        # Mongillo, Barak & Tsodyks 2008: u jumps first; release and depletion both use u+
+        u[j] += U[j] * (1 - u[j])
+        _ρ[j] = u[j] * x[j]
+        @turbo for s = colptr[j]:(colptr[j+1]-1)
+            ρ[s] = _ρ[j]
         end
+        x[j] -= u[j] * x[j]
     end
 end
 
@@ -282,7 +307,7 @@ function plasticity!(
     c::PT,
     param::MET,
     variables::MarkramSTPVariables,
-    dt::Float32,
+    dt::AbstractFloat,
     T::Time,
 ) where {PT<:AbstractSparseSynapse, MET<:AbstractMarkramSTPParameterEvent}
 end
@@ -291,7 +316,7 @@ function plasticity!(
     c::PT,
     param::MarkramSTPParameterTimestep,
     plasticity::MarkramSTPVariables,
-    dt::Float32,
+    dt::AbstractFloat,
     T::Time,
 ) where {PT<:AbstractSparseSynapse}
     @unpack rowptr, colptr, I, J, index, W, v_post, fireJ, g, ρ, index = c
@@ -311,21 +336,19 @@ function update_traces!(
     c::PT,
     param::MarkramSTPParameterTimestep,
     variables::MarkramSTPVariables,
-    dt::Float32,
+    dt::AbstractFloat,
     T::Time,
 ) where {PT<:AbstractSparseSynapse}
-    @unpack colptr, fireJ, ρ = c
+    @unpack colptr, ρ = c
     @unpack u, x, _ρ = variables
     @unpack U = param
-    @inbounds for j in eachindex(fireJ)
-        if fireJ[j]
-            u[j] += U * (1 - u[j])
-            _ρ[j] = u[j] * x[j]
-            @simd for s = colptr[j]:(colptr[j+1]-1)
-                ρ[s] = _ρ[j]
-            end
-            x[j] -= u[j] * x[j]
+    @inbounds for j in presynaptic_spikes(c)
+        u[j] += U * (1 - u[j])
+        _ρ[j] = u[j] * x[j]
+        @simd for s = colptr[j]:(colptr[j+1]-1)
+            ρ[s] = _ρ[j]
         end
+        x[j] -= u[j] * x[j]
     end
 end
 

@@ -63,11 +63,11 @@ function bench_train(param, rate_Hz)
     return t
 end
 
-rules = Any[("STDPGerstner", STDPGerstner(A_pre = 1.0f-3, A_post = -1.0f-3, Wmax = 10.0f0))]
+rules = Any[("STDPGerstner", STDPGerstner(; A_pre = 1.0f-3, A_post = -1.0f-3, Wmax = 10.0f0))]
 isdefined(SNNModels, :STDPTriplet) &&
-    push!(rules, ("STDPTriplet", getfield(SNNModels, :STDPTriplet)(Wmax = 10.0f0)))
+    push!(rules, ("STDPTriplet", getfield(SNNModels, :STDPTriplet)(; Wmax = 10.0f0)))
 isdefined(SNNModels, :STDPWeightDependent) &&
-    push!(rules, ("STDPWeightDependent", getfield(SNNModels, :STDPWeightDependent)(Wmax = 10.0f0)))
+    push!(rules, ("STDPWeightDependent", getfield(SNNModels, :STDPWeightDependent)(; Wmax = 10.0f0)))
 push!(rules, ("STDPMexicanHat", STDPMexicanHat(Wmax = 10.0f0)))
 
 println("threads = ", Threads.nthreads(), ", event-driven = ", isdefined(SNNModels, :STDPTriplet))

@@ -233,7 +233,7 @@ Variant of `Base.@kwdef` that also accepts default values for the type parameter
 
 The macro defines the struct (with the defaults stripped) and one keyword constructor
 `Name(; field1 = default1, ..., T1 = Default1, T2 = ...)`. Field defaults may refer to earlier
-fields. Type parameters are keyword arguments of the constructor:
+fields and to the type parameters (which are the first keyword arguments, and may refer to earlier type parameters). Type parameters are keyword arguments of the constructor:
 
 - a type parameter with a default (`FT = Float32`) takes that default unless passed explicitly;
 - a type parameter without a default is inferred as `typeof(field)` of the first field with a
@@ -320,10 +320,12 @@ macro snn_kw(str)
     ctor_params_bodies = snn_kw_str_sentinel_check_concrete.(str_params; dict = dict)
 
     # Constructor accepts field values and type params as kwargs
+    # The type parameters come first so that the default of a field (or of another type parameter) can refer to
+    # them, e.g. `v::VFT = zeros(eltype(VFT), N)`; the order of keyword arguments does not matter to the caller.
     ctor_kws = Expr(
         :parameters,
-        map(snn_kw_str_kws, str_fields)...,
         map(snn_kw_str_kws_types, ctor_params)...,
+        map(snn_kw_str_kws, str_fields)...,
     )
     ctor_sig = Expr(:call, str_name, ctor_kws)
     ctor_call = if length(str_params) > 0

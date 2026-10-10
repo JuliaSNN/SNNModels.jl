@@ -36,8 +36,12 @@ size(W)
 ```
 """
 function matrix(c::C) where {C<:AbstractConnection}
-    return sparse(c.I, c.J, c.W, length(c.rowptr) - 1, length(c.colptr) - 1)
+    return sparse(c.I, c.J, _current_W(c), length(c.rowptr) - 1, length(c.colptr) - 1)
 end
+
+# the weights as of the last step: through the accessor for the sparse synapses (a rule may defer the update of `W`)
+_current_W(c::AbstractSparseSynapse) = plasticity_value(c, :W)
+_current_W(c) = c.W
 
 
 function matrix(c::C, sym::Symbol) where {C<:AbstractConnection}
@@ -95,6 +99,7 @@ Set to `w` the weight of the existing synapse from presynaptic `j` to postsynapt
 form). Synapses that do not exist are not created (see `connect!`).
 """
 function update_weights!(c::C, j, i, w) where {C<:AbstractConnection}
+    sync_weights!(c)   # a pending (deferred) update must not be added to the new value
     @unpack colptr, I, W = c
     for s = colptr[j]:(colptr[j+1]-1)
         if I[s] == i
@@ -110,6 +115,7 @@ function update_weights!(
     is::Vector,
     w::Real,
 ) where {C<:AbstractConnection}
+    sync_weights!(c)
     @unpack colptr, I, W = c
     for j in js
         for s = colptr[j]:(colptr[j+1]-1)
@@ -291,7 +297,7 @@ using SpecialFunctions, Roots
     sparse_matrix(Npre, Npost; p | ρ, μ = 1, σ = 0, dist = :Normal, rule = :Fixed, γ, kmin)
 
 Random connectivity matrix of size `Npost x Npre` (rows: postsynaptic, columns:
-presynaptic) as a `SparseMatrixCSC{Float32,Int}`, built directly in CSC form in
+presynaptic) as a `SparseMatrixCSC{FT,Int}` (`FT = Float32` unless the keyword `FT` is given; a connection constructor passes the precision of its target population), built directly in CSC form in
 O(nnz + Npre + Npost) time and memory: no dense `Npost x Npre` array is ever allocated.
 
 Exactly one of `p` and `ρ` (connection probability / density, in [0, 1]) must be given.
@@ -344,6 +350,7 @@ function sparse_matrix(
     rule = :Fixed,
     γ = -1,
     kmin = -1,
+    FT::Type{<:AbstractFloat} = Float32,
     kwargs...,
 )
     isempty(kwargs) || @warn "sparse_matrix: unknown connectivity keyword(s) $(collect(keys(kwargs))) ignored"
@@ -381,9 +388,9 @@ function sparse_matrix(
 
     # 2. One Float32 weight per connection; non-positive draws are not synapses.
     my_dist = dist isa Symbol ? getfield(Distributions, dist) : dist
-    nzval = Vector{Float32}(undef, length(rowval))
-    rand!(my_dist(Float32(μ), Float32(σ)), nzval)
-    w = SparseMatrixCSC{Float32,Int}(Npost, Npre, colptr, rowval, nzval)
+    nzval = Vector{FT}(undef, length(rowval))
+    rand!(my_dist(FT(μ), FT(σ)), nzval)
+    w = SparseMatrixCSC{FT,Int}(Npost, Npre, colptr, rowval, nzval)
     _filter_csc!(w, (i, j, v) -> v > 0)
     syn_sign == -1 && (nonzeros(w) .*= -1)
     return w
@@ -517,6 +524,7 @@ function sparse_matrix_dense_legacy(
     rule = :Fixed,
     γ = -1,
     kmin = -1,
+    FT::Type{<:AbstractFloat} = Float32,
     kwargs...,
 )
     isempty(kwargs) || @warn "sparse_matrix: unknown connectivity keyword(s) $(collect(keys(kwargs))) ignored"
@@ -573,6 +581,8 @@ end
 # Convert any sparse/dense connectivity matrix to SparseMatrixCSC{Float32}.
 _float32_sparse(w::SparseMatrixCSC) = SparseMatrixCSC{Float32,Int}(w)
 _float32_sparse(w::AbstractMatrix) = SparseMatrixCSC{Float32,Int}(sparse(Float32.(w)))
+_float_sparse(w::SparseMatrixCSC, ::Type{FT}) where {FT} = SparseMatrixCSC{FT,Int}(w)
+_float_sparse(w::AbstractMatrix, ::Type{FT}) where {FT} = SparseMatrixCSC{FT,Int}(sparse(FT.(w)))
 
 
 """
@@ -584,12 +594,12 @@ of `sparse_matrix`; a matrix (dense or sparse, any element type, size `Npost x N
 asserted) is converted to `SparseMatrixCSC{Float32,Int}` as is (stored zeros of a sparse
 input are kept, explicit zeros of a dense input are dropped).
 """
-sparse_matrix(Npre, Npost, conn::NamedTuple) = sparse_matrix(Npre, Npost; conn...)
+sparse_matrix(Npre, Npost, conn::NamedTuple, ::Type{FT} = Float32) where {FT<:AbstractFloat} = sparse_matrix(Npre, Npost; conn..., FT)
 
-function sparse_matrix(Npre, Npost, conn::AbstractMatrix)
+function sparse_matrix(Npre, Npost, conn::AbstractMatrix, ::Type{FT} = Float32) where {FT<:AbstractFloat}
     w = conn
     @assert size(w) == (Npost, Npre) "The size of the synaptic weight is not correct: $(size(w)) != ($Npost, $Npre)"
-    return _float32_sparse(w)
+    return _float_sparse(w, FT)
 end
 
 
@@ -616,6 +626,7 @@ The plasticity variables are per neuron and are not affected.
     (the matrix shrank if the last neurons had no synapse).
 """
 function update_sparse_matrix!(c::S, W::SparseMatrixCSC) where {S<:AbstractConnection}
+    sync_weights!(c)   # per-synapse deferred state (vSTDPParameter snapshots) is not reordered: materialise it first
     old_I, old_J = copy(c.I), copy(c.J)
     rowptr, colptr, I, J, index, W = dsparse(W)
     @assert length(rowptr) == length(c.rowptr) "Rowptr length mismatch"
@@ -646,6 +657,7 @@ function update_sparse_matrix!(c::S, W::SparseMatrixCSC) where {S<:AbstractConne
 end
 
 function update_sparse_matrix!(c::S) where {S<:AbstractConnection}
+    sync_weights!(c)
     Npost, Npre = length(c.rowptr) - 1, length(c.colptr) - 1
     # CSC order: by presynaptic neuron, then postsynaptic neuron
     perm = sortperm(collect(zip(c.J, c.I)))
@@ -682,6 +694,7 @@ function _remap_synapse_state!(c, perm::AbstractVector{<:Integer})
         for s in eachindex(perm)
             c.param.delaytime[s] = perm[s] > 0 ? old[perm[s]] : d0
         end
+        c.param.dt[1] = NaN32   # the delays in steps and the ring buffer are rebuilt at the next forward!
     end
     return c
 end

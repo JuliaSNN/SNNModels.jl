@@ -64,8 +64,8 @@ end
             maxdiff = max(maxdiff, maximum(abs.(W .- syn.W)))
         end
         @test syn.W ≈ W rtol = 1e-5
-        @test vars.tpre ≈ tpre rtol = 1e-5
-        @test vars.tpost ≈ tpost rtol = 1e-5
+        @test trace_values(vars, :tpre) ≈ tpre rtol = 1e-5
+        @test trace_values(vars, :tpost) ≈ tpost rtol = 1e-5
         @test maxdiff < 1e-3
         @test syn.W != W0                     # the rule did act
         @test extrema(syn.W)[1] >= param.Wmin && extrema(syn.W)[2] <= param.Wmax

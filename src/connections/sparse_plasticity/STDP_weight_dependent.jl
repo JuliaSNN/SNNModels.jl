@@ -27,8 +27,8 @@ exactly Auryn's `STDPwdConnection` (`learning_rate = η`, `param_alpha = α`,
 
 Fields: `η = 1e-3` (relative learning rate), `α = 1` (LTD/LTP asymmetry), `μ_plus = 1`,
 `μ_minus = 1` (weight-dependence exponents), `τpre = τpost = 20ms`, `Wmax = 30pF`,
-`Wmin = 0pF`. State: `STDPVariables`. Event-driven with the ordering of `STDP_kernels.jl`,
-serial, applied only under `train!`.
+`Wmin = 0pF`. State: `STDPVariables` (lazily decayed traces, see `STDPGerstner`).
+Event-driven with the ordering of `STDP_kernels.jl`, serial, applied only under `train!`.
 
 # Example
 ```julia
@@ -59,18 +59,17 @@ function plasticity!(
     c::PT,
     param::STDPWeightDependent,
     variables::STDPVariables,
-    dt::Float32,
+    dt::AbstractFloat,
     T::Time,
 ) where {PT<:AbstractSparseSynapse}
     @unpack η, α, μ_plus, μ_minus, τpre, τpost, Wmax, Wmin = param
-    @unpack tpre, tpost = variables
     W̃ = Wmax - Wmin
     fudge_dep = η * α * W̃^(1 - μ_minus)
     fudge_pot = η * W̃^(1 - μ_plus)
     # pre spike: LTD ∝ (w - Wmin)^μ_minus * x_post[i]
-    f_pre = (w, i, j) -> -fudge_dep * max(w - Wmin, 0.0f0)^μ_minus * tpost[i]
+    f_pre = (w, xpost) -> -fudge_dep * max(w - Wmin, zero(w))^μ_minus * xpost
     # post spike: LTP ∝ (Wmax - w)^μ_plus * x_pre[j]
-    f_post = (w, i, j) -> fudge_pot * max(Wmax - w, 0.0f0)^μ_plus * tpre[j]
+    f_post = (w, xpre) -> fudge_pot * max(Wmax - w, zero(w))^μ_plus * xpre
     _pair_stdp!(c, variables, f_pre, f_post, τpre, τpost, Wmin, Wmax, dt, T)
 end
 

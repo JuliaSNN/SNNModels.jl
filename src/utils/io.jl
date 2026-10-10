@@ -240,6 +240,10 @@ function SNNsave(
     @info "Storing $(type)-$count of `$(savename(name, info, connector="-"))`
     at $(path) \n"
 
+    # saved weights are the current ones: materialise the deferred weight updates (vSTDPParameter; the accumulation
+    # epoch restarts, a perturbation of the later trajectory at the rounding level of the rule)
+    _sync_model_weights!(model)
+
     ## Create directory if it does not exist
     root = SNNfolder(path, name, info)
     isdir(root) || mkpath(root)
@@ -272,6 +276,15 @@ function SNNsave(
     else
         @error "Unknown type: $type. Use :all, :model, or :data."
     end
+end
+
+# materialise the deferred weights of every sparse synapse of a model (see `sync_traces!`)
+function _sync_model_weights!(model)
+    hasproperty(model, :syn) || return model
+    for c in values(model.syn)
+        c isa AbstractSparseSynapse && sync_weights!(c)
+    end
+    return model
 end
 
 export load, save, load_model, load_data, SNNload, SNNsave, SNNpath, SNNfolder, savename

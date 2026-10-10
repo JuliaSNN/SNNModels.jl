@@ -12,27 +12,32 @@ so a new model only needs to implement `integrate!`.
 abstract type AbstractPopulationParameter <: AbstractParameter end
 
 """
-    integrate!(p::AbstractPopulation, param::AbstractPopulationParameter, dt::Float32)
+    integrate!(p::AbstractPopulation, param::AbstractPopulationParameter, dt)
 
 Advance the state of population `p` by one time step `dt` (ms). Every population model
 implements a method of `integrate!` for its own parameter type; it is called once per step by
 `sim!` and `train!`, after the stimuli and before the connections. The fallback for an
-`AbstractPopulationParameter` without a specific method does nothing.
+`AbstractPopulationParameter` without a specific method does nothing for a `Float32` step and throws an `ArgumentError` for
+another precision (a `Float64` population whose model has no `Float64` method, see `float_type`). `dt` is given in the
+precision of the population (`float_type(p)`), so a model of populations of different precisions runs each in its own.
 
 See the documentation of each population type for the equations and the integration scheme.
 """
-integrate!(p::AbstractPopulation, param::AbstractPopulationParameter, dt::Float32) = nothing
+integrate!(p::AbstractPopulation, param::AbstractPopulationParameter, dt::AbstractFloat) =
+    dt isa Float32 ? nothing : throw(ArgumentError(
+        "population $(nameof(typeof(p))) has no integrate! method for steps of type $(typeof(dt)) (its model is not implemented in $(typeof(dt)); " *
+        "populations with Float64 state: Identity, IF)"))
 plasticity!(
     p::AbstractPopulation,
     param::AbstractPopulationParameter,
-    dt::Float32,
+    dt::AbstractFloat,
     T::Time,
 ) = nothing
 
 update_traces!(
     p::AbstractPopulation,
     param::AbstractPopulationParameter,
-    dt::Float32,
+    dt::AbstractFloat,
     T::Time,
 ) = nothing
 
@@ -45,6 +50,9 @@ populations. The only concrete subtype is `PostSpike`.
 """
 abstract type AbstractSpikeParameter end
 include("spike/postspike.jl")
+
+## Spike index lists, shared by populations and connections
+include("spike_index.jl")
 
 ## Neurons
 include("poisson.jl")

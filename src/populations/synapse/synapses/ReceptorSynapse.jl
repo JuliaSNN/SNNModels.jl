@@ -243,10 +243,14 @@ end
 ) where {T<:AbstractReceptorVariable}
     @unpack N, g, h = synvars
     @unpack τr⁻, τd⁻, α = receptor
-    for i ∈ 1:N
+    (size(g, 1) >= N && size(h, 1) >= N && n <= size(g, 2) && n <= size(h, 2) && length(target) >= N) ||
+        throw(DimensionMismatch("receptor state of $(size(g)) / $(size(h)) or input buffer of length $(length(target)) too small for N = $N receptors $n"))
+    ed = exp64(-dt * τd⁻)    # loop invariants
+    er = exp64(-dt * τr⁻)
+    @inbounds @simd for i ∈ 1:N
         h[i, n] += target[i] * α
-        g[i, n] = exp64(-dt * τd⁻) * (g[i, n] + dt * h[i, n])
-        h[i, n] = exp64(-dt * τr⁻) * (h[i, n])
+        g[i, n] = ed * (g[i, n] + dt * h[i, n])
+        h[i, n] = er * (h[i, n])
     end
 end
 
@@ -271,16 +275,26 @@ end
     @unpack g, h = synvars
     @unpack syn, NMDA = synapse
     @unpack mg, b, k = NMDA
+    (length(v) >= N && length(syncurr) >= N && size(g, 1) >= N && size(g, 2) >= length(syn)) ||
+        throw(DimensionMismatch("membrane potential, current or conductance matrix too small for N = $N and $(length(syn)) receptors"))
     fill!(syncurr, 0.0f0)
-    # @inbounds @fastmath 
+    mgb = mg / b    # loop invariant
+    # Receptor by receptor, so every neuron accumulates in the same order as the scalar loop of SNNModels <= 1.9 (bit-identical).
+    # The voltage-dependent factor is only evaluated for the NMDA receptors (the multiplication by 1 of the others is exact).
     for n in eachindex(syn)
         @unpack gsyn, E_rev, nmda = syn[n]
-        for neuron ∈ 1:N
-            syncurr[neuron] +=
-                gsyn *
-                g[neuron, n] *
-                (v[neuron] - E_rev) *
-                (nmda==0.0f0 ? 1.0f0 : 1/(1.0f0 + (mg / b) * exp256(k * v[neuron])))
+        if nmda == 0.0f0
+            @inbounds @simd for neuron ∈ 1:N
+                syncurr[neuron] += gsyn * g[neuron, n] * (v[neuron] - E_rev)
+            end
+        else
+            @inbounds @simd for neuron ∈ 1:N
+                syncurr[neuron] +=
+                    gsyn *
+                    g[neuron, n] *
+                    (v[neuron] - E_rev) *
+                    (1 / (1.0f0 + mgb * exp256(k * v[neuron])))
+            end
         end
     end
 end

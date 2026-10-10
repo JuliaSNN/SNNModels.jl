@@ -4,11 +4,11 @@ import Interpolations: scale, interpolate, BSpline, Linear, NoInterp
     get_time(model::NamedTuple)
 
 Current simulation time in ms (`T.t[1]`, or `model.time.t[1]` for a model built with
-`compose`), as `Float32`.
+`compose`), in the precision of the clock (`Float32` unless the model is `Float64`, see `float_type`).
 """
-get_time(T::Time)::Float32 = T.t[1]
+get_time(T::Time) = T.t[1]
 
-get_time(model::NamedTuple)::Float32 = model.time.t[1]
+get_time(model::NamedTuple) = model.time.t[1]
 
 """
     get_step(T::Time)
@@ -36,30 +36,30 @@ Get the time step size.
 - `Float32`: The time step size.
 
 """
-get_dt(T::Time)::Float32 = T.dt
+get_dt(T::Time) = T.dt
 
 """
     get_interval(T::Time)
 
 Time points `dt:dt:get_time(T)` (ms) of the steps simulated so far, as a `Float32` range.
 """
-get_interval(T::Time) = Float32(T.dt):Float32(T.dt):get_time(T)
+get_interval(T::Time{FT}) where {FT} = FT(T.dt):FT(T.dt):get_time(T)
 
 """
-    update_time!(T::Time, dt::Float32)
+    update_time!(T::Time, dt)
     update_time!(T::Time, myT::Time)
 
 Advance the clock by one step: `T.t[1] += dt` and the step counter `T.tt[1] += 1`. Called at
 the beginning of every `sim!`/`train!` step, before the stimuli. The second method copies
 time and step counter from `myT` into `T`.
 """
-function update_time!(T::Time, dt::Float32)
-    T.t[1] += dt
+function update_time!(T::Time{FT}, dt::AbstractFloat) where {FT}
+    T.t[1] += FT(dt)
     T.tt[1] += 1
 end
 
-function update_time!(T::Time, myT::Time)
-    T.t[1] = myT.t[1]
+function update_time!(T::Time{FT}, myT::Time) where {FT}
+    T.t[1] = FT(myT.t[1])
     T.tt[1] = myT.tt[1]
 end
 
@@ -70,13 +70,13 @@ end
 Set the time to `0` and the step counter to `0` (for a model, its `model.time`). Recordings
 are not cleared; use `clear_records!` for that.
 """
-function reset_time!(T::Time)
-    T.t[1] = 0.0f0
+function reset_time!(T::Time{FT}) where {FT}
+    T.t[1] = zero(FT)
     T.tt[1] = 0
 end
 
 function reset_time!(model::NamedTuple)
-    model.time.t[1] = 0.0f0
+    model.time.t[1] = zero(eltype(model.time.t))
     model.time.tt[1] = 0
 end
 
@@ -253,10 +253,15 @@ function _grow_fire!(rec, meta)
     return
 end
 
-@inline function get_model_field(obj, key::Symbol, var_map::Dict{Symbol,Tuple{Symbol,Symbol}})
+@inline function get_model_field(obj, key::Symbol, var_map::Dict{Symbol,Tuple{Symbol,Symbol}}, T::Time)
     if haskey(var_map, key)
         parent, sub = var_map[key]
-        return getfield(getfield(obj, parent), sub)
+        # variables of a plasticity rule (`monitor!(obj, keys, :LTPVars)`) are recorded as values, not as
+        # stored: lazily decayed traces and event-updated STP variables are read through `plasticity_value`
+        return plasticity_value(obj, parent, sub, T)
+    elseif key === :W && obj isa AbstractSparseSynapse
+        # weights of rules that defer their update (vSTDPParameter) are read through the accessor
+        return plasticity_value(obj, :W)
     else
         return getfield(obj, key)
     end
@@ -393,7 +398,14 @@ end
 Record all monitored variables of `obj` at the current time `T`. Dispatches to
 the dense or legacy path per `meta[:mode][key]`. Called every dt inside the sim loop.
 """
-function record!(obj, T::Time)
+@inline function record!(obj, T::Time)
+    # most objects are not monitored: the inlined emptiness test is the whole cost of an
+    # unmonitored object (no call, no hashed lookup, no allocation; hot path, every dt)
+    isempty(getfield(obj, :records)) && return nothing
+    return _record!(obj, T)
+end
+
+function _record!(obj, T::Time)
     @unpack records = obj
     !haskey(records, :data) && return
     meta = records[:meta]
@@ -419,8 +431,11 @@ function record!(obj, T::Time)
             else
                 record_fire!(obj.fire, records[:fire], T, records[:indices])
             end
+        elseif !sampled
+            # not a sampling step: nothing is read (a lazily stored variable would be materialised for nothing)
+            continue
         elseif get(mode, key, :legacy) === :dense
-            snapshot = get_model_field(obj, key, meta[:var_map])
+            snapshot = get_model_field(obj, key, meta[:var_map], T)
             ind = get(records[:indices], key, Int[])
             if !isempty(ind)
                 snapshot isa AbstractArray || throw(ArgumentError("Indexed recording for $key requires an array-like field, got $(typeof(snapshot))"))
@@ -429,7 +444,7 @@ function record!(obj, T::Time)
             record_sym_dense!(snapshot, records, meta, key, T)
         else
             record_sym!(
-                get_model_field(obj, key, meta[:var_map]),
+                get_model_field(obj, key, meta[:var_map], T),
                 obj, key, T, records[:indices], records[:sr][key],
             )
         end
@@ -506,7 +521,13 @@ here.
 - `variables = :none`: name of a nested field holding the variables, e.g. `:STPVars` or
   `:LTPVars` of a `SpikingSynapse`, or `:synvars`. The key `sym` is then read from
   `obj.<variables>.<sym>` and stored as `Symbol(variables, "_", sym)`, e.g. `:STPVars_u`.
-  The positional form `monitor!(obj, keys, :STPVars)` is equivalent.
+  The positional form `monitor!(obj, keys, :STPVars)` is equivalent. Variables of a plasticity
+  rule are recorded as VALUES, read through `plasticity_value` at each sampling step: the lazily decayed
+  STDP traces (`:tpre`, `:tpost`, `:r1`, `:r2`, `:o1`, `:o2`) and the event-updated `:u`, `:x` of the
+  event-driven Markram rules are recorded at their value at the sampling time, not as stored. Recording
+  never changes the state, so a monitored and an unmonitored run give identical weights. (Reading
+  `syn.LTPVars.tpre` or `syn.STPVars.u` directly returns the stored values.) A lazily stored variable
+  without a `plasticity_value` method makes `monitor!` throw an `ArgumentError`.
 - `monitor_time`: capacity hint in ms used to size the buffers (default: the duration of the
   `sim!` call, at least 1 s). Recording beyond the capacity is still correct: the buffer is
   doubled with a one-time warning.
@@ -586,8 +607,10 @@ function monitor!(
         end
         if variables == :none
             if hasfield(typeof(obj), sym)
-                typ = typeof(getfield(obj, sym))
-                sample = getfield(obj, sym)
+                # the weights of a synapse are read through the accessor, as the recorder will: throws now (not mid-run)
+                # for a rule that defers the weight update and defines no accessor
+                sample = (sym === :W && obj isa AbstractSparseSynapse) ? plasticity_value(obj, :W) : getfield(obj, sym)
+                typ = typeof(sample)
                 key = sym
             else
                 verbose && @warn "Field $sym not found in $(nameof(typeof(obj)))"
@@ -596,8 +619,10 @@ function monitor!(
         else
             if hasproperty(obj, variables)
                 if hasproperty(getfield(obj, variables), sym)
-                    typ = typeof(getfield(getfield(obj, variables), sym))
-                    sample = getfield(getfield(obj, variables), sym)
+                    # read through the accessor, as the recorder will: throws now (not mid-run) for a lazily
+                    # stored variable that has no `plasticity_value` method
+                    sample = plasticity_value(obj, variables, sym, 0.0f0)
+                    typ = typeof(sample)
                     key = Symbol(variables, "_", sym)
                     if !(variables ∈ obj.records[:variables])
                         @debug "Monitoring $(variables)"
