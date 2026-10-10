@@ -116,23 +116,12 @@ MorrisLecar
 
 function integrate!(p::MorrisLecar, param::MorrisLecarParameter, dt::Float32)
     @unpack N, v, w, ge, gi, fire, I = p
-    @unpack Cm, El, EK, ECa, gl, gK, gCa, τe, τi, V1, V2, V3, V4, ϕ = param
+    @unpack Cm, τe, τi = param
     @unpack Ee, Ei = param
-    @inbounds for i = 1:N
+    _check_state_lengths(N, v, w, ge, gi, fire, I)
+    # `MorrisLecar_dv` and `MorrisLecar_dw` use the inlined `tanh` / `cosh` (`_tanh_inl`, `_cosh_inl`: the bits of `Base`), so the loop vectorises
+    @inbounds @simd for i = 1:N
         v_old = v[i]
-        m_ss = 0.5*(1+tanh((v[i]-V1)/V2))
-        n_ss = 0.5*(1+tanh((v[i]-V3)/V4))
-        τ = 1 / (ϕ * cosh((v[i]-V3)/(2V4)))
-
-        # v[i] += dt / Cm * (
-        #         I[i] +
-        #         gl  * (El  - v[i]) +
-        #         gCa * (ECa - v[i]) * m_ss +
-        #         gK  * (EK  - v[i]) * w[i] +
-        #         0
-        #     )
-        # w[i]  += dt * (n_ss - w[i])/τ
-
         v[i] += dt / Cm * MorrisLecar_dv(v[i], w[i], I[i], param)
         w[i] += dt * MorrisLecar_dw(v[i], w[i], param)
 
@@ -144,21 +133,20 @@ function integrate!(p::MorrisLecar, param::MorrisLecarParameter, dt::Float32)
     end
 end
 
-
 # Intrinsic + external current of the Morris-Lecar membrane equation (pA), i.e. `Cm * dv/dt`
 # without the synaptic term.
-function MorrisLecar_dv(v::Float32, w::Float32, I::Float32, param::MorrisLecarParameter)
+@inline function MorrisLecar_dv(v::Float32, w::Float32, I::Float32, param::MorrisLecarParameter)
     @unpack Cm, El, EK, ECa, gl, gK, gCa, τe, τi, V1, V2, V3, V4, ϕ = param
-    m_ss = 0.5*(1+tanh((v-V1)/V2))
+    m_ss = 0.5*(1+_tanh_inl((v-V1)/V2))
     return I + gl * (El - v) + gCa * (ECa - v) * m_ss + gK * (EK - v) * w
 end
 
 
 # Right-hand side of the potassium gating equation, `(w_inf(v) - w) / τw(v)` (1/ms).
-function MorrisLecar_dw(v::Float32, w::Float32, param::MorrisLecarParameter)
+@inline function MorrisLecar_dw(v::Float32, w::Float32, param::MorrisLecarParameter)
     @unpack Cm, El, EK, ECa, gl, gK, gCa, τe, τi, V1, V2, V3, V4, ϕ = param
-    n_ss = 0.5*(1+tanh((v-V3)/V4))
-    τ = 1 / (ϕ * cosh((v-V3)/(2V4)))
+    n_ss = 0.5*(1+_tanh_inl((v-V3)/V4))
+    τ = 1 / (ϕ * _cosh_inl((v-V3)/(2V4)))
     return (n_ss - w)/τ
 end
 

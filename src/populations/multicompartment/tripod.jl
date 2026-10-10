@@ -214,30 +214,48 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     update_neuron!(p, param, Δv, dt)
     # @show Δv.+Δv_temp
 
-    @inbounds for i ∈ 1:N
-        tabs[i] -= 1
-        θ[i] += dt * (Vt - θ[i]) / τA
-        if tabs[i] > n_abs # backpropagation period
-            v_s[i] = AP_membrane
-            v_d1[i] += dt * (v_s[i] - v_d1[i]) * d1.gax[i] / d1.C[i]
-            v_d2[i] += dt * (v_s[i] - v_d2[i]) * d2.gax[i] / d2.C[i]
-        elseif tabs[i] > 0 # absolute refractory period
-            v_s[i] = Vr
-            v_d1[i] += dt * (v_s[i] - v_d1[i]) * d1.gax[i] / d1.C[i]
-            v_d2[i] += dt * (v_s[i] - v_d2[i]) * d2.gax[i] / d2.C[i]
-        elseif tabs[i] <= 0
-            fire[i] = v_s[i] + Δv[i, 1] * dt >= Vspike
-            Δv[i, 1] = ifelse(fire[i], AP_membrane - v_s[i], Δv[i, 1])
-            v_s[i] = ifelse(fire[i], AP_membrane, v_s[i])
-            w_s[i] = ifelse(fire[i], w_s[i] + b, w_s[i])
-            θ[i] = ifelse(fire[i], θ[i] + At, θ[i])
-            tabs[i] = ifelse(fire[i], n_ref, tabs[i])
-            fire[i] && continue
-            v_s[i] += 0.5 * dt * (Δv_temp[i, 1] + Δv[i, 1])
-            v_d1[i] += 0.5 * dt * (Δv_temp[i, 2] + Δv[i, 2])
-            v_d2[i] += 0.5 * dt * (Δv_temp[i, 3] + Δv[i, 3])
-            w_s[i] += 0.5 * dt * (Δv_temp[i, 4] + Δv[i, 4])
-        end
+    _check_state_lengths(N, v_s, w_s, v_d1, v_d2, fire, θ, tabs, d1.gax, d1.C, d2.gax, d2.C)
+    (size(Δv, 1) >= N && size(Δv, 2) >= 4 && size(Δv_temp, 1) >= N && size(Δv_temp, 2) >= 4) ||
+        throw(DimensionMismatch("Δv and Δv_temp must have N rows and 4 columns"))
+    gax1, C1, gax2, C2 = d1.gax, d1.C, d2.gax, d2.C
+    nabs_f = convert(eltype(tabs), n_abs)    # the counters are `Float32`: compare and store without mixing types
+    nref_f = convert(eltype(tabs), n_ref)
+    # Branchless (`ifelse`) and vectorised, bit-identical to the branching loop of SNNModels <= 1.9 (backpropagation period,
+    # absolute refractory period, free integration or spike): all the cases are evaluated and the one that applies is kept.
+    @inbounds @simd for i ∈ 1:N
+        t1 = tabs[i] - 1
+        th1 = θ[i] + dt * (Vt - θ[i]) / τA
+        bp = t1 > nabs_f                 # backpropagation period
+        rf = !bp & (t1 > 0)            # absolute refractory period
+        act = t1 <= 0                   # free integration (or spike)
+        vs0 = v_s[i]
+        vd1 = v_d1[i]
+        vd2 = v_d2[i]
+        ws0 = w_s[i]
+        dv1 = Δv[i, 1]
+
+        # bp or rf: the soma is clamped, the dendrites relax towards it
+        vsc = ifelse(bp, AP_membrane, Vr)
+        vd1c = vd1 + dt * (vsc - vd1) * gax1[i] / C1[i]
+        vd2c = vd2 + dt * (vsc - vd2) * gax2[i] / C2[i]
+
+        # act: spike or Heun update
+        spk = act & (vs0 + dv1 * dt >= Vspike)
+        keep = act & !spk
+        vs_h = convert(Float32, vs0 + 0.5 * dt * (Δv_temp[i, 1] + dv1))   # the old loop stored the Float64 sum into a Float32 array
+        vd1_h = convert(Float32, vd1 + 0.5 * dt * (Δv_temp[i, 2] + Δv[i, 2]))   # the old loop stored the Float64 sum into a Float32 array
+        vd2_h = convert(Float32, vd2 + 0.5 * dt * (Δv_temp[i, 3] + Δv[i, 3]))   # the old loop stored the Float64 sum into a Float32 array
+        ws_h = convert(Float32, ws0 + 0.5 * dt * (Δv_temp[i, 4] + Δv[i, 4]))   # the old loop stored the Float64 sum into a Float32 array
+
+        clamped = bp | rf
+        fire[i] = spk
+        Δv[i, 1] = ifelse(spk, AP_membrane - vs0, dv1)
+        v_s[i] = ifelse(clamped, vsc, ifelse(spk, AP_membrane, ifelse(keep, vs_h, vs0)))
+        v_d1[i] = ifelse(clamped, vd1c, ifelse(keep, vd1_h, vd1))
+        v_d2[i] = ifelse(clamped, vd2c, ifelse(keep, vd2_h, vd2))
+        w_s[i] = ifelse(spk, ws0 + b, ifelse(keep, ws_h, ws0))
+        θ[i] = ifelse(spk, th1 + At, th1)
+        tabs[i] = ifelse(spk, nref_f, t1)
     end
 end
 
@@ -256,7 +274,14 @@ end
 
     # Heun stage: evaluate the derivatives at the predicted state x + dt * Δv
     # (Δv = 0 at the first stage, i.e. at the current state).
-    @inbounds for i ∈ 1:p.N
+    N = p.N
+    d1gax, d1gm, d1El, d1C = d1.gax, d1.gm, d1.El, d1.C
+    d2gax, d2gm, d2El, d2C = d2.gax, d2.gm, d2.El, d2.C
+    _check_state_lengths(N, v_s, v_d1, v_d2, w_s, θ, I, I_d, d1gax, d1gm, d1El, d1C, d2gax, d2gm, d2El, d2C)
+    (size(Δv, 1) >= N && size(Δv, 2) >= 4 && size(is, 1) >= N && size(is, 2) >= 3 && size(v_pred, 1) >= N && size(v_pred, 2) >= 3) ||
+        throw(DimensionMismatch("Δv, is and v_pred must have N rows (4, 3 and 3 columns)"))
+
+    @inbounds @simd for i ∈ 1:N
         v_pred[i, 1] = v_s[i] + Δv[i, 1] * dt
         v_pred[i, 2] = v_d1[i] + Δv[i, 2] * dt
         v_pred[i, 3] = v_d2[i] + Δv[i, 3] * dt
@@ -267,15 +292,18 @@ end
     @views synaptic_current!(p, dend_syn, synvars_d2, v_pred[:, 3], is[:, 3])
     clamp!(is, -1500, 1500)
 
-    @fastmath @inbounds for i ∈ 1:p.N
+    # This `@fastmath` loop is kept as it was (scalar, `ic` stored and reloaded). Its floating-point result depends on how LLVM reassociates the
+    # fast-math expression: with the axial currents in registers (which lets it vectorise, about 5x faster) the derivatives
+    # differ from this loop in the last bit (1 ulp in `Δv`), so the vectorised variant is not used (see the changelog).
+    @fastmath @inbounds for i ∈ 1:N
         vs = v_pred[i, 1]
         vd1 = v_pred[i, 2]
         vd2 = v_pred[i, 3]
         ws = w_s[i] + Δv[i, 4] * dt
-        ic[1] = (vs - vd1) * d1.gax[i] # axial current soma -> d1
-        ic[2] = (vs - vd2) * d2.gax[i] # axial current soma -> d2
-        Δv[i, 2] = ((d1.El[i] - vd1) * d1.gm[i] - is[i, 2] + ic[1] + I_d[i]) / d1.C[i]
-        Δv[i, 3] = ((d2.El[i] - vd2) * d2.gm[i] - is[i, 3] + ic[2] + I_d[i]) / d2.C[i]
+        ic[1] = (vs - vd1) * d1gax[i] # axial current soma -> d1
+        ic[2] = (vs - vd2) * d2gax[i] # axial current soma -> d2
+        Δv[i, 2] = ((d1El[i] - vd1) * d1gm[i] - is[i, 2] + ic[1] + I_d[i]) / d1C[i]
+        Δv[i, 3] = ((d2El[i] - vd2) * d2gm[i] - is[i, 3] + ic[2] + I_d[i]) / d2C[i]
         Δv[i, 1] =
             (
                 gl * (El - vs) +

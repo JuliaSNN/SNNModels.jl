@@ -198,27 +198,44 @@ function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
     Δv_temp .= Δv
     update_neuron!(p, param, Δv, dt)
 
-    @inbounds for i ∈ 1:N
-        tabs[i] -= 1
-        θ[i] += dt * (Vt - θ[i]) / τA
-        if tabs[i] > n_abs # backpropagation period
-            v_s[i] = AP_membrane
-            v_d[i] += dt * (v_s[i] - v_d[i]) * d.gax[i] / d.C[i]
-        elseif tabs[i] > 0 # absolute refractory period
-            v_s[i] = Vr
-            v_d[i] += dt * (v_s[i] - v_d[i]) * d.gax[i] / d.C[i]
-        elseif tabs[i] <= 0
-            fire[i] = v_s[i] + Δv[i, 1] * dt >= Vspike
-            Δv[i, 1] = ifelse(fire[i], AP_membrane - v_s[i], Δv[i, 1])
-            v_s[i] = ifelse(fire[i], AP_membrane, v_s[i])
-            w_s[i] = ifelse(fire[i], w_s[i] + b, w_s[i])
-            θ[i] = ifelse(fire[i], θ[i] + At, θ[i])
-            tabs[i] = ifelse(fire[i], n_ref, tabs[i])
-            fire[i] && continue
-            v_s[i] += 0.5 * dt * (Δv_temp[i, 1] + Δv[i, 1])
-            v_d[i] += 0.5 * dt * (Δv_temp[i, 2] + Δv[i, 2])
-            w_s[i] += 0.5 * dt * (Δv_temp[i, 3] + Δv[i, 3])
-        end
+    _check_state_lengths(N, v_s, w_s, v_d, fire, θ, tabs, d.gax, d.C)
+    (size(Δv, 1) >= N && size(Δv, 2) >= 3 && size(Δv_temp, 1) >= N && size(Δv_temp, 2) >= 3) ||
+        throw(DimensionMismatch("Δv and Δv_temp must have N rows and 3 columns"))
+    gax, Cd = d.gax, d.C
+    nabs_f = convert(eltype(tabs), n_abs)    # the counters are `Float32`: compare and store without mixing types
+    nref_f = convert(eltype(tabs), n_ref)
+    # Branchless (`ifelse`) and vectorised, bit-identical to the branching loop of SNNModels <= 1.9 (backpropagation period,
+    # absolute refractory period, free integration or spike): all the cases are evaluated and the one that applies is kept.
+    @inbounds @simd for i ∈ 1:N
+        t1 = tabs[i] - 1
+        th1 = θ[i] + dt * (Vt - θ[i]) / τA
+        bp = t1 > nabs_f                # backpropagation period
+        rf = !bp & (t1 > 0)            # absolute refractory period
+        act = t1 <= 0                   # free integration (or spike)
+        vs0 = v_s[i]
+        vd0 = v_d[i]
+        ws0 = w_s[i]
+        dv1 = Δv[i, 1]
+
+        # bp or rf: the soma is clamped, the dendrite relaxes towards it
+        vsc = ifelse(bp, AP_membrane, Vr)
+        vdc = vd0 + dt * (vsc - vd0) * gax[i] / Cd[i]
+
+        # act: spike or Heun update
+        spk = act & (vs0 + dv1 * dt >= Vspike)
+        keep = act & !spk
+        vs_h = convert(Float32, vs0 + 0.5 * dt * (Δv_temp[i, 1] + dv1))   # the old loop stored the Float64 sum into a Float32 array
+        vd_h = convert(Float32, vd0 + 0.5 * dt * (Δv_temp[i, 2] + Δv[i, 2]))   # the old loop stored the Float64 sum into a Float32 array
+        ws_h = convert(Float32, ws0 + 0.5 * dt * (Δv_temp[i, 3] + Δv[i, 3]))   # the old loop stored the Float64 sum into a Float32 array
+
+        clamped = bp | rf
+        fire[i] = spk
+        Δv[i, 1] = ifelse(spk, AP_membrane - vs0, dv1)
+        v_s[i] = ifelse(clamped, vsc, ifelse(spk, AP_membrane, ifelse(keep, vs_h, vs0)))
+        v_d[i] = ifelse(clamped, vdc, ifelse(keep, vd_h, vd0))
+        w_s[i] = ifelse(spk, ws0 + b, ifelse(keep, ws_h, ws0))
+        θ[i] = ifelse(spk, th1 + At, th1)
+        tabs[i] = ifelse(spk, nref_f, t1)
     end
 end
 
@@ -238,7 +255,13 @@ end
 
     # Heun stage: evaluate the derivatives at the predicted state x + dt * Δv
     # (Δv = 0 at the first stage, i.e. at the current state).
-    @inbounds for i ∈ 1:p.N
+    N = p.N
+    dgax, dgm, dEl, dC = d.gax, d.gm, d.El, d.C
+    _check_state_lengths(N, v_s, v_d, w_s, θ, Is, Id, dgax, dgm, dEl, dC)
+    (size(Δv, 1) >= N && size(Δv, 2) >= 3 && size(is, 1) >= N && size(is, 2) >= 2 && size(v_pred, 1) >= N && size(v_pred, 2) >= 2) ||
+        throw(DimensionMismatch("Δv, is and v_pred must have N rows (3, 2 and 2 columns)"))
+
+    @inbounds @simd for i ∈ 1:N
         v_pred[i, 1] = v_s[i] + Δv[i, 1] * dt
         v_pred[i, 2] = v_d[i] + Δv[i, 2] * dt
     end
@@ -247,11 +270,13 @@ end
     @views synaptic_current!(p, dend_syn, synvars_d, v_pred[:, 2], is[:, 2])
     clamp!(is, -1000, 1000)
 
-    @fastmath @inbounds for i ∈ 1:p.N
+    # This `@fastmath` loop is kept as it was (scalar, `ic` stored and reloaded), see `Tripod`: with the axial current in a register it vectorises
+    # (about 5x faster) but the derivatives differ in the last bit.
+    @fastmath @inbounds for i ∈ 1:N
         vs = v_pred[i, 1]
         vd = v_pred[i, 2]
         ws = w_s[i] + Δv[i, 3] * dt
-        ic[1] = (vs - vd) * d.gax[i] # axial current soma -> d
+        ic[1] = (vs - vd) * dgax[i] # axial current soma -> d
         Δv[i, 1] =
             (
                 gl * (El - vs) +
@@ -260,7 +285,7 @@ end
                 - ic[1] # axial current
                 + Is[i]  # external current
             ) / C
-        Δv[i, 2] = ((d.El[i] - vd) * d.gm[i] - is[i, 2] + ic[1] + Id[i]) / d.C[i]
+        Δv[i, 2] = ((dEl[i] - vd) * dgm[i] - is[i, 2] + ic[1] + Id[i]) / dC[i]
         Δv[i, 3] = (a * (vs - El) - ws) / τw
     end
 end

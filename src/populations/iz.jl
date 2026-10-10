@@ -125,22 +125,26 @@ detection (`v > 30`) with reset `v = c`, `u += d`. See `IZ`.
 """
 function integrate!(p::IZ, param::IZParameter, dt::Float32)
     @unpack N, v, u, fire, I = p
-    @unpack a, b, c, d = param
+    @unpack a, b, c, d, τe, τi, Ee, Ei = param
     @unpack ge, gi = p
-    @inbounds for i = 1:N
-        ge[i] += dt * -ge[i] / param.τe
-        gi[i] += dt * -gi[i] / param.τi
-    end
-    @inbounds for i = 1:N
-        v[i] += 0.5f0 * dt * (0.04f0 * v[i]^2 + 5.0f0 * v[i] + 140.0f0 - u[i] + I[i])
-        v[i] += 0.5f0 * dt * (0.04f0 * v[i]^2 + 5.0f0 * v[i] + 140.0f0 - u[i] + I[i])
-        u[i] += dt * (a * (b * v[i] - u[i]))
-        v[i] += dt * (ge[i] * (param.Ee - v[i]) + gi[i] * (param.Ei - v[i]))
-    end
-    @inbounds for i = 1:N
-        fire[i] = v[i] > 30.0f0
-        v[i] = ifelse(fire[i], c, v[i])
-        u[i] += ifelse(fire[i], d, 0.0f0)
+    _check_state_lengths(N, v, u, fire, I, ge, gi)
+    # One pass over the neurons (the three loops of SNNModels <= 1.9 fused: every neuron is independent, same operations in the same order).
+    Tv = eltype(v); Tu = eltype(u); Tg = eltype(ge); Tgi = eltype(gi)    # every `x[i] += ...` of the old loops rounded to the array type
+    @inbounds @simd for i = 1:N
+        gei = convert(Tg, ge[i] + dt * -ge[i] / τe)
+        gii = convert(Tgi, gi[i] + dt * -gi[i] / τi)
+        ge[i] = gei
+        gi[i] = gii
+        vi = v[i]
+        ui = u[i]
+        vi = convert(Tv, vi + 0.5f0 * dt * (0.04f0 * vi^2 + 5.0f0 * vi + 140.0f0 - ui + I[i]))
+        vi = convert(Tv, vi + 0.5f0 * dt * (0.04f0 * vi^2 + 5.0f0 * vi + 140.0f0 - ui + I[i]))
+        ui = convert(Tu, ui + dt * (a * (b * vi - ui)))
+        vi = convert(Tv, vi + dt * (gei * (Ee - vi) + gii * (Ei - vi)))
+        spk = vi > 30.0f0
+        fire[i] = spk
+        v[i] = ifelse(spk, c, vi)
+        u[i] = ui + ifelse(spk, d, 0.0f0)
     end
 end
 

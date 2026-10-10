@@ -118,40 +118,43 @@ function integrate!(p::ExtendedIF, param::ExtendedIFParameter, dt::Float32)
     update_neuron!(p, param, dt)
 end
 
+# Branchless and vectorised (`@inbounds @simd`), bit-identical to the branching loop of SNNModels <= 1.9: the membrane update is
+# evaluated for every neuron and discarded (`ifelse`) for the refractory ones; `round(Int, τabs / dt)` is hoisted.
 function update_neuron!(p::ExtendedIF, param::ExtendedIFParameter, dt::Float32)
     @unpack N, v, g_Exc, g_PV, g_SST, w, I, tabs, fire = p
-    @unpack El, E_i, E_e, τabs, gl, α = param
-    @unpack N, v, w, tabs, fire = p
-    @unpack Vt, Vr, τabs = param
-    @inbounds for i = 1:N
-        if tabs[i] > 0
-            fire[i] = false
-            tabs[i] -= 1
-            continue
-        end
+    @unpack El, E_i, E_e, gl, α, Vt, Vr, τabs, Cm = param
+    _check_state_lengths(N, v, g_Exc, g_PV, g_SST, I, tabs, fire)
+    nabs = convert(eltype(tabs), round(Int, τabs / dt))    # refractory steps, loop invariant
+    one_ = one(eltype(tabs))
+    @inbounds @simd for i = 1:N
+        ti = tabs[i]
+        vi = v[i]
+        refr = ti > 0
         # Membrane potential
         dv =
             (
-                gl * (El - v[i]) +
-                g_Exc[i] * (E_e - v[i]) +
-                g_PV[i] * (E_i - v[i]) +
-                g_SST[i] * (E_i - v[i]) +
-                -α * g_Exc[i] * g_SST[i] * (E_e - v[i]) +
+                gl * (El - vi) +
+                g_Exc[i] * (E_e - vi) +
+                g_PV[i] * (E_i - vi) +
+                g_SST[i] * (E_i - vi) +
+                -α * g_Exc[i] * g_SST[i] * (E_e - vi) +
                 + I[i] # synaptic term
                 # 0
-            ) / param.Cm
-        v[i] += dt * dv
-        fire[i] = v[i] > Vt
-        v[i] = ifelse(fire[i], Vr, v[i])
+            ) / Cm
+        vn = vi + dt * dv
+        spk = !refr & (vn > Vt)
+        fire[i] = spk
+        v[i] = ifelse(refr, vi, ifelse(spk, Vr, vn))
         # Absolute refractory period
-        tabs[i] = ifelse(fire[i], round(Int, τabs / dt), tabs[i])
+        tabs[i] = ifelse(refr, ti - one_, ifelse(spk, nabs, ti))
     end
 end
 
 function update_synapses!(p::ExtendedIF, param::ExtendedIFParameter, dt::Float32)
     @unpack N, g_Exc, g_PV, g_SST = p
     @unpack τe, τi = param
-    @inbounds for i = 1:N
+    _check_state_lengths(N, g_Exc, g_PV, g_SST)
+    @inbounds @simd for i = 1:N
         g_Exc[i] += dt * (-g_Exc[i] / τe)
         g_PV[i] += dt * (-g_PV[i] / τi)
         g_SST[i] += dt * (-g_SST[i] / τi)

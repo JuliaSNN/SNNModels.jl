@@ -56,9 +56,12 @@ end
 
 function integrate!(p::WilsonCowan, param::WCParameter, dt::Float32)
     @unpack N, x, r, g, I = p
-    @inbounds for i = 1:N
-        x[i] += dt * (-x[i] + g[i] + I[i])
-        r[i] = tanh(x[i])
+    _check_state_lengths(N, x, r, g, I)
+    # `_tanh_inl`: the bits of `tanh`, with the exponential inlined so that the loop vectorises
+    @inbounds @simd for i = 1:N
+        xi = x[i] + dt * (-x[i] + g[i] + I[i])
+        x[i] = xi
+        r[i] = _tanh_inl(xi)
         g[i] = 0.0f0 # g is the synaptic input of this step (connections add to it)
     end
 end

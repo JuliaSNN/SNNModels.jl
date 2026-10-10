@@ -102,12 +102,15 @@ Then, only if `τw > 0`, for every neuron `w += b` if it fired and
 - `spike::PST = PostSpike()`: spike parameters (only `τabs` is used).
 - `id::String = randstring(12)`, `name::String = "IF"`.
 - `N::Int32 = 100`: number of neurons.
-- `v::Vector{Float32}`: membrane potential (mV), initialised uniformly in `[Vr, Vt]`.
-- `w::Vector{Float32}`: adaptation current (pA), zeros.
+- `v::VFT`: membrane potential (mV), initialised uniformly in `[Vr, Vt]`. `VFT = Vector{Float32}` by default;
+  `IF(N = 10, VFT = Vector{Float64})` is a `Float64` population: `param`, `synapse` (`DoubleExpSynapse`), `spike`, the
+  synaptic variables and the receptor buffers default to `Float64` too, and the connections and stimuli built on it
+  follow (see `float_type`). Mixing precisions in one population is an `ArgumentError`.
+- `w::VFT`: adaptation current (pA), zeros.
 - `fire::Vector{Bool}`: spike flags of the last step.
 - `tabs::Vector{Int}`: refractory counters (steps), ones.
-- `I::Vector{Float32}`: external current (pA), zeros.
-- `syn_curr::Vector{Float32}`: total synaptic current (pA).
+- `I::VFT`: external current (pA), zeros.
+- `syn_curr::VFT`: total synaptic current (pA).
 - `synvars`: synaptic state, `synaptic_variables(synapse, N)`.
 - `receptors::NamedTuple`: spike input buffers, `synaptic_receptors(synapse, N)`
   (`(glu, gaba)` for the two-receptor synapse models). Connections target them with the
@@ -129,28 +132,28 @@ IF
 @snn_kw struct IF{
     IT = Int32,
     VFT = Vector{Float32},
-    PST = PostSpike{Float32},
+    PST = PostSpike{eltype(VFT)},
     SYNT<:AbstractSynapseParameter,
     SYNV<:AbstractSynapseVariable,
     RECT<:NamedTuple,
 } <: AbstractGeneralizedIF
 
-    param::IFParameter = IFParameter()
-    synapse::SYNT = DoubleExpSynapse()
-    spike::PST = PostSpike()
+    param::IFParameter = IFParameter(FT = eltype(VFT))
+    synapse::SYNT = DoubleExpSynapse(FT = eltype(VFT))
+    spike::PST = PostSpike(FT = eltype(VFT))
 
     id::String = randstring(12)
     name::String = "IF"
 
     N::IT = 100 # Number of neurons
-    v::VFT = param.Vr .+ rand(Float32, N) .* (param.Vt - param.Vr)
-    w::VFT = zeros(Float32, N) # Adaptation current
+    v::VFT = param.Vr .+ rand(eltype(VFT), N) .* (param.Vt - param.Vr)
+    w::VFT = zeros(eltype(VFT), N) # Adaptation current
     fire::VBT = zeros(Bool, N) # Store spikes
     tabs::VIT = ones(Int, N) # Membrane time constant
-    I::VFT = zeros(Float32, N) # Current
+    I::VFT = zeros(eltype(VFT), N) # Current
 
     # Two receptors synaptic conductance
-    syn_curr::VFT = zeros(Float32, N)
+    syn_curr::VFT = zeros(eltype(VFT), N)
     synvars::SYNV = synaptic_variables(synapse, N) # Synaptic variables for receptor model
     receptors::RECT = synaptic_receptors(synapse, N)
     # Synaptic targets
@@ -185,7 +188,7 @@ end
 
 
 """
-    update_neuron!(p::AbstractGeneralizedIF, param::AbstractGeneralizedIFParameter, dt::Float32)
+    update_neuron!(p::AbstractGeneralizedIF, param::AbstractGeneralizedIFParameter, dt)
 
 Third stage of `integrate!` for generalized integrate-and-fire populations: integrate the
 membrane (and adaptation) equations over `dt` using the synaptic current `p.syn_curr`, detect
@@ -199,39 +202,64 @@ adaptation `w` only if `τw > 0`.
 function update_neuron!(
     p::IF,
     param::T,
-    dt::Float32,
+    dt::AbstractFloat,
 ) where {T<:AbstractGeneralizedIFParameter}
     @unpack N, v, w, I, tabs, fire, syn_curr = p
     @unpack τm, El, R, Vt, Vr = param
     @unpack τabs = p.spike
+    _check_state_lengths(N, v, w, I, tabs, fire, syn_curr)
+    nabs = round(Int, τabs / dt)    # refractory steps, loop invariant
+    FT = eltype(v)
 
-    # @inbounds 
-    for i = 1:N
-        # Idle time
-        if tabs[i] > 0
-            fire[i] = false
-            tabs[i] -= 1
-            continue
-        end
-        # Membrane potential
-        v[i] += dt/τm * (-(v[i] - El) + R*(-w[i] + I[i]) - R*syn_curr[i])
-
-        # Spike and absolute refractory period
-        fire[i] = v[i] > Vt
-        v[i] = ifelse(fire[i], Vr, v[i])
-        tabs[i] = ifelse(fire[i], round(Int, τabs / dt), tabs[i])
+    # Branchless: the membrane update is evaluated for every neuron and discarded for the refractory ones,
+    # which keeps the loop free of control flow so that it vectorises.
+    @inbounds @simd for i = 1:N
+        ti = tabs[i]
+        vi = v[i]
+        refr = ti > 0
+        vn = convert(FT, vi + dt/τm * (-(vi - El) + R*(-w[i] + I[i]) - R*syn_curr[i]))
+        spk = !refr & (vn > Vt)
+        fire[i] = spk
+        v[i] = ifelse(refr, vi, ifelse(spk, Vr, vn))
+        tabs[i] = ifelse(refr, ti - 1, ifelse(spk, nabs, ti))
     end
 
 
     # Adaptation current
-    if (hasfield(typeof(param), :τw) && param.τw > 0.0f0)
+    if (hasfield(typeof(param), :τw) && param.τw > 0)
         @unpack a, b, τw = param
-        # @inbounds 
-        for i = 1:N
-            w[i] = ifelse(fire[i], w[i] + param.b, w[i])
+        @inbounds @simd for i = 1:N
+            w[i] = ifelse(fire[i], w[i] + b, w[i])
             (w[i] += dt * (a * (v[i] - El) - w[i]) / τw)
         end
     end
+end
+
+# Guard for the `@inbounds` neuron loops: every state vector must hold at least `N` entries
+# (unrolled at compile time over the argument tuple, no allocation).
+@inline _lengths_ok(N, ::Tuple{}) = true
+@inline _lengths_ok(N, t::Tuple) = length(first(t)) >= N && _lengths_ok(N, Base.tail(t))
+@inline function _check_state_lengths(N, vs::Vararg{AbstractVector})
+    _lengths_ok(N, vs) || _throw_state_length(N, vs)
+    return nothing
+end
+@noinline function _throw_state_length(N, vs)
+    L = minimum(length, vs)
+    throw(DimensionMismatch("population state vector of length $L is shorter than N = $N"))
+end
+
+_float64_supported(p::IF) = p.synapse isa DoubleExpSynapse
+
+# one precision per population: the parameter objects must have the type of the state arrays (`float_type`)
+function snn_kw_finalize(::Type{<:IF}, f::NamedTuple)
+    FT = eltype(f.v)
+    for (what, obj) in (("param", f.param), ("synapse", f.synapse), ("spike", f.spike))
+        float_type(obj) === FT || throw(ArgumentError(
+            "IF mixes precisions: the state is $FT but `$what` is a $(typeof(obj)) ($(float_type(obj))). " *
+            "Build all with the same floating-point type, e.g. IF(VFT = Vector{Float64}, param = IFParameter(FT = Float64), " *
+            "synapse = DoubleExpSynapse(FT = Float64), spike = PostSpike(FT = Float64)); the defaults follow `VFT`."))
+    end
+    return f
 end
 
 export IF, IFParameter

@@ -188,6 +188,12 @@ end
 
 
 # Membrane update of `AdEx` (scalar parameters); see the `AdEx` docstring for the step order.
+#
+# Branchless and vectorised (`@inbounds @simd`): the update is evaluated for every neuron and discarded for the
+# refractory ones (`tabs > 0` after the decrement) with `ifelse`, which is bit-identical to the branching loop of
+# SNNModels <= 1.9 (every value that is kept goes through the same floating-point operations in the same order).
+# The exponential term does not depend on the neuron through anything but `v` and `θ`; for a refractory neuron it may overflow to `Inf`,
+# which is discarded. Hoisted out of the loop: `round(Int, τabs / dt)` and the test `ΔT < 0`.
 function update_neuron!(
     p::P,
     param::T,
@@ -196,34 +202,35 @@ function update_neuron!(
     @unpack N, v, w, fire, θ, I, tabs, syn_curr = p
     @unpack τm, Vt, Vr, El, R, ΔT, τw, a, b = param
     @unpack At, τA, τabs = p.spike
+    _check_state_lengths(N, v, w, fire, θ, I, tabs, syn_curr)
+    nabs = round(Int, τabs / dt)    # refractory steps, loop invariant
+    useexp = !(ΔT < 0.0f0)          # the exponential term is removed by a negative slope factor
 
-    @inbounds for i ∈ 1:N
-        # Reset membrane potential after spike
-        v[i] = ifelse(fire[i], Vr, v[i])
+    @inbounds @simd for i ∈ 1:N
+        vi = ifelse(fire[i], Vr, v[i])      # reset after the spike of the previous step
+        ti = tabs[i] - 1
+        act = ti <= 0                       # not refractory
+        wi = w[i]
+        thi = θ[i]
 
-        # Absolute refractory period
-        fire[i] = false
-        tabs[i] -= 1
-        tabs[i] > 0 && continue
+        w1 = wi + dt * (a * (vi - El) - wi) / τw
+        ex = ifelse(useexp, ΔT * @inline(exp((vi - thi) / ΔT)), 0.0f0)
+        v1 = vi +
+             dt * (
+            -(vi - El)  # leakage
+            + ex        # exponential term
+            - R * syn_curr[i] # synapses
+            - R * w1    # adaptation
+            + R * I[i]  # external current
+        ) / τm
+        th1 = thi + dt * (Vt - thi) / τA
+        spk = act & (v1 >= 0mV)
 
-        # Adaptation current 
-        w[i] += dt * (a * (v[i] - El) - w[i]) / τw
-        # Membrane potential
-        v[i] +=
-            dt * (
-                -(v[i] - El)  # leakage
-                + (ΔT < 0.0f0 ? 0.0f0 : ΔT * exp((v[i] - θ[i]) / ΔT)) # exponential term
-                - R * syn_curr[i] # excitatory synapses
-                - R * w[i] # adaptation
-                + R * I[i] # external current
-            ) / τm
-
-        θ[i] += dt * (Vt - θ[i]) / τA
-        fire[i] = v[i] >= 0mV#$param.AP_membrane
-        v[i] = ifelse(fire[i], 20.0f0, v[i]) # Set membrane potential to spike potential
-        w[i] = ifelse(fire[i], w[i] + b, w[i])
-        θ[i] = ifelse(fire[i], θ[i] + At, θ[i])
-        tabs[i] = ifelse(fire[i], round(Int, τabs / dt), tabs[i])
+        fire[i] = spk
+        v[i] = ifelse(act, ifelse(spk, 20.0f0, v1), vi)
+        w[i] = ifelse(act, ifelse(spk, w1 + b, w1), wi)
+        θ[i] = ifelse(act, ifelse(spk, th1 + At, th1), thi)
+        tabs[i] = ifelse(spk, nabs, ti)
     end
 end
 
@@ -237,32 +244,35 @@ function update_neuron!(
     @unpack N, v, w, fire, θ, I, tabs, syn_curr = p
     @unpack τm, Vt, Vr, El, R, ΔT, τw, a, b = param
     @unpack At, τA, τabs = p.spike
+    _check_state_lengths(N, v, w, fire, θ, I, tabs, syn_curr, τm, Vt, Vr, El, R, ΔT, τw, a, b)
+    nabs = round(Int, τabs / dt)
 
-    @inbounds for i ∈ 1:N
-        v[i] = ifelse(fire[i], Vr[i], v[i])
-        # Absolute refractory period
-        fire[i] = false
-        tabs[i] -= 1
-        tabs[i] > 0 && continue
+    @inbounds @simd for i ∈ 1:N
+        vi = ifelse(fire[i], Vr[i], v[i])
+        ti = tabs[i] - 1
+        act = ti <= 0
+        wi = w[i]
+        thi = θ[i]
+        Ti = ΔT[i]
 
-        w[i] += dt * (a[i] * (v[i] - El[i]) - w[i]) / τw[i]
-        v[i] +=
-            dt * (
-                -(v[i] - El[i])  # leakage
-                +
-                (ΔT[i] < 0.0f0 ? 0.0f0 : ΔT[i] * exp((v[i] - θ[i]) / ΔT[i])) # exponential term
-                -
-                R[i] * syn_curr[i] # excitatory synapses
-                - R[i] * w[i] # adaptation
-                + R[i] * I[i] # external current
-            ) / (τm[i])
+        w1 = wi + dt * (a[i] * (vi - El[i]) - wi) / τw[i]
+        ex = ifelse(Ti < 0.0f0, 0.0f0, Ti * @inline(exp((vi - thi) / Ti)))
+        v1 = vi +
+             dt * (
+            -(vi - El[i])  # leakage
+            + ex           # exponential term
+            - R[i] * syn_curr[i] # synapses
+            - R[i] * w1    # adaptation
+            + R[i] * I[i]  # external current
+        ) / τm[i]
+        th1 = thi + dt * (Vt[i] - thi) / τA
+        spk = act & (v1 >= 0mV)
 
-        θ[i] += dt * (Vt[i] - θ[i]) / τA
-        fire[i] = v[i] >= 0mV#$param.AP_membrane
-        v[i] = ifelse(fire[i], 20.0f0, v[i]) # Set membrane potential to spike potential
-        w[i] = ifelse(fire[i], w[i] + b[i], w[i])
-        θ[i] = ifelse(fire[i], θ[i] + At, θ[i])
-        tabs[i] = ifelse(fire[i], round(Int, τabs / dt), tabs[i])
+        fire[i] = spk
+        v[i] = ifelse(act, ifelse(spk, 20.0f0, v1), vi)
+        w[i] = ifelse(act, ifelse(spk, w1 + b[i], w1), wi)
+        θ[i] = ifelse(act, ifelse(spk, th1 + At, th1), thi)
+        tabs[i] = ifelse(spk, nabs, ti)
     end
 end
 

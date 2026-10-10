@@ -1,7 +1,7 @@
 # abstract type AbstractIFParameter <: AbstractGeneralizedIFParameter end
 
 """
-    integrate!(p::AbstractGeneralizedIF, param::AbstractGeneralizedIFParameter, dt::Float32)
+    integrate!(p::AbstractGeneralizedIF, param::AbstractGeneralizedIFParameter, dt)
 
 One integration step of a generalized integrate-and-fire population (`IF`, `AdEx`, `Tripod`,
 `BallAndStick`). Calls, in this order,
@@ -13,11 +13,16 @@ One integration step of a generalized integrate-and-fire population (`IF`, `AdEx
 3. `update_neuron!(p, param, dt)`: integrates the membrane (and adaptation) equations, detects
    spikes and applies reset and refractoriness.
 """
+# populations whose model is implemented in Float64 (a Float32 step is always accepted)
+_float64_supported(::AbstractGeneralizedIF) = false
+
 function integrate!(
     p::P,
     param::T,
-    dt::Float32,
+    dt::AbstractFloat,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractGeneralizedIFParameter}
+    dt isa Float32 || _float64_supported(p) || throw(ArgumentError(
+        "population $(nameof(typeof(p))) is not implemented in $(typeof(dt)) (Float64 state: Identity, IF with DoubleExpSynapse)"))
     update_synapses!(p, p.synapse, p.receptors, p.synvars, dt)
     synaptic_current!(p, p.synapse, p.synvars)
     update_neuron!(p, param, dt)

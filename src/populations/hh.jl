@@ -64,6 +64,14 @@ function synaptic_target(
     return g, v_post
 end
 
+# `x^4` of a `Float32`, written out: Base evaluates `Float32 ^ 4` in `Float64` by `power_by_squaring` (an out-of-line call that blocks vectorisation);
+# this is the same arithmetic, `x2 = x * x; x2 * x2` in `Float64`, rounded to `Float32`, hence the same bits.
+@inline function _pow4(x::Float32)
+    y = Float64(x)
+    y2 = y * y
+    return Float32(y2 * y2)
+end
+
 @doc raw"""
     HH(; N = 100, param = HHParameter(), name = "HH", kwargs...)
 
@@ -132,25 +140,27 @@ HH
 function integrate!(p::HH, param::HHParameter, dt::Float32)
     @unpack N, v, m, n, h, ge, gi, fire, I = p
     @unpack Cm, gl, El, Ek, En, gn, gk, Vt, τe, τi, Ee, Ei = param
-    @inbounds for i = 1:N
+    _check_state_lengths(N, v, m, n, h, ge, gi, fire, I)
+    # `@inline exp`: the exponentials are inlined so that the loop vectorises (same bits as the `exp` call)
+    @inbounds @simd for i = 1:N
         v_old = v[i]
         m[i] +=
             dt * (
                 0.32f0 * (13.0f0 - v[i] + Vt) /
-                (exp((13.0f0 - v[i] + Vt) / 4.0f0) - 1.0f0) * (1.0f0 - m[i]) -
+                (@inline(exp((13.0f0 - v[i] + Vt) / 4.0f0)) - 1.0f0) * (1.0f0 - m[i]) -
                 0.28f0 * (v[i] - Vt - 40.0f0) /
-                (exp((v[i] - Vt - 40.0f0) / 5.0f0) - 1.0f0) * m[i]
+                (@inline(exp((v[i] - Vt - 40.0f0) / 5.0f0)) - 1.0f0) * m[i]
             )
         n[i] +=
             dt * (
                 0.032f0 * (15.0f0 - v[i] + Vt) /
-                (exp((15.0f0 - v[i] + Vt) / 5.0f0) - 1.0f0) * (1.0f0 - n[i]) -
-                0.5f0 * exp((10.0f0 - v[i] + Vt) / 40.0f0) * n[i]
+                (@inline(exp((15.0f0 - v[i] + Vt) / 5.0f0)) - 1.0f0) * (1.0f0 - n[i]) -
+                0.5f0 * @inline(exp((10.0f0 - v[i] + Vt) / 40.0f0)) * n[i]
             )
         h[i] +=
             dt * (
-                0.128f0 * exp((17.0f0 - v[i] + Vt) / 18.0f0) * (1.0f0 - h[i]) -
-                4.0f0 / (1.0f0 + exp((40.0f0 - v[i] + Vt) / 5.0f0)) * h[i]
+                0.128f0 * @inline(exp((17.0f0 - v[i] + Vt) / 18.0f0)) * (1.0f0 - h[i]) -
+                4.0f0 / (1.0f0 + @inline(exp((40.0f0 - v[i] + Vt) / 5.0f0))) * h[i]
             )
         v[i] +=
             dt / Cm * (
@@ -159,7 +169,7 @@ function integrate!(p::HH, param::HHParameter, dt::Float32)
                 ge[i] * (Ee - v[i]) +
                 gi[i] * (Ei - v[i]) +
                 gn * m[i]^3 * h[i] * (En - v[i]) +
-                gk * n[i]^4 * (Ek - v[i])
+                gk * _pow4(n[i]) * (Ek - v[i])
             )
         ge[i] += dt * -ge[i] / τe
         gi[i] += dt * -gi[i] / τi
