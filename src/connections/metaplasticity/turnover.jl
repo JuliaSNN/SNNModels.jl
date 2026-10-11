@@ -283,7 +283,7 @@ function synaptic_turnover!(
     for (s, new_post) in zip(rep_connections, rep_neurons)
         C.I[s] = new_post
         C.W[s] = rand(wdist)
-        hasfield(typeof(C), :ρ) && (C.ρ[s] = 1.0f0)
+        hasfield(typeof(C), :ρ) && length(C.ρ) == length(C.W) && (C.ρ[s] = 1.0f0)   # ρ is stored only with a short-term rule
     end
     update_sparse_matrix!(C)
 end

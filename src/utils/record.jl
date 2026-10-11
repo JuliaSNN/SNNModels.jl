@@ -607,6 +607,8 @@ function monitor!(
         end
         if variables == :none
             if hasfield(typeof(obj), sym)
+                # the efficacy of a SpikingSynapse without short-term rule is not stored: store it (ones) so that it can be recorded
+                (sym === :ρ && obj isa SpikingSynapse) && materialize_efficacy!(obj)
                 # the weights of a synapse are read through the accessor, as the recorder will: throws now (not mid-run)
                 # for a rule that defers the weight update and defines no accessor
                 sample = (sym === :W && obj isa AbstractSparseSynapse) ? plasticity_value(obj, :W) : getfield(obj, sym)

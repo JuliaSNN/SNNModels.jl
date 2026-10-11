@@ -158,6 +158,7 @@ function SynapseNormalization(synapses; param::NormParam, kwargs...)
     for syn in synapses
         @assert isa(syn, AbstractSparseSynapse)
         sync_weights!(syn)   # event-driven rules (vSTDPParameter) keep `W` stale between syncs
+        ensure_transpose!(syn)   # the inputs of every neuron are read through `index`
         @unpack rowptr, W, index = syn
         Is = 1:(length(rowptr)-1)
         @assert length(Is) == N
@@ -207,6 +208,7 @@ function plasticity!(c::SynapseNormalization, param::NormParam)
     @unpack W1, W0, μ, synapses = c
     additive = param isa AdditiveNorm
     foreach(sync_weights!, synapses)   # the rescaling acts on the current weights (deferred updates are materialised)
+    foreach(ensure_transpose!, synapses)
     fill!(W1, zero(eltype(W1)))
     nsyn = zeros(Int, length(W1))
     for syn in synapses

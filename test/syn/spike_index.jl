@@ -26,10 +26,11 @@ end
 
 # dense reference of forward!
 function _dense_forward!(g, c)
+    ρ = SNNModels.efficacy(c)
     for j in eachindex(c.fireJ)
         c.fireJ[j] || continue
         for s in c.colptr[j]:(c.colptr[j+1]-1)
-            g[c.I[s]] += c.W[s] * c.ρ[s]
+            g[c.I[s]] += c.W[s] * ρ[s]
         end
     end
 end
@@ -227,12 +228,13 @@ end
         c = SpikingSynapse(pre, post, :g; conn = (p = 0.4f0, μ = 1.0f0, σ = 0.3f0), delay_dist = D.Uniform(0.3, 1.7))
         queue = [Tuple{Float32,Float32}[] for _ in 1:Npost]
         T = Time()
+        eff = SNNModels.efficacy(c)
         for n in 1:300
             pre.fire .= n == 1 ? falses(Npre) : rand(Npre) .< 0.1
             update_time!(T, _DT_SI)
             t = get_time(T)
             for j in findall(pre.fire), s in c.colptr[j]:(c.colptr[j+1]-1)
-                push!(queue[c.I[s]], (t + c.param.delaytime[s], c.W[s] * c.ρ[s]))
+                push!(queue[c.I[s]], (t + c.param.delaytime[s], c.W[s] * eff[s]))
             end
             gref = zeros(Float32, Npost)
             for i in 1:Npost

@@ -36,7 +36,7 @@ size(W)
 ```
 """
 function matrix(c::C) where {C<:AbstractConnection}
-    return sparse(c.I, c.J, _current_W(c), length(c.rowptr) - 1, length(c.colptr) - 1)
+    return sparse(c.I, _presyn_index(c), _current_W(c), length(c.rowptr) - 1, length(c.colptr) - 1)
 end
 
 # the weights as of the last step: through the accessor for the sparse synapses (a rule may defer the update of `W`)
@@ -45,8 +45,12 @@ _current_W(c) = c.W
 
 
 function matrix(c::C, sym::Symbol) where {C<:AbstractConnection}
-    return sparse(c.I, c.J, getfield(c, sym), length(c.rowptr) - 1, length(c.colptr) - 1)
+    return sparse(c.I, _presyn_index(c), _synapse_values(c, sym), length(c.rowptr) - 1, length(c.colptr) - 1)
 end
+
+# per-synapse values of the field `sym` (the efficacy of a SpikingSynapse through `efficacy`: `ρ` may not be stored)
+_synapse_values(c, sym::Symbol) = getfield(c, sym)
+_synapse_values(c::SpikingSynapse, sym::Symbol) = sym === :ρ ? efficacy(c) : getfield(c, sym)
 
 """
     matrix_record(c::AbstractConnection, sym::Symbol, time::Number)
@@ -80,12 +84,13 @@ Sparse `N_post x N_pre` matrix of the interpolated record `W` (callable as
 `matrix_record`.
 """
 function matrix(c::C, W::AbstractArray, time::Number) where {C<:AbstractConnection}
-    return sparse(c.I, c.J, W(axes(W, 1), time), length(c.rowptr) - 1, length(c.colptr) - 1)
+    return sparse(c.I, _presyn_index(c), W(axes(W, 1), time), length(c.rowptr) - 1, length(c.colptr) - 1)
 end
 
 function matrix(c::C, W::AbstractArray, time::AbstractVector) where {C<:AbstractConnection}
+    J = _presyn_index(c)
     return [
-        sparse(c.I, c.J, W(axes(W, 1), t), length(c.rowptr) - 1, length(c.colptr) - 1) for
+        sparse(c.I, J, W(axes(W, 1), t), length(c.rowptr) - 1, length(c.colptr) - 1) for
         t in time
     ] |> x -> cat(x..., dims = 3)
 end
@@ -138,6 +143,7 @@ postsynaptic neuron `i`: `c.rowptr[i]:(c.rowptr[i+1]-1)`. These are not indices 
 e.g. `c.W[c.index[presynaptic_idxs(c, i)]]` are the input weights of `i`.
 """
 function presynaptic_idxs(c::C, i::Int) where {C<:AbstractConnection}
+    ensure_transpose!(c)   # the caller indexes `c.index` with the result
     @unpack rowptr, index, J, W = c
     rowptr[i]:(rowptr[i+1]-1)
 end
@@ -162,16 +168,19 @@ SNN.SNNModels.postsynaptic(EI, 1)    # targets of E neuron 1
 ```
 """
 function presynaptic(c::C) where {C<:AbstractConnection}
+    ensure_transpose!(c)
     @unpack rowptr, index, J, W = c
     [J[index[rowptr[i]:(rowptr[i+1]-1)]] for i = 1:(length(rowptr)-1)]
 end
 
 function presynaptic(c::C, i::Int) where {C<:AbstractConnection}
+    ensure_transpose!(c)
     @unpack rowptr, index, J, W = c
     J[index[rowptr[i]:(rowptr[i+1]-1)]]
 end
 
 function presynaptic(c::C, is::AbstractVector) where {C<:AbstractConnection}
+    ensure_transpose!(c)
     @unpack rowptr, index, J, W = c
     presyn = Vector{Vector{Int}}()
     for i in is
@@ -609,7 +618,7 @@ end
 
 Rebuild the double sparse storage of `c` (`rowptr`, `colptr`, `I`, `J`, `index`, `W`). The
 first form replaces it with the matrix `W` (same size, asserted; the number of synapses may
-change). The second form rebuilds it from the current `c.I`, `c.J`, `c.W` (used after
+change). The second form rebuilds it from the current `c.I`, presynaptic indices, `c.W` (used after
 `synaptic_turnover!` has changed postsynaptic indices), keeping the size of the matrix
 (`length(c.rowptr) - 1` postsynaptic, `length(c.colptr) - 1` presynaptic neurons).
 
@@ -617,7 +626,9 @@ The per-synapse arrays are resized and reordered with the synapses: the short-te
 `ρ` and, for delayed synapses, the delays `param.delaytime`. In the first form a synapse
 `(i, j)` that already existed keeps its values and a new synapse gets `ρ = 1` and the mean
 delay; in the second form every stored synapse keeps its values (its CSC position may change).
-The plasticity variables are per neuron and are not affected.
+The plasticity variables are per neuron and are not affected. For a `SpikingSynapse`, an efficacy
+`ρ` that is not stored stays not stored, `J`/`index` are rebuilt only if they were present or a
+rule needs them, and equal delays are stored once.
 
 !!! note "Changed after SNNModels 1.8.4"
     Up to 1.8.4 `ρ` and the delays were neither resized nor reordered (out-of-bounds reads in
@@ -627,8 +638,10 @@ The plasticity variables are per neuron and are not affected.
 """
 function update_sparse_matrix!(c::S, W::SparseMatrixCSC) where {S<:AbstractConnection}
     sync_weights!(c)   # per-synapse deferred state (vSTDPParameter snapshots) is not reordered: materialise it first
-    old_I, old_J = copy(c.I), copy(c.J)
-    rowptr, colptr, I, J, index, W = dsparse(W)
+    old_I, old_J = copy(c.I), (has_transpose(c) ? copy(c.J) : _presyn_index(c))
+    colptr, I, V = _csc_int32(W)
+    rowptr = _rowptr_int32(I, size(W, 1))
+    J = _column_index(colptr)
     @assert length(rowptr) == length(c.rowptr) "Rowptr length mismatch"
     @assert length(colptr) == length(c.colptr) "Colptr length mismatch"
 
@@ -639,20 +652,8 @@ function update_sparse_matrix!(c::S, W::SparseMatrixCSC) where {S<:AbstractConne
     end
     perm = [get(old_pos, (Int(I[s]), Int(J[s])), 0) for s in eachindex(I)]
 
-    resize!(c.I, length(I))
-    resize!(c.J, length(I))
-    resize!(c.W, length(I))
-    resize!(c.index, length(I))
-
-    @inbounds @simd for i in eachindex(I)
-        c.I[i] = I[i]
-        c.J[i] = J[i]
-        c.W[i] = W[i]
-        c.index[i] = index[i]
-    end
-    c.colptr = colptr
-    c.rowptr = rowptr
-    _remap_synapse_state!(c, perm)
+    _set_sparse_storage!(c, rowptr, colptr, I, J, V)
+    _remap_synapse_state!(c, perm, length(old_I))
     return nothing
 end
 
@@ -660,28 +661,51 @@ function update_sparse_matrix!(c::S) where {S<:AbstractConnection}
     sync_weights!(c)
     Npost, Npre = length(c.rowptr) - 1, length(c.colptr) - 1
     # CSC order: by presynaptic neuron, then postsynaptic neuron
-    perm = sortperm(collect(zip(c.J, c.I)))
-    A = sparse(c.I[perm], c.J[perm], c.W[perm], Npost, Npre)
+    old_J = _presyn_index(c)
+    perm = sortperm(collect(zip(old_J, c.I)))
+    A = sparse(c.I[perm], old_J[perm], c.W[perm], Npost, Npre)
     @assert nnz(A) == length(c.W) "duplicate synapses after rewiring"
-    rowptr, colptr, I, J, index, W = dsparse(A)
-
-    @inbounds @simd for i in eachindex(I)
-        c.I[i] = I[i]
-        c.J[i] = J[i]
-        c.W[i] = W[i]
-        c.index[i] = index[i]
-    end
-    c.colptr = colptr
-    c.rowptr = rowptr
+    colptr, I, V = _csc_int32(A)
+    _set_sparse_storage!(c, _rowptr_int32(I, Npost), colptr, I, _column_index(colptr), V)
     _remap_synapse_state!(c, perm)
     return nothing
 end
 
+# Write a rebuilt storage into `c` (same arrays, resized). The transposed `J`/`index` are rebuilt if `c` had them or a rule
+# of `c` needs them, else left empty (SpikingSynapse; other connections always have them).
+function _set_sparse_storage!(c, rowptr, colptr, I, J, V)
+    n = length(I)
+    keepT = has_transpose(c) || needs_transpose(c)
+    resize!(c.I, n)
+    resize!(c.W, n)
+    @inbounds @simd for i in eachindex(I)
+        c.I[i] = I[i]
+        c.W[i] = V[i]
+    end
+    if keepT
+        resize!(c.J, n)
+        @inbounds @simd for i in eachindex(J)
+            c.J[i] = J[i]
+        end
+        _transpose_index!(resize!(c.index, n), colptr, I, rowptr)
+    else   # new empty vectors: `resize!` would keep the memory
+        c.J = similar(c.J, 0)
+        c.index = similar(c.index, 0)
+    end
+    c.colptr = colptr
+    c.rowptr = rowptr
+    return c
+end
+
+_stores_efficacy(c) = true
+_stores_efficacy(c::SpikingSynapse) = !(c.STPParam isa NoSTP)
+
 # Reorder / resize the per-synapse arrays of `c` after a rebuild of its sparse storage:
-# `perm[s]` is the old position of the synapse now stored at `s` (0 for a new synapse).
-function _remap_synapse_state!(c, perm::AbstractVector{<:Integer})
+# `perm[s]` is the old position of the synapse now stored at `s` (0 for a new synapse); `nold` synapses before.
+function _remap_synapse_state!(c, perm::AbstractVector{<:Integer}, nold::Integer = length(perm))
     hasfield(typeof(c), :chunkptr) && invalidate_chunk_ptr!(c.chunkptr)   # the sub-row pointers of the threaded forward!/plasticity
-    if hasfield(typeof(c), :ρ)
+    # ρ is reordered only if stored (a SpikingSynapse without short-term rule keeps it empty); a short-term rule always has it
+    if hasfield(typeof(c), :ρ) && (length(c.ρ) > 0 || _stores_efficacy(c))
         old = copy(c.ρ)
         resize!(c.ρ, length(perm))
         for s in eachindex(perm)
@@ -689,12 +713,15 @@ function _remap_synapse_state!(c, perm::AbstractVector{<:Integer})
         end
     end
     if hasfield(typeof(c), :param) && hasfield(typeof(c.param), :delaytime)
-        old = copy(c.param.delaytime)
+        # a common delay stored once is expanded first, so that the mean delay of a new synapse is the same value as with
+        # per-synapse storage; the result is stored once again if all delays are equal
+        old = length(c.param.delaytime) == 1 ? fill(c.param.delaytime[1], nold) : copy(c.param.delaytime)
         d0 = isempty(old) ? 0.0f0 : Float32(sum(old) / length(old))
         resize!(c.param.delaytime, length(perm))
         for s in eachindex(perm)
             c.param.delaytime[s] = perm[s] > 0 ? old[perm[s]] : d0
         end
+        length(c.param.delaytime) > 1 && allequal(c.param.delaytime) && (c.param.delaytime = c.param.delaytime[1:1])
         c.param.dt[1] = NaN32   # the delays in steps and the ring buffer are rebuilt at the next forward!
     end
     return c
@@ -740,6 +767,62 @@ function dsparse(A)
     # Test.@test At.nzval == A.nzval[index]
     rowptr, colptr, I, J, index, V # Returns the modified rowptr, colptr, I, J, index, and V arrays.
 end
+
+# Int32 storage of a SpikingSynapse built without the temporaries of `dsparse` (no `sparse(A')`, no Int64 index arrays).
+# `_csc_int32(w)`: the CSC arrays of `w` as (colptr::Vector{Int32}, I::Vector{Int32}, W = nonzeros(w)) (`W` aliases `w`).
+_csc_int32(w::SparseMatrixCSC) = (Vector{Int32}(w.colptr),Vector{Int32}(rowvals(w)), nonzeros(w))
+
+# row pointers (`rowptr` of `dsparse`) of an `Npost x Npre` matrix with row indices `I`: one counting pass
+function _rowptr_int32(I::AbstractVector{<:Integer}, Npost::Integer)
+    rowptr = zeros(Int32, Npost + 1)
+    @inbounds for i in I
+        rowptr[i+1] += Int32(1)
+    end
+    rowptr[1] = 1
+    return cumsum!(rowptr, rowptr)
+end
+
+# presynaptic index (`J` of `dsparse`) of every stored synapse, from the column pointers
+function _column_index!(J::AbstractVector{<:Integer}, colptr::AbstractVector{<:Integer})
+    @inbounds for j = 1:(length(colptr)-1)
+        for s = colptr[j]:(colptr[j+1]-1)
+            J[s] = j
+        end
+    end
+    return J
+end
+_column_index(colptr::AbstractVector{<:Integer}) = _column_index!(Vector{Int32}(undef, colptr[end] - 1), colptr)
+
+# map from row-major position to CSC position (`index` of `dsparse`): the columns are visited in order, so the entries of
+# row `i` get the slots `rowptr[i]:(rowptr[i+1]-1)` by increasing presynaptic index, as in `sparse(A')`
+function _transpose_index!(index::AbstractVector{<:Integer}, colptr, I, rowptr)
+    next = rowptr[1:(end-1)]
+    @inbounds for j = 1:(length(colptr)-1)
+        for s = colptr[j]:(colptr[j+1]-1)
+            i = I[s]
+            index[next[i]] = s
+            next[i] += 1
+        end
+    end
+    return index
+end
+
+"""
+    ensure_transpose!(c::AbstractConnection)
+    has_transpose(c::AbstractConnection)
+
+`SpikingSynapse` keeps the transposed index arrays `J` (presynaptic neuron of every synapse) and `index` (row-major to CSC
+position, see `dsparse`) only when something reads them: a plasticity rule that walks the inputs of a postsynaptic neuron
+(`needs_transpose`), `presynaptic`, `presynaptic_idxs`, `SynapseNormalization`, `AggregateScaling`. Otherwise both are
+empty. `ensure_transpose!` builds them in place (Int32, identical to the arrays of `dsparse`) if they are missing and
+returns `c`; `has_transpose` tells whether they are present. Other connection types always have them (no-op / `true`).
+Call it before reading `c.J` or `c.index` in user code.
+"""
+ensure_transpose!(c::AbstractConnection) = c
+has_transpose(c::AbstractConnection) = true
+
+# presynaptic index of every synapse without building it in `c` (a temporary for a SpikingSynapse without transpose)
+_presyn_index(c) = has_transpose(c) ? c.J : _column_index(c.colptr)
 
 export dsparse,
     matrix,

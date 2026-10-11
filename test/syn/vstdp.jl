@@ -88,7 +88,7 @@ end
 _vse_dense(; kw...) = vSTDPDenseParameter(; merge(_VSE, NamedTuple(kw))...)
 _vse_event(; kw...) = vSTDPParameter(; merge(_VSE, NamedTuple(kw))...)
 # weights as a (post, pre) matrix
-_vse_mat(syn, W = plasticity_value(syn, :W)) = (M = zeros(Float64, length(syn.fireI), length(syn.fireJ)); for s in eachindex(W); M[syn.I[s], syn.J[s]] = W[s]; end; M)
+_vse_mat(syn, W = plasticity_value(syn, :W)) = (SNNModels.ensure_transpose!(syn); M = zeros(Float64, length(syn.fireI), length(syn.fireJ)); for s in eachindex(W); M[syn.I[s], syn.J[s]] = W[s]; end; M)
 
 @testset "vSTDPParameter" begin
     spikes, V = _vse_inputs()
@@ -137,6 +137,7 @@ _vse_mat(syn, W = plasticity_value(syn, :W)) = (M = zeros(Float64, length(syn.fi
             # weights of the silent neurons are untouched (no spike, no LTP), then change with their first spikes
         end
         se, _ = _vse_manual(_vse_event(), sp[1:39000], Vs[:, 1:39000])
+        SNNModels.ensure_transpose!(se)
         @test all(plasticity_value(se, :W)[se.J .<= 6] .== 0.5f0)
     end
 

@@ -208,6 +208,7 @@ end
     EE = SpikingSynapse(E, E, :ge; conn = (p = 0.2, μ = 2.0))
     TO = MetaPlasticity(RandomTurnover(τ = 5.0f0ms, threshold = 0.3f0, μ = 1.0f0), EE)
     I0 = copy(EE.I)
+    SNNModels.materialize_efficacy!(EE)   # ρ is stored only with a short-term rule
     EE.ρ .= range(0.1f0, 0.9f0, length = length(EE.ρ))
     @test train!([E], [EE, TO]; duration = 20ms) isa SNNModels.Time
     @test EE.I != I0
@@ -221,12 +222,13 @@ end
     F = IF(N = 4)
     FF = SpikingSynapse(F, F, :ge; conn = (p = 0.75, μ = 1.0))
     synaptic_turnover!(FF; p_rewire = 1.0)
-    @test length(FF.W) == length(FF.ρ)
+    @test length(FF.W) == length(SNNModels.efficacy(FF))
 end
 
 @testset "connect!/update_sparse_matrix! keep per-synapse state; set_plasticity!" begin
     E = IF(N = 10)
     EE = SpikingSynapse(E, E, :ge; conn = (p = 0.2, μ = 1.0))
+    SNNModels.materialize_efficacy!(EE)
     EE.ρ .= 0.5f0
     M = matrix(EE)
     i, j = findfirst(iszero, M - SNNModels.spdiagm(0 => ones(Float32, 10)) .* 0) |> Tuple

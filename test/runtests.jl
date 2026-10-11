@@ -101,6 +101,7 @@ end
     _ts("istdp_kernel",      "syn/istdp_kernel.jl")
     _ts("stp_mongillo",      "syn/stp_mongillo.jl")
     _ts("metaplasticity",    "syn/metaplasticity.jl")
+    _ts("synapse_footprint", "syn/synapse_footprint.jl")
 end
 
 # ── Analysis ──────────────────────────────────────────────────────────────────

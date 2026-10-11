@@ -18,8 +18,9 @@ change) every delay is rounded up to a whole number of steps, `ceil(delay / dt)`
 whose time is not before the arrival time (so 0.8 ms at `dt = 0.125` ms arrives 7 steps later).
 
 # Fields
-- `delaytime::Vector{FT}`: delay of each synapse (ms), in the CSC order of `W`.
-- `delaysteps::Vector{Int32}`: delay of each synapse in steps of the `dt` of the last `forward!`.
+- `delaytime::Vector{FT}`: delay of each synapse (ms), in the CSC order of `W`; a single value when all synapses have the
+  same delay (e.g. `delay_dist = Dirac(d)`), which then applies to every synapse.
+- `delaysteps::Vector{Int32}`: delay of each synapse (or the common delay) in steps of the `dt` of the last `forward!`.
 - `buffer::Matrix{FT}`: `Npost x (max(delaysteps) + 1)` increments ``W_{ij}\,\rho_{ij}``
   (evaluated at emission time) per target and arrival step, a ring indexed from `pos`.
 - `dt::Vector{FT}`: the step `delaysteps` was computed for (`NaN` before the first `forward!`).
@@ -115,7 +116,8 @@ increments with arrival time ``\le t`` are added to ``g_i``.
   or a receptor name); `comp`: compartment for multicompartment models (e.g. `:d1`, `:s`).
 - `conn`: either a `NamedTuple` of `sparse_matrix` options (`p` or `ρ`, `μ`, `σ`, `dist`, `rule`,
   `γ`, `kmin`) or an explicit `Npost x Npre` matrix (dense or sparse, any element type).
-- `delay_dist`: optional `Distribution`; one delay (ms) per synapse is drawn from it.
+- `delay_dist`: optional `Distribution`; one delay (ms) per synapse is drawn from it (stored once if all
+  drawn delays are equal, e.g. `Dirac(d)`).
 - `dt`: unused (kept for backward compatibility).
 - `LTPParam`: long-term plasticity rule (`STDPGerstner`, `STDPTriplet`, `STDPWeightDependent`,
   `iSTDPRate`, `vSTDPParameter`, ...). Applied only when the network is run with `train!`;
@@ -128,11 +130,16 @@ increments with arrival time ``\le t`` are added to ``g_i``.
 rule types are `LTPParameter` and `STPParameter`.
 
 # Fields
-- `rowptr`, `colptr`, `I`, `J`, `index`, `W`: double sparse storage returned by `dsparse`
+- `rowptr`, `colptr`, `I`, `J`, `index`, `W`: double sparse storage, as returned by `dsparse`
   (CSC column pointers `colptr`, postsynaptic index `I` and presynaptic index `J` of every
   synapse, row pointers `rowptr` of the transposed matrix and the map `index` from row-major
   to CSC position); `W::Vector{FT}` holds the weights in CSC order (`FT` = precision of the synapse).
-- `ρ::Vector{FT}`: short-term efficacy per synapse (initialised to 1).
+  `J` and `index` are empty unless something reads them: a plasticity rule that walks the inputs of a
+  neuron (`needs_transpose`), `presynaptic`, `presynaptic_idxs`, `SynapseNormalization`, `AggregateScaling`;
+  call `SNNModels.ensure_transpose!(c)` before reading them in user code (since 1.10).
+- `ρ::Vector{FT}`: short-term efficacy per synapse (initialised to 1), stored only with a short-term rule
+  (`STPParam`); otherwise empty (ρ = 1). Read it with `SNNModels.efficacy(c)`; call
+  `SNNModels.materialize_efficacy!(c)` before writing to it (since 1.10).
 - `fireI`, `fireJ`: references to `post.fire` and `pre.fire`.
 - `g`, `v_post`: references to the target variable and to the membrane potential of the
   target compartment.
@@ -228,8 +235,10 @@ function SpikingSynapse(
     w = sparse_matrix(output_N(pre), input_N(post), conn, FT)
     # remove autapses if pre == post (structural removal, the matrix stays sparse)
     (pre == post) && remove_autapses!(w)
-    # get the sparse representation of the synaptic weight matrix
-    rowptr, colptr, I, J, index, W = dsparse(w)
+    # sparse storage in Int32 (`W` aliases the values of `w`); the transposed arrays `J`, `index` only if a rule reads them
+    colptr, I, W = _csc_int32(w)
+    rowptr = _rowptr_int32(I, size(w, 1))
+    J, index = Int32[], Int32[]
 
     # set the paramter for the synaptic plasticity
     LTPParam = convert_precision(LTPParam, FT)
@@ -237,8 +246,8 @@ function SpikingSynapse(
     LTPVars = plasticityvariables(LTPParam, pre.N, post.N)
     STPVars = plasticityvariables(STPParam, pre.N, post.N)
 
-    # short term plasticity
-    ρ = ones(FT, length(W))
+    # short-term efficacy: stored only with a short-term rule (empty = 1 for every synapse, see `efficacy`)
+    ρ = STPParam isa NoSTP ? FT[] : ones(FT, length(W))
 
     # Network targets
 
@@ -247,9 +256,12 @@ function SpikingSynapse(
     else
         # delays have the precision of the synapse whatever the element type of `delay_dist`
         delaytime = FT.(rand(delay_dist, length(W)))
+        # a delay common to all synapses (e.g. `Dirac`) is stored once (same draw, so the random stream is unchanged)
+        # (a new vector: `resize!` would keep the memory of the full one)
+        length(delaytime) > 1 && allequal(delaytime) && (delaytime = delaytime[1:1])
         param = SpikingSynapseDelayParameter(; delaytime, VFT = Vector{FT}, MFT = Matrix{FT})
     end
-    return SpikingSynapse(;
+    c = SpikingSynapse(;
             VFT = Vector{FT},
             ρ = ρ,
             param = param,
@@ -264,6 +276,57 @@ function SpikingSynapse(
             pre_spikes = spike_index(pre),
             post_spikes = spike_index(post),
         )
+    needs_transpose(c) && ensure_transpose!(c)
+    return c
+end
+
+"""
+    has_transpose(c::SpikingSynapse)
+    ensure_transpose!(c::SpikingSynapse)
+
+Whether the transposed index arrays `c.J`, `c.index` are present; build them in place if not (see
+`ensure_transpose!(::AbstractConnection)`). Serial; called only outside the threaded kernels.
+"""
+has_transpose(c::SpikingSynapse) = length(c.index) == length(c.W) && length(c.J) == length(c.W)
+
+# whether a rule of `c` reads `J`/`index` (a constant per synapse type)
+needs_transpose(c::SpikingSynapse) = needs_transpose(c.LTPParam) || needs_transpose(c.STPParam)
+needs_transpose(c::AbstractConnection) = true
+
+# step guard of the rules (serial, before any threaded kernel): a synapse loaded from a file, built with the keyword
+# constructor or whose arrays were emptied gets `J`/`index` before a rule reads them, and `ρ` before a short-term rule
+# writes it (`train!` calls `update_traces!` first, so this runs before the Markram kernels). `NoSTP` is a type parameter:
+# the ρ branch compiles away for a synapse without a short-term rule.
+_ensure_rule_arrays!(c) = c
+function _ensure_rule_arrays!(c::SpikingSynapse)
+    needs_transpose(c) && !has_transpose(c) && ensure_transpose!(c)
+    c.STPParam isa NoSTP || length(c.ρ) == length(c.W) || materialize_efficacy!(c)
+    return c
+end
+
+function ensure_transpose!(c::SpikingSynapse)
+    has_transpose(c) && return c
+    n = length(c.W)
+    _column_index!(resize!(c.J, n), c.colptr)
+    _transpose_index!(resize!(c.index, n), c.colptr, c.I, c.rowptr)
+    return c
+end
+
+"""
+    efficacy(c::SpikingSynapse)
+    materialize_efficacy!(c::SpikingSynapse)
+
+The short-term efficacy `ρ` is stored only for a synapse with a short-term rule (`STPParam`); otherwise `c.ρ` is empty and
+ρ = 1 for every synapse. `efficacy(c)` returns the efficacy of every synapse: `c.ρ` itself when it is stored, else a new
+vector of ones (writing to it has no effect). `materialize_efficacy!(c)` stores it (ones) if it is not stored and returns
+`c.ρ`: after it, writes to `c.ρ` are used by `forward!` (as in SNNModels up to 1.9).
+"""
+efficacy(c::SpikingSynapse) = length(c.ρ) == length(c.W) ? c.ρ : ones(eltype(c.W), length(c.W))
+
+function materialize_efficacy!(c::SpikingSynapse)
+    length(c.ρ) == length(c.W) && return c.ρ
+    fill!(resize!(c.ρ, length(c.W)), one(eltype(c.ρ)))
+    return c.ρ
 end
 
 """
@@ -301,6 +364,7 @@ function update_plasticity!(c::SpikingSynapse; LTP = nothing, STP = nothing)
         c.STPParam = STP
         c.STPVars = vars
     end
+    _ensure_rule_arrays!(c)
 end
 
 # The rule and its state are type parameters of SpikingSynapse: only a rule of the same type can be set in place.
@@ -317,6 +381,11 @@ with `c` but has the rule `LTP` and/or `STP`, with fresh state (`plasticityvaria
 `nothing` are kept with their state. Since the rule types are type parameters of `SpikingSynapse`,
 this is how a rule of another type is installed; the caller replaces `c` by the result in its model.
 `update_plasticity!` and `change_plasticity!` only accept a rule of the same type as the current one.
+
+!!! note
+    The result shares its vectors with `c` (no copy): the weights, conductances, efficacy `ρ` and index arrays are the
+    same objects, so simulating one changes the state seen by the other. `c` itself stays a valid synapse (with its own
+    rules) and can still be simulated; use only one of the two in a model, or `deepcopy(c)` first for independent copies.
 
 # Example
 ```julia
@@ -344,7 +413,10 @@ function with_plasticity(c::SpikingSynapse; LTP = nothing, STP = nothing)
         fields[:STPParam] = STP
         fields[:STPVars] = plasticityvariables(STP, Npre, Npost)
     end
-    return SpikingSynapse(; fields...)
+    new = SpikingSynapse(; fields...)
+    new.STPParam isa NoSTP || materialize_efficacy!(new)   # a short-term rule writes ρ (shared with `c`: ones in both)
+    needs_transpose(new) && ensure_transpose!(new)           # J/index are shared with `c` too
+    return new
 end
 
 
@@ -355,14 +427,19 @@ For each presynaptic neuron ``j`` that fired, add ``W_{ij}\rho_{ij}`` to `c.g[i]
 targets ``i`` (no delay).
 """
 function forward!(c::SpikingSynapse, param::SpikingSynapseParameter, dt::AbstractFloat, T::Time)
-    @unpack colptr, I, W, g, ρ = c
+    @unpack colptr, I, W, g = c
     spikes = presynaptic_spikes(c)
     Npost = length(c.fireI)
     ptr = _syn_chunk_ptr(c.chunkptr, Npost, colptr, I, spikes)
+    # function barrier: the kernels are specialised on the efficacy (a vector, or `nothing` for ρ = 1) before any fork
+    _forward_nodelay!(g, W, _efficacy_or_nothing(c), I, colptr, ptr, spikes, Npost)
+end
+
+function _forward_nodelay!(g, W, ρ, I, colptr, ptr, spikes, Npost)
     if ptr === nothing
         @inbounds for j ∈ spikes # loop on presynaptic neurons that fired
             @inbounds @fastmath @simd for s ∈ colptr[j]:(colptr[j+1]-1)
-                g[I[s]] += W[s] * ρ[s]
+                g[I[s]] += _wρ_fast(W, ρ, s)
             end
         end
     else
@@ -371,15 +448,27 @@ function forward!(c::SpikingSynapse, param::SpikingSynapseParameter, dt::Abstrac
             _forward_chunk!(g, W, ρ, I, ptr, ch, spikes)
         end
     end
+    return nothing
 end
 
 @inline function _forward_chunk!(g, W, ρ, I, ptr, ch, spikes)
     @inbounds for j ∈ spikes
         @inbounds @fastmath @simd for s ∈ ptr[ch, j]:(ptr[ch+1, j]-1)
-            g[I[s]] += W[s] * ρ[s]
+            g[I[s]] += _wρ_fast(W, ρ, s)
         end
     end
 end
+
+# increment of synapse `s`: W ρ, or W when the efficacy is not stored (ρ = 1; W * 1 == W exactly, same additions).
+# `_wρ_fast` keeps the @fastmath product of the undelayed kernels (same instructions as the inlined `W[s] * ρ[s]` before).
+@inline _wρ(W, ρ::AbstractVector, s) = @inbounds W[s] * ρ[s]
+@inline _wρ(W, ::Nothing, s) = @inbounds W[s]
+@inline _wρ_fast(W, ρ::AbstractVector, s) = @inbounds @fastmath W[s] * ρ[s]
+@inline _wρ_fast(W, ::Nothing, s) = @inbounds W[s]
+# delay (steps) of synapse `s`: one value for all synapses, or one per synapse
+@inline _dstep(d::Integer, s) = d
+@inline _dstep(d::AbstractVector, s) = @inbounds d[s]
+_efficacy_or_nothing(c) = isempty(c.ρ) ? nothing : c.ρ
 
 _chunkptr(c::SpikingSynapse) = c.chunkptr
 presynaptic_spikes(c::SpikingSynapse) = spike_list!(c.pre_spikes, c.fireJ)
@@ -398,7 +487,7 @@ delays rounded up to whole steps, see `SpikingSynapseDelayParameter`); then add 
 increments that arrive in the current step and clear them.
 """
 function forward!(c::SpikingSynapse, param::SpikingSynapseDelayParameter, dt::AbstractFloat, T::Time)
-    @unpack colptr, I, W, g, ρ = c
+    @unpack colptr, I, W, g = c
     Npost = length(c.fireI)
     _delay_steps!(param, dt, Npost)
     @unpack delaysteps, buffer = param
@@ -407,12 +496,19 @@ function forward!(c::SpikingSynapse, param::SpikingSynapseDelayParameter, dt::Ab
     spikes = presynaptic_spikes(c)
     # the arrival pass over the Npost targets counts as Npost / 4 operations
     ptr = _syn_chunk_ptr(c.chunkptr, Npost, colptr, I, spikes, Npost >> 2)
+    # function barrier on the efficacy (vector or `nothing`) and on the delays (one per synapse, or one for all)
+    d = length(delaysteps) == 1 ? delaysteps[1] : delaysteps
+    _forward_delay!(g, W, _efficacy_or_nothing(c), I, colptr, ptr, spikes, Npost, d, buffer, pos, nslots)
+    param.pos[1] = pos + 1 == nslots ? 0 : pos + 1
+end
+
+function _forward_delay!(g, W, ρ, I, colptr, ptr, spikes, Npost, delaysteps, buffer, pos, nslots)
     if ptr === nothing
         @inbounds for j ∈ spikes # loop on presynaptic neurons that fired
             for s ∈ colptr[j]:(colptr[j+1]-1)
-                slot = pos + delaysteps[s]
+                slot = pos + _dstep(delaysteps, s)
                 slot >= nslots && (slot -= nslots)
-                buffer[I[s], slot+1] += W[s] * ρ[s]
+                buffer[I[s], slot+1] += _wρ(W, ρ, s)
             end
         end
         # arrivals of this step
@@ -426,15 +522,15 @@ function forward!(c::SpikingSynapse, param::SpikingSynapseDelayParameter, dt::Ab
             _delay_chunk!(g, W, ρ, I, ptr, ch, rng, spikes, delaysteps, buffer, pos, nslots)
         end
     end
-    param.pos[1] = pos + 1 == nslots ? 0 : pos + 1
+    return nothing
 end
 
 @inline function _delay_chunk!(g, W, ρ, I, ptr, ch, rng, spikes, delaysteps, buffer, pos, nslots)
     @inbounds for j ∈ spikes
         for s ∈ ptr[ch, j]:(ptr[ch+1, j]-1)
-            slot = pos + delaysteps[s]
+            slot = pos + _dstep(delaysteps, s)
             slot >= nslots && (slot -= nslots)
-            buffer[I[s], slot+1] += W[s] * ρ[s]
+            buffer[I[s], slot+1] += _wρ(W, ρ, s)
         end
     end
     @inbounds @simd for i ∈ rng

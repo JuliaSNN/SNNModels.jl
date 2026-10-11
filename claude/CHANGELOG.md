@@ -245,6 +245,25 @@ Each item gives the migration.
   `current_weights` and `sync_weights!` are no longer exported (see "Reading the weights").
 - Tests changed: `test/syn/with_plasticity.jl` ("change_plasticity!": same type in place, other type via
   `with_plasticity`), `test/syn/float32.jl` (delay state: `eltype(buffer)` instead of `spike_time`/`spike_w`).
+- `SpikingSynapse` stores only what it uses (see "Synapse memory footprint"). (1) `syn.ρ` is EMPTY for a synapse without a
+  short-term rule (`STPParam = NoSTP()`), meaning ρ = 1 for every synapse: user code that wrote `syn.ρ .= x` on such a synapse now
+  silently does nothing (an empty vector is broadcast to), and code that indexed `syn.ρ[s]` reads out of bounds. Migration: read
+  with `SNNModels.efficacy(syn)` (the stored vector, or a new vector of ones); call `SNNModels.materialize_efficacy!(syn)` before
+  writing to `syn.ρ` (after it the written values are used by `forward!`, as before). `monitor!(syn, [:ρ])`, `matrix(syn, :ρ)`,
+  `with_plasticity(syn; STP = ...)`, `connect!`/`update_sparse_matrix!` and `synaptic_turnover!` handle this themselves.
+  (2) `syn.J` and `syn.index` are EMPTY until a plasticity rule that walks the inputs of a neuron (every rule except `NoLTP`,
+  `NoSTP`, the Markram STP rules and `vSTDPParameter`/`vSTDPDenseParameter`; user-defined rules count as needing them),
+  `presynaptic`, `presynaptic_idxs`, `SynapseNormalization`, `AggregateScaling` or `SNNModels.ensure_transpose!(syn)` needs
+  them. Code that reads `syn.J`/`syn.index` of a synapse without such a rule must call `SNNModels.ensure_transpose!(syn)` first
+  (done in SNNUtils `average_weight`, `weights_indices`, `update_weight!` and SNNPlots `mutual_EI_connections`; their
+  `[compat]` still says SNNModels 1.9, to be raised to 1.10 at the release). (3) A delay common to all synapses
+  (`delay_dist = Dirac(d)`, or any draw that gives equal values) is stored once: `syn.param.delaytime` and
+  `syn.param.delaysteps` have length 1; code that indexes them per synapse must check the length.
+- Saved models and this change. Loading and saving compatibility with older models is NOT guaranteed: model files written by
+  this version contain empty `ρ`/`J`/`index` and length-1 delays, and must not be opened with any older SNNModels (1.9.1 refuses
+  them at load, but the earlier 1.10 development commits do not and read out of bounds under `@inbounds`). Files written by the
+  earlier 1.10 development commits (full arrays; the struct layout is unchanged) are read and run by this version, but this is
+  not guaranteed for future versions. Breaking the reading of old files was accepted for this change but was not needed.
 
 ### New API
 - `with_plasticity(c::SpikingSynapse; LTP, STP)`: synapse that shares all arrays with `c` and has the new rule
@@ -510,6 +529,49 @@ no global flag, no separate precision argument.
   event-driven and the dense rule agree to 3.6e-14 (200 synapses) and 8.2e-14 (1e4 synapses), and with Brian2 (float64) to 3e-15 (dense) and 3e-14 to 9e-14
   (event), against 2.4e-6 / 2.9e-6 between them in Float32: the Float32 difference is the accumulation error of the dense rule (hypothesis confirmed).
   Float64 costs 13 % on the dense rule at 1e4 synapses (2.09 s against 1.88 s, unpinned) and nothing measurable on the event-driven one.
+
+### Synapse memory footprint (`SpikingSynapse`, 29 to 9 bytes per synapse)
+Live memory of the synapses of the T4 network of the performance campaign (IF E 8000 / I 2000, `CurrentSynapse`, K = 100,
+1e6 synapses, `delay_dist = Dirac(0.8)`, no plasticity), `Base.summarysize` per field after 100 steps (arrays that alias
+population state counted in the synapse); construction temporaries are `@allocated` of one more EE constructor. Results of the
+reference worktree (6b7addc) and of the four steps, which were measured one after the other; Float32 results bit-identical to
+6b7addc after every step (spike times, final `v`, synaptic variables, `W`, efficacy; T4 network, pair STDP + iSTDP, event vSTDP,
+Markram STP and STP Het, weight-recorded network, heterogeneous delays, no delays; serial and threaded with
+`neurons_per_thread = 64`, `SYN_MIN_OPS[] = 0`). Scripts and CSV: `papers/JuliaSNN_publication/validation/profilation_v1.10/perf/
+synapse_footprint/` (`scripts/fp_fields.jl`, `scripts/fp_identity.jl`, `scripts/fp_summary.py`; `out/fields.csv`,
+`out/construct.csv`, `out/summary_per_cut.csv`, `out/fields_EE_per_cut.csv`, `out/identity.csv`).
+
+| step | network B/syn | EE | EI | IE | II | EE construction B/syn |
+|---|---|---|---|---|---|---|
+| before (6b7addc) | 29.18 | 28.77 | 29.12 | 30.77 | 31.10 | 64.5 |
+| 1: Int32 storage without the transposed temporary | 29.18 | 28.77 | 29.12 | 30.77 | 31.10 | 36.4 |
+| 2: `ρ` empty without STP | 25.18 | 24.77 | 25.12 | 26.77 | 27.10 | 32.4 |
+| 3: `J`/`index` built only when read | 17.18 | 16.77 | 17.12 | 18.77 | 19.09 | 24.3 |
+| 4: a common delay stored once | 9.18 | 8.77 | 9.12 | 10.77 | 11.09 | 24.3 |
+
+EE per field (B/syn): `I` 4, `W` 4 (both kept); `J` 4, `index` 4, `ρ` 4, `param.delaytime` 4, `param.delaysteps` 4 (all 0 after
+the change); ring buffer, pointers, aliased population state and spike lists 0.76. A synapse keeps 4 B/syn for `ρ` with a
+short-term rule, 8 B/syn for `J`/`index` with a rule that needs them, 8 B/syn for heterogeneous delays.
+- Step 1. The constructor builds `colptr`, `I`, `rowptr` in Int32 directly (`_csc_int32`, `_rowptr_int32`) instead of `dsparse`
+  (`sparse(A')`, Int64 `J`/`index`, Int64 -> Int32 copies); `dsparse` is unchanged (exported, used by the other connections).
+  `ensure_transpose!` builds `J` (from `colptr`) and `index` (one counting pass over the columns) in place, identical to `dsparse`.
+- Step 2. `ρ = FT[]` without a short-term rule. `forward!` (both methods) passes `ρ` or `nothing` to its kernels through a
+  function barrier (one branch per call, before any threaded fork); the increment is `W[s] * ρ[s]` or `W[s]` (`W * 1 == W`
+  exactly; the undelayed kernel keeps the `@fastmath` product). New: `efficacy`, `materialize_efficacy!` (not exported).
+- Step 3. `J`/`index` are built at construction only if a rule needs them (`needs_transpose(rule)`, `true` by default), by
+  `with_plasticity`/`update_plasticity!`, by a guard at the top of `plasticity!`/`update_traces!` of the synapse (serial, before the rule
+  kernels fork; covers synapses loaded from a file or built with the keyword constructor), by `presynaptic*`, by the normalization
+  and scaling rules (constructor and every application), and are kept by `connect!`/`update_sparse_matrix!` if present. `matrix`,
+  `matrix_record`, weight records, `update_weights!`, `indices`, `postsynaptic*` and the event vSTDP never read them (a temporary
+  presynaptic index is used where needed, `_presyn_index`). New: `has_transpose`, `ensure_transpose!`, `needs_transpose`.
+- Step 4. If all drawn delays are equal (after the draw and the conversion, so the random stream is unchanged) one value is kept;
+  the delayed kernels take the delay in steps as a scalar or per synapse through the same function barrier. `update_sparse_matrix!`
+  expands a common delay before remapping (a new synapse gets the same mean delay as with per-synapse storage) and stores it once
+  again if all delays are equal.
+- Tests: `test/syn/synapse_footprint.jl` (memory bounds, lazy arrays empty/built exactly when expected for every rule type,
+  `ρ` empty and its readers, in-process bit-identity of empty vs stored `ρ`, common vs per-synapse delays, eager vs lazy transpose
+  with pair STDP/STP, weight records and vSTDP, threaded vs serial when run with more than one thread, JLD2 round trip). Minimal
+  edits of `syn/spike_index.jl`, `sim/sweep_fixes.jl`, `syn/lazy_weights.jl`, `syn/vstdp.jl`, `stim/poisson_pop_sparse.jl`.
 
 ### Known limitations
 - `iSTDPPotential` and the dense vSTDP are not converted (the event-driven vSTDP keeps the postsynaptic filters per step, O(Npost)): their postsynaptic filters follow the membrane potential at every step

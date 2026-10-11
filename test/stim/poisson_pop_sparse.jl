@@ -167,6 +167,7 @@ end
         E = IF(N = Npost)
         Random.seed!(3)
         syn = SpikingSynapse(P, E, :ge; conn = (p = 0.3, μ = 1.0, σ = 0.0))
+        SNNModels.ensure_transpose!(syn)   # J is built only when read
         @test syn.pre_spikes === P.spikes
         W = sparse(syn.I, syn.J, syn.W, Npost, N)
         T = Time()
@@ -218,6 +219,7 @@ end
         E = IF(N = 20)
         Random.seed!(5)
         syn = SpikingSynapse(P, E, :ge; conn = (p = 0.4, μ = 1.0, σ = 0.0))
+        SNNModels.ensure_transpose!(syn)
         W = sparse(syn.I, syn.J, syn.W, 20, N)
         T = Time(); g = E.receptors.glu
         pre_rate = 10Hz

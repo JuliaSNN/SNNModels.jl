@@ -166,6 +166,7 @@ MarkramSTPParameterHet
 end
 
 MarkramSTPParameter =  MarkramSTPParameterEvent 
+needs_transpose(::AbstractMarkramSTPParameter) = false   # the Markram rules walk the outputs of the presynaptic neurons only
 """
     MarkramSTPParameter
 

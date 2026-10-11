@@ -148,6 +148,7 @@ vSTDPParameter
     epoch::FT = 10.0f0
     active::VBT = [true]
 end
+needs_transpose(::vSTDPParameter) = false   # event vSTDP reads colptr, I, W only
 
 """
     vSTDPVariables(; Npre, Npost)
@@ -431,6 +432,7 @@ vSTDPDenseParameter
     Wmin::FT = 0.1pF
     active::VBT = [true]
 end
+needs_transpose(::vSTDPDenseParameter) = false
 
 """
     vSTDPDenseVariables(; Npre, Npost, u = zeros(Npost), v = zeros(Npost), x = zeros(Npre), active = [true],

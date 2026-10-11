@@ -102,6 +102,18 @@ plasticityvariables(param::NoLTP, Npre, Npost) = NoVariables()
 plasticityvariables(param::NoSTP, Npre, Npost) = NoVariables()
 
 """
+    needs_transpose(rule::PlasticityParameter)
+
+Whether the plasticity rule reads the transposed index arrays `J`/`index` of a `SpikingSynapse` (the inputs of a
+postsynaptic neuron): `true` by default (also for user-defined rules), `false` for `NoLTP`, `NoSTP`, the Markram STP
+rules and the voltage-based `vSTDPParameter`/`vSTDPDenseParameter`, which only walk the outputs of the presynaptic
+neurons. A `SpikingSynapse` builds `J`/`index` when one of its rules needs them (see `ensure_transpose!`).
+"""
+needs_transpose(::PlasticityParameter) = true
+needs_transpose(::NoLTP) = false
+needs_transpose(::NoSTP) = false
+
+"""
     plasticity!(c::AbstractSparseSynapse, param::AbstractSpikingSynapseParameter, dt::AbstractFloat, T::Time)
 
 Apply one step of the plasticity rules of the sparse synapse `c`: first the short-term rule
@@ -119,6 +131,7 @@ function plasticity!(
     dt::AbstractFloat,
     T::Time,
 ) where {PT<:AbstractSparseSynapse, ST<:AbstractSpikingSynapseParameter}
+    _ensure_rule_arrays!(c)   # serial, before the rule kernels fork
     any(c.STPVars.active) && plasticity!(c, c.STPParam, c.STPVars, dt, T)
     any(c.LTPVars.active) && plasticity!(c, c.LTPParam, c.LTPVars, dt, T)
     return nothing
@@ -140,6 +153,7 @@ function update_traces!(
     dt::AbstractFloat,
     T::Time,
 ) where {PT<:AbstractSparseSynapse, ST<:AbstractSpikingSynapseParameter}
+    _ensure_rule_arrays!(c)
     any(c.STPVars.active) && update_traces!(c, c.STPParam, c.STPVars, dt, T)
     any(c.LTPVars.active) && update_traces!(c, c.LTPParam, c.LTPVars, dt, T)
     return nothing

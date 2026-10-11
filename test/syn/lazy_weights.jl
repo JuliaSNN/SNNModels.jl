@@ -65,6 +65,7 @@ end
         ev = _lazy_run!(_lazy_net(vSTDPParameter), 5000)
         W = plasticity_value(ev.syn, :W)
         M = matrix(ev.syn)
+        SNNModels.ensure_transpose!(ev.syn)   # J is built only when read (vSTDP does not)
         @test all(M[ev.syn.I[s], ev.syn.J[s]] == W[s] for s in eachindex(W))
         @test maximum(abs.(ev.syn.W .- W)) > 0                  # while syn.W is stale
     end

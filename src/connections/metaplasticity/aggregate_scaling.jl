@@ -150,6 +150,7 @@ function AggregateScaling(N, synapses; param::AggregateScalingParameter, kwargs.
     for syn in synapses
         @assert isa(syn, AbstractSparseSynapse)
         sync_weights!(syn)   # event-driven rules (vSTDPParameter) keep `W` stale between syncs
+        ensure_transpose!(syn)   # the inputs of every neuron are read through `index`
         @unpack rowptr, W, index, fireI = syn
         Is = 1:(length(rowptr)-1)
         @assert length(Is) == N
@@ -212,6 +213,7 @@ function plasticity!(c::AggregateScaling, param::AggregateScalingParameter)
     @unpack Wt, WT, μ, synapses, y = c
     @unpack τe, Y, Wmin = param
     foreach(sync_weights!, synapses)   # the rescaling acts on the current weights (deferred updates are materialised)
+    foreach(ensure_transpose!, synapses)
     fill!(Wt, zero(eltype(Wt)))
     nsyn = zeros(Int, length(Wt))
     for syn in synapses
