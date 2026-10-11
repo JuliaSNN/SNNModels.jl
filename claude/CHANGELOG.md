@@ -572,6 +572,33 @@ short-term rule, 8 B/syn for `J`/`index` with a rule that needs them, 8 B/syn fo
   `ρ` empty and its readers, in-process bit-identity of empty vs stored `ρ`, common vs per-synapse delays, eager vs lazy transpose
   with pair STDP/STP, weight records and vSTDP, threaded vs serial when run with more than one thread, JLD2 round trip). Minimal
   edits of `syn/spike_index.jl`, `sim/sweep_fixes.jl`, `syn/lazy_weights.jl`, `syn/vstdp.jl`, `stim/poisson_pop_sparse.jl`.
+- Test suites: SNNModels `-t 1` 74714 passed (0 failed, 0 errored); also passed with `--check-bounds=yes` and with `-t 4`.
+  SNNUtils 17, SNNPlots 14, SpikingNeuralNetworks 3 passed.
+- Measured time and memory, before (6b7addc) vs after (48c60eb). T4 network, K = 100, Float32, one thread pinned to core 8,
+  10 s simulated, warm-up discarded. Before and after interleaved over 4 rounds; median of 12 repetitions; shared machine,
+  load 4.6-8.5. Folder `perf/synapse_footprint/` (README.md, `out/time_summary.csv`, `out/mem_slopes.csv`, `out/plastic_summary.csv`,
+  `fig/F_synapse_footprint.png`).
+
+  | N | before ns/neuron-step | after | after/before (paired rounds) | Auryn, same session |
+  |---|---|---|---|---|
+  | 10000 | 1.647 | 1.486 | 0.88-0.93 | 1.73 |
+  | 20000 | 1.863 | 1.664 | 0.84-0.94 | 1.94 |
+  | 30000 | 1.966 | 1.732 | 0.86-0.93 | 1.96 |
+  | 50000 | 2.43 (2.36-2.43 undisturbed) | 2.11 (2.10-2.12 undisturbed) | 0.87 | 2.16-2.18 (campaign 1.99) |
+
+  Peak-RSS slope against synapse count (N = 1e4, 2e4, 5e4): 49.6 -> 34.7 B/syn (Auryn 8.4). RSS growth during the build:
+  40.8 -> 25.1 B/syn.
+
+  No plastic regression:
+  - pair-STDP E/I N = 10000: 0.237 -> 0.216 s per simulated s, with rates and final weights identical;
+  - vSTDP 1e4 synapses: dense 1.983 -> 1.989 s, event 0.0366 -> 0.0371 s;
+  - pair STDP 1e4 synapses: 0.0203 -> 0.0213 s. Two of the 12 "after" processes ran at 2x, and later rounds did not
+    reproduce it; without them the ratio is 1.02.
+
+  The speed-up is close to a constant factor at every N, and the growth from 1e4 to 5e4 stays at +42 % (before +47 %, Auryn
+  +26-39 %). The smaller arrays therefore help at all sizes, but they do not explain the steeper growth with N. The cache-footprint
+  hypothesis of the perf README is only weakly supported. Splitting the gain into bytes and instructions per event would need
+  hardware counters (not tested).
 
 ### Known limitations
 - `iSTDPPotential` and the dense vSTDP are not converted (the event-driven vSTDP keeps the postsynaptic filters per step, O(Npost)): their postsynaptic filters follow the membrane potential at every step
