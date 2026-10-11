@@ -610,6 +610,32 @@ no global flag, no separate precision argument.
   the double delay vector and the copy in the keyword constructor of `SpikingSynapse`), which only moves the trigger; the
   re-mark cost belongs to the Julia runtime and the loaded dependencies.
 
+### No allocation per `sim!`/`train!` step (branch dev-diag, pre-1.10 diagnostics, job 4)
+- Cause of the residual per-step allocations (Performance above: 240 B with a `PoissonStimulus`, 384 B balanced, 560 B
+  `Tripod` in the review measurements): the step loops over abstract component vectors, so `_step_dt(x, dt)` and
+  `integrate!`/`stimulate!`/`forward!` are dynamic calls, and the `Float32` returned by `_step_dt` (and passed on) was
+  boxed: one 16 B box per stimulus, population and connection per step (`Profile.Allocs`, `main.jl` lines of
+  `stimulate!`, `integrate!`, `forward!`; nothing in the component methods). `with_flush_subnormals` and
+  `with_neurons_per_thread` allocate nothing.
+- Fix (`src/utils/main.jl` only): the keyword forms of `sim!`/`train!` share one loop (`_run!`, `_run_loop!`, and
+  `_run_pbar!` for the progress bar) that wraps `dt` in a `Ref` once per call; the step (`_sim_step!`, `_train_step!`)
+  calls one function barrier per component, `_sim_component!(x, param, dtr, T)` / `_train_component!`, with the component and
+  its `param` read from the boxed vector element (some populations hold an abstractly typed `param`; a call dispatched on it
+  from inside a method specialized on the population would box the population again, 176 B for an `IF`) and returns
+  `nothing`, so no argument or result is boxed and everything inside the barrier is statically dispatched. The public
+  per-step methods `sim!(P, C, S, dt, T)` / `train!(P, C, S, dt, T)` remain (16 B each: the `Ref`). The firing-rate `Dict`
+  is only built with `pbar = true`. Order of operations and arithmetic unchanged.
+- Measured (`perf/pre110_diag/job4_alloc.csv`, `job4_alloc.jl`; pinned idle core, `-t 1`, `@allocated` after warm-up,
+  model form, 1/10/100/1000 steps, least-squares slope and constant; before = 7c3d4ad): `IF` E/I with `CurrentSynapse` (2
+  populations, 3 synapses) 80 B per step + 2192 B per call to 0 + 1936; `IF` with a `PoissonStimulus` 48 + 1008 to 0 + 752;
+  `Tripod` with a `PoissonStimulus` 48 + 1376 to 0 + 1120 (same for `train!`). Per-call constant (`job4_percall_sites.csv`):
+  `_args_model` (the component vectors and the boxing of the populations stored in the model NamedTuple), `_allocate_records!`
+  (`utils/record.jl:278-281`, iteration tuples and `Float32` boxes, recording code not changed here), the `Ref` (16 B).
+  Spike counts and final `v` bit-identical before/after for the three cases (`job4_correctness.csv`).
+- Test: `test/sim/allocations.jl` (18 tests): for the three networks, `sim!` and `train!` bytes do not grow with the run
+  length (< 1 B per step between 10 and 400 steps), the per-call constant is below 4 kB, and `_sim_step!`/`_train_step!`
+  allocate 0 B.
+
 ### Known limitations
 - `iSTDPPotential` and the dense vSTDP are not converted (the event-driven vSTDP keeps the postsynaptic filters per step, O(Npost)): their postsynaptic filters follow the membrane potential at every step
   (class C, see "Lazy classification of the plasticity rules"); `SpikeRateSynapse` keeps its dense scans. The clock-driven
