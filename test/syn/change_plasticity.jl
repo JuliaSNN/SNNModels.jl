@@ -9,13 +9,13 @@ using Random
 const _CPS = SNNModels
 
 # E/I network built with `compose`, never plastic; EE, EI, IE, II
-function _cp_model(; FT = Float32, seed = 11, NE = 400, NI = 100)
+function _cp_model(; FT = Float32, seed = 11, NE = 400, NI = 100, ltpEE = NoLTP())
     Random.seed!(seed)
     vft = FT === Float64 ? (VFT = Vector{Float64},) : (;)
     E = IF(; N = NE, name = "E", vft...); I = IF(; N = NI, name = "I", vft...)
     E.v .= FT(-70) .+ FT(20) .* rand(FT, NE); I.v .= FT(-70) .+ FT(20) .* rand(FT, NI)
     E.I .= FT(250) .+ FT(150) .* rand(FT, NE); I.I .= FT(250) .+ FT(150) .* rand(FT, NI)
-    EE = SpikingSynapse(E, E, :ge; conn = (p = 0.05, μ = 0.25), name = "EE")
+    EE = SpikingSynapse(E, E, :ge; conn = (p = 0.05, μ = 0.25), name = "EE", LTPParam = ltpEE)
     EI = SpikingSynapse(E, I, :ge; conn = (p = 0.05, μ = 0.25), name = "EI")
     IE = SpikingSynapse(I, E, :gi; conn = (p = 0.05, μ = 2.0), name = "IE")
     II = SpikingSynapse(I, I, :gi; conn = (p = 0.05, μ = 2.0), name = "II")
@@ -93,6 +93,19 @@ end
             m4 = change_plasticity(m1, :EE)
             @test typeof(m4.syn.EE) === typeof(m1.syn.EE)
         end
+    end
+
+    @testset "replaces the entry, input not doubled" begin
+        m0 = _cp_model()
+        m1 = change_plasticity(m0, :EE; LTP = STDPGerstner())
+        @test keys(m1.syn) == keys(m0.syn) && length(m1.syn) == length(m0.syn)
+        @test !any(c -> c === m0.syn.EE, values(m1.syn))
+        @test count(c -> c.name == "EE", values(m1.syn)) == 1
+        ref = _cp_model(; ltpEE = STDPGerstner())
+        train!(; model = m1, duration = 100ms)
+        train!(; model = ref, duration = 100ms)
+        @test _cp_spikes(m1) == _cp_spikes(ref)
+        @test sum(length, Iterators.flatten(_cp_spikes(m1))) > 0
     end
 
     @testset "other synapse" begin
