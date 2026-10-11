@@ -14,6 +14,8 @@ Simulate a network with plasticity for `duration` (ms) with time step `dt` (ms).
 2. for every stimulus: `stimulate!`, `record!`;
 3. for every population: `update_traces!`, `integrate!`, `plasticity!`, `record!`;
 4. for every connection: `update_traces!`, `forward!`, `plasticity!`, `record!`.
+The list of the neurons that fired in a population (`spike_index`) is built once per step and shared by its connections
+and recorder from `integrate!` to the end of the step.
 
 `sim!` runs the same sequence without `update_traces!` and `plasticity!`, so weights and STP
 variables only change under `train!` (long-term STDP/iSTDP/vSTDP rules, short-term
@@ -85,14 +87,18 @@ function _run!(step!::F, P, C, S, dt::AbstractFloat, dts, duration, time::Time, 
     _allocate_records!(P, C, S, Float32(dt), Float32(duration))
     start_time = get_time(time)
     dtr = Ref(dt)
-    with_neurons_per_thread(neurons_per_thread) do
-        with_flush_subnormals(flush_subnormals) do
-            if pbar
-                _run_pbar!(step!, P, C, S, dt, dtr, dts, time, perturbation!, start_time)
-            else
-                _run_loop!(step!, P, C, S, dt, dtr, dts, time, perturbation!, start_time)
+    try
+        with_neurons_per_thread(neurons_per_thread) do
+            with_flush_subnormals(flush_subnormals) do
+                if pbar
+                    _run_pbar!(step!, P, C, S, dt, dtr, dts, time, perturbation!, start_time)
+                else
+                    _run_loop!(step!, P, C, S, dt, dtr, dts, time, perturbation!, start_time)
+                end
             end
         end
+    finally
+        _retire_all_spikes!(P)   # a step interrupted by an exception leaves no list open
     end
     return time
 end
@@ -182,7 +188,12 @@ function train!(
     dt::AbstractFloat,
     T::Time,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
-    return _train_step!(P, C, S, Ref(dt), T)
+    try
+        _train_step!(P, C, S, Ref(dt), T)
+    finally
+        _retire_all_spikes!(P)
+    end
+    return nothing
 end
 
 # One `train!` step. `dtr[]` is the model `dt`; every component gets it in its own precision (float_type): a Float32
@@ -203,6 +214,7 @@ function _train_step!(P::Vector, C::Vector, S::Vector, dtr::Base.RefValue{<:Abst
     for c in C
         _train_component!(c, c.param, dtr, T)
     end
+    _retire_all_spikes!(P)
     return nothing
 end
 
@@ -215,6 +227,7 @@ function _train_component!(p::AbstractPopulation, param, dtr, T)
     dtp = _step_dt(p, dtr[])
     update_traces!(p, param, dtp, T)
     integrate!(p, param, dtp)
+    _publish_spikes!(p)
     plasticity!(p, param, dtp, T)
     record!(p, T)
     return nothing
@@ -266,6 +279,8 @@ Each step runs:
 2. for every stimulus: `stimulate!(s, s.param, T, dt)`, `record!`;
 3. for every population: `integrate!(p, p.param, dt)`, `record!`;
 4. for every connection: `forward!(c, c.param, dt, T)`, `record!`.
+The list of the neurons that fired in a population (`spike_index`) is built once per step and shared by its connections
+and recorder from `integrate!` to the end of the step.
 
 No plasticity is applied: `sim!` never calls `update_traces!` or `plasticity!`, so weights
 and short-term plasticity variables stay constant even if a synapse carries an `LTPParam`
@@ -350,7 +365,12 @@ function sim!(
     dt::AbstractFloat,
     T::Time,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
-    return _sim_step!(P, C, S, Ref(dt), T)
+    try
+        _sim_step!(P, C, S, Ref(dt), T)
+    finally
+        _retire_all_spikes!(P)
+    end
+    return nothing
 end
 
 # One `sim!` step (see `_train_step!` for the `Ref` and the function barrier)
@@ -366,6 +386,7 @@ function _sim_step!(P::Vector, C::Vector, S::Vector, dtr::Base.RefValue{<:Abstra
     for c in C
         _sim_component!(c, getfield(c, :param), dtr, T)
     end
+    _retire_all_spikes!(P)
     return nothing
 end
 
@@ -376,6 +397,7 @@ function _sim_component!(s::AbstractStimulus, param, dtr, T)
 end
 function _sim_component!(p::AbstractPopulation, param, dtr, T)
     integrate!(p, param, _step_dt(p, dtr[]))
+    _publish_spikes!(p)
     record!(p, T)
     return nothing
 end

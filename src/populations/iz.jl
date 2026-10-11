@@ -70,6 +70,8 @@ finally spikes are detected (`v > 30`) and reset. No refractory period.
 - `v::Vector{Float32} = fill(-65, N)`: membrane potential (mV).
 - `u::Vector{Float32} = param.b * v`: recovery variable.
 - `fire::Vector{Bool}`; `I::Vector{Float32}`: external input (mV/ms), zeros.
+- `spikes::SpikeIndex`: ascending list of the neurons that fired in the step, owned by the population and shared by its
+  connections and recorder (see `spike_index`).
 - `ge::Vector{Float32} = (1.5randn(N) .+ 4) .* 10nS`: excitatory conductance, random initial
   values (mean 40 nS).
 - `gi::Vector{Float32} = (12randn(N) .+ 20) .* 10nS`: inhibitory conductance, random initial
@@ -100,6 +102,7 @@ IZ
     v::VFT = fill(-65.0, N)
     u::VFT = param.b * v
     fire::VBT = zeros(Bool, N)
+    spikes::SpikeIndex = owned_spike_index(N)
     I::VFT = zeros(N)
     records::Dict = Dict()
     ge::VFT = (1.5randn(N) .+ 4) .* 10nS

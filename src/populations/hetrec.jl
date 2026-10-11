@@ -85,6 +85,8 @@ the neuron fires with the probability above, which sets `tabs = round(Int, τabs
 - `v_d` (length `N * Nd`), `v_s` (length `N`): dendritic and somatic potentials.
 - `M::Matrix{Float32}`: dense mapping (unused after construction, zeros by default).
 - `r`: maximal rates (1/ms); `fire`; `tabs`; `trace`: adaptive baseline; `randcache`.
+- `spikes::SpikeIndex`: ascending list of the neurons that fired in the step, owned by the population and shared by its
+  connections and recorder (see `spike_index`).
 - `τd`: dendritic time constants (ms).
 - `rowptr`, `colptr`, `I`, `J`, `index`, `W`: CSC representation of the dendrite-to-soma
   mapping (columns = neurons, rows = dendrites).
@@ -127,6 +129,7 @@ HetRec
     M::MFT = zeros(N, N*param.Nd)
     r::VFT = zeros(N)
     fire::VBT = zeros(Bool, N)
+    spikes::SpikeIndex = owned_spike_index(N)
     tabs::VIT = zeros(N)
     trace::VFT = zeros(N)
     randcache::VFT = rand(N) # random cache for stochastic firing

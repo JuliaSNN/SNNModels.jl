@@ -392,8 +392,9 @@ _owner_types(f, generic) = Set(
     owners = _owner_types(SNNModels.spike_index, AbstractPopulation)
     readers = _owner_types(SNNModels._recording_spike_index, Any)
     @test owners == readers
-    @test length(owners) == 5
-    @test SNNModels._recording_spike_index(IF(N = 3)) === nothing
+    @test length(owners) == 14                   # 5 fed-list types + the 9 owners of the integrate-and-fire family
+    E = IF(N = 3)
+    @test SNNModels._recording_spike_index(E) === E.spikes === SNNModels.spike_index(E)
     P = Poisson(N = 3)
     @test SNNModels._recording_spike_index(P) === P.spikes
 end

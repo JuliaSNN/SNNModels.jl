@@ -209,36 +209,44 @@ end
 """
     _recording_spike_index(obj)
 
-`SpikeIndex` that `obj` owns and feeds itself, read by the `:fire` recorder instead of `obj.fire`
-while its `fed` flag is set; `nothing` (the default) for every other component, whose spikes are
-recorded from a word scan of `fire`.
+`SpikeIndex` that `obj` owns, read by the `:fire` recorder instead of a scan of `obj.fire` into the
+recorder's scratch list: a list the owner feeds itself, read while its `fed` flag is set, or the list owned by
+a population of the integrate-and-fire family (`spike_index`), read while its window is open (`active`, between
+`integrate!` and the end of the step: the recorder may be the consumer that scans `fire` for the step, the
+connections then reuse the list). `nothing` (the default) for every other component, whose spikes are recorded
+from a word scan of `fire`.
 
-Contract: a type returns its `SpikeIndex` only if, whenever `fed == true` at the time `record!`
-runs, `idx[1:n]` is the complete, ascending list (no duplicates) of the `true` entries of `fire`.
-Never return a list that can be unsorted or contain repeats (e.g. the `spiking` log of
-`SpikeTimeStimulus`). The types listed here are exactly those with a non-generic `spike_index`
-method (checked by the test suite).
+Contract: a type returns its `SpikeIndex` only if, whenever `fed == true` (or `owned && active`) at the time
+`record!` runs, `idx[1:n]` is (or `spike_list!` builds) the complete, ascending list (no duplicates) of the
+`true` entries of `fire`. Never return a list that can be unsorted or contain repeats (e.g. the `spiking` log
+of `SpikeTimeStimulus`). The types listed here are exactly those with a non-generic `spike_index` method
+(checked by the test suite).
 """
 _recording_spike_index(::Any) = nothing
 _recording_spike_index(
     p::Union{Poisson,VariablePoisson,InhomogeneousPoisson,Identity,PoissonStimulusLayer},
 ) = getfield(p, :spikes)
+_recording_spike_index(p::_OWNED_LIST_POPULATIONS) = getfield(p, :spikes)
 
-_has_fed_list(::Nothing) = false
-_has_fed_list(s::SpikeIndex) = s.fed
+# whether the recorder can read the list of the step from `src` (fed, or owned with the window open)
+_has_step_list(::Nothing) = false
+_has_step_list(s::SpikeIndex) = s.fed || (s.owned && s.active)
 
 """
     _fire_step_list(src, fire, meta)
 
 Ascending `Int32` indices of the neurons that fired this step, as a view: the owner's fed list if
-`src` is a `SpikeIndex` with `fed == true`, otherwise a word scan of `fire` (`_flags_to_list!`) into
-the recorder's own scratch list `meta[:fire_scratch]` (never the `SpikeIndex` shared with the
-connections).
+`src` is a `SpikeIndex` with `fed == true`; the population's owned list if `owned` and its window is
+open (`spike_list!`: scanned once per step, by the first consumer); otherwise a word scan of `fire`
+(`_flags_to_list!`) into the recorder's own scratch list `meta[:fire_scratch]` (window closed:
+`record_zero!`, direct `record!` calls; and lists that are not owned, which are never written by the
+recorder).
 """
 @inline _fire_step_list(::Nothing, fire::AbstractVector{Bool}, meta) = _scan_fire!(fire, meta)
 
 @inline function _fire_step_list(s::SpikeIndex, fire::AbstractVector{Bool}, meta)
     s.fed && return @inbounds view(s.idx, 1:s.n)
+    (s.owned && s.active) && return spike_list!(s, fire)
     return _scan_fire!(fire, meta)
 end
 
@@ -294,10 +302,10 @@ _owner_name(obj) = hasproperty(obj, :name) ? "$(getproperty(obj, :name)) ($(name
 
 Append the spikes of this step of `obj` (time `Float32(get_time(T))`, neuron id) to the COO buffers
 `records[:fire][:times_buf]`, `[:neurons_buf]`, in ascending neuron order. The ids come from the
-list of the neurons that fired (`_fire_step_list`: the owner's fed `SpikeIndex`, or a word scan of
-`fire`), so the cost follows the number of spikes; the buffer grows at most once per step.
+list of the neurons that fired (`_fire_step_list`: the owner's fed or owned `SpikeIndex`, or a word
+scan of `fire`), so the cost follows the number of spikes; the buffer grows at most once per step.
 With `indices[:fire]` only the listed neurons are recorded (membership mask); an unsorted or
-repeated index list, or a short one on a population without a fed list, is visited in its own order.
+repeated index list, or a short one on a population without a list of the step, is visited in its own order.
 """
 function record_fire_dense!(
     obj,
@@ -315,7 +323,7 @@ function record_fire_dense!(
         ind = indices[:fire]
         isempty(ind) && return nothing
         mask, sorted = _fire_mask!(meta, ind, length(fire), obj)
-        if !sorted || (!_has_fed_list(src) && 8 * length(ind) < length(fire))
+        if !sorted || (!_has_step_list(src) && 8 * length(ind) < length(fire))
             return _write_fire_ordered!(rec, meta, alloc, fire, ind, t)
         end
         return _write_fire_masked!(rec, meta, alloc, _fire_step_list(src, fire, meta), mask, t)

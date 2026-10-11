@@ -77,6 +77,8 @@ one forward-Euler step of ``v``, threshold test, reset to `Vr` and `tabs = round
 - `tabs`: refractory counters (steps, stored in the float type of the state), zeros.
 - `w`: unused by the dynamics, zeros.
 - `fire::Vector{Bool}`; `I`: external current (pA); `records::Dict`.
+- `spikes::SpikeIndex`: ascending list of the neurons that fired in the step, owned by the population and shared by its
+  connections and recorder (see `spike_index`).
 - `Δv`, `Δv_temp`: unused buffers.
 
 # Example
@@ -107,6 +109,7 @@ ExtendedIF
     tabs::VFT = zeros(N)
     w::VFT = zeros(N)
     fire::VBT = zeros(Bool, N)
+    spikes::SpikeIndex = owned_spike_index(N)
     I::VFT = zeros(N)
     records::Dict = Dict()
     Δv::VFT = zeros(eltype(VFT), N)

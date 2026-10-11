@@ -56,6 +56,7 @@ end
     ge::VFT = zeros(N)
     gi::VFT = zeros(N)
     fire::VBT = zeros(Bool, N)
+    spikes::SpikeIndex = owned_spike_index(N)
     I::VFT = zeros(N)
     records::Dict = Dict()
 end
@@ -98,6 +99,8 @@ potential); there is no reset. (Up to SNNModels 1.8.4 `fire` was the level test 
 - `v = -52.14 .+ zeros(N)` (mV), `w = 0.2 .+ zeros(N)`.
 - `ge`, `gi`: synaptic conductances (nS), zeros.
 - `fire::Vector{Bool}`; `I`: external current (pA); `records::Dict`.
+- `spikes::SpikeIndex`: ascending list of the neurons that fired in the step, owned by the population and shared by its
+  connections and recorder (see `spike_index`).
 
 # References
 Morris C., Lecar H. (1981). Voltage oscillations in the barnacle giant muscle fiber.

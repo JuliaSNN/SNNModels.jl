@@ -95,6 +95,7 @@ end
     _ts("spike_index",       "syn/spike_index.jl")
     _ts("delay_uniform",     "syn/delay_uniform.jl")
     _ts("spike_handoff",     "syn/spike_handoff.jl")
+    _ts("population_spike_list", "syn/population_spike_list.jl")
     _ts("lazy_traces",       "syn/lazy_traces.jl")
     _ts("lazy_traces_euler", "syn/lazy_traces_euler.jl")
     _ts("vstdp",       "syn/vstdp.jl")
