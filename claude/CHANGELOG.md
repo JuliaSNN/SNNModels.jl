@@ -117,10 +117,22 @@ populations are built with `Float64` state (see "Precision from the population t
     - `Tripod`, `BallAndStick`: the refractory/backpropagation/spike/Heun loop of `integrate!` is branchless (the `Float64` arithmetic of the old
       `0.5 * dt * (...)` is kept), the dendritic and somatic synaptic currents of `ReceptorSynapse` (`synaptic_current!`, scalar, bounds-checked, an `exp256`
       and a division for every receptor, also for the receptors without a magnesium block) are vectorised with the block evaluated only for the NMDA
-      receptors, and `update_receptor!` of `MultiReceptorSynapse` has `exp64` of the loop-invariant argument hoisted. Not changed: the two `@fastmath` Heun
-      loops (`update_neuron!`) keep the axial currents `ic` in memory, because holding them in registers lets LLVM vectorise and reassociate the fast-math
-      expression and changes the derivatives by 1 ulp: that variant measured 10.7 (Tripod) and 6.7 ns (BallAndStick) against 21.7 and 15.1, but is not
-      bit-identical, so it was not kept. These two loops are now about half of the `Tripod` step.
+      receptors, and `update_receptor!` of `MultiReceptorSynapse` has `exp64` of the loop-invariant argument hoisted. The two Heun-stage loops
+      (`update_neuron!`) hold the axial currents in registers instead of storing and reloading them through `p.ic` (which kept them scalar) and
+      have no `@fastmath`: they vectorise, and without fast-math LLVM neither reassociates nor contracts, so a neuron gets the same bits in the
+      vector body and in the scalar remainder, for every chunking and thread count (`threading_synapses.jl`, N up to 4097, 1, 4 and 8 threads).
+      Not bit-identical to the `@fastmath` loops of 1.9.1: the derivatives differ by at most 3 ulp of the largest term of the sum (Tripod; 2 for
+      BallAndStick; `test/pop/multicompartment_update_loop.jl`, where the synapse and state stages are still compared bit for bit). `p.ic` is
+      no longer written (field kept) and the threaded path no longer grows it. The same loop with `@fastmath` (the earlier prototype) is as fast
+      within 7 % and moves spike times in driven runs, so it is not used. ns per neuron and step (pinned, median of 3, two series, N = 1000 /
+      10000, spiking and quiet): `Tripod` 22.1-23.9 -> 10.5-12.1 (2.0-2.15x), `BallAndStick` 15.2-16.0 -> 6.6-7.4 (2.1-2.4x). Driven single
+      neurons over 500 ms (`pre110_fixes/scripts/j2_single_neuron.jl`, N = 1 and 100, dt 0.1): subthreshold drive max difference 1.5e-5 mV,
+      spike steps identical in every case (e.g. 389 and 436 spikes at N = 100), but with spikes the potentials drift apart by up to
+      0.16 (Tripod) and 0.13 mV (BallAndStick) at constant drive and 0.23 mV with synaptic kicks, largest in the step before a spike (the
+      exponential upswing amplifies the rounding differences; a single 1-ulp change of the initial `v_s` gives 0.025-0.038 mV with the old code).
+      `Tripod` network (`tripod_net.jl`, 800 + 200 neurons, 5 s, seeds 1-3, same seed old/new): Tripod rates 22.3-22.5 Hz change by +0.01 to
+      +0.19 %, mean CV-ISI by at most 0.0014, interneuron rates by at most 0.08 %; KS distance between old and new 0.006-0.010 on the
+      per-neuron rates and 0.003-0.004 on the pooled ISIs, against 0.025-0.043 and 0.022-0.061 between seeds of the old code.
     - `HetRec` is unchanged (273 ns per neuron and step at N = 1000: a gather over about `N overlap Nd` weights per neuron, 0.27 ns per weight, and
       the dense `rand!` is a small part). `IF_CANAHP`, `AdExMultiTimescale` and `Multipod` are not included in the module (commented out in `populations.jl`)
       and were not touched. The `@fastmath` synapse stages of `SingleExpSynapse` and `DeltaSynapse` are already vectorised by LLVM (checked in the IR).
@@ -193,7 +205,13 @@ populations are built with `Float64` state (see "Precision from the population t
   workers (`@batch`). The default is `0`: threading is off and nothing changes. With one Julia thread, with `0` or `Inf`, or with a single chunk the
   serial loop runs and `@batch` is not called. The number of chunks depends on `N` and the setting only (at most 8), never on the number of threads, and a
   per-neuron update has no reduction, so the result is bit-identical for every setting and thread count. New dependency: Polyester 0.7.
-  `Tripod`, `BallAndStick`, `ReceptorSynapse`, `DeltaSynapse`, `ExtendedIF` and the Poisson populations stay serial. Measurements and the prototype are in
+  `Tripod` and `BallAndStick` run in chunks too when their synapse models have chunk methods (`ReceptorSynapse`, `MultiReceptorSynapse`, the
+  defaults; also `DoubleExpSynapse`, `SingleExpSynapse`, `CurrentSynapse`): synapses, both Heun stages and the state update of a chunk in one
+  task, one fork/join per step; `IF` with `ReceptorSynapse` likewise. `DeltaSynapse`, `ExtendedIF` and the Poisson populations stay serial.
+  Network of 800 / 4000 `Tripod` + 200 / 1000 `IF` (`tripod_net.jl` via `jl_thread.jl`, best setting, s per simulated second; cores 9, 7,9-11
+  and 0,1,3,6,7,9-11 because 8 was taken by other pinned jobs): 1 / 4 / 8 threads 0.119 / 0.115 / 0.118 (NE = 800, no gain: the step is too
+  short) and 0.586 / 0.417 / 0.379 (NE = 4000, 1.40x and 1.55x); before the vectorised Heun stage 0.212 / 0.154 / 0.149 and 1.019 / 0.520 /
+  0.554 (1.96x at 4 threads): the serial part shrank more than the parallel one. Measurements and the prototype are in
   `papers/JuliaSNN_publication/validation/threading`.
 
 ### Breaking changes

@@ -97,8 +97,8 @@ between spikes.
 
 ## Work arrays
 - `Δv`, `Δv_temp::MFT` (`N x 4`): derivatives of `(v_s, v_d1, v_d2, w_s)` at the two Heun stages.
-- `is::MFT` (`N x 3`): synaptic currents of soma, d1, d2; `ic::VFT` (length 2): axial currents
-  soma -> dendrite (pA) of the last evaluated stage (the threaded update gives every chunk its own two-element slot, `SCRATCH_STRIDE` floats apart, and grows `ic` to `SCRATCH_STRIDE * nchunks` elements on first threaded use); `v_pred::MFT` (`N x 3`): stage potentials
+- `is::MFT` (`N x 3`): synaptic currents of soma, d1, d2; `ic::VFT` (length 2): not written since 1.10 (the axial currents
+  are held in registers), kept for compatibility; `v_pred::MFT` (`N x 3`): stage potentials
   of soma, d1, d2 (mV).
 
 # References
@@ -195,12 +195,10 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     (size(p.Δv, 1) >= N && size(p.Δv, 2) >= 4 && size(p.Δv_temp, 1) >= N && size(p.Δv_temp, 2) >= 4) ||
         throw(DimensionMismatch("Δv and Δv_temp must have N rows and 4 columns"))
     if _chunk_synapse(soma_syn) && _chunk_synapse(dend_syn)
-        # All the stages are per-neuron: one fork/join per population and step, every chunk with its own scratch slot of `ic`
-        # (the shared two-element vector of the serial loop). `foreach_chunk_c` runs the one chunk `1:N` on the calling thread when there is one chunk or one thread.
-        nc = nchunks(N, _BPC[])
-        (nc > 1 && Threads.nthreads() > 1 && length(p.ic) < SCRATCH_STRIDE * nc) && resize!(p.ic, SCRATCH_STRIDE * nc)   # serial: the two-element `ic` as before
+        # All the stages are per-neuron and have no shared scratch: one fork/join per population and step.
+        # `foreach_chunk_c` runs the one chunk `1:N` on the calling thread when there is one chunk or one thread.
         foreach_chunk_c(N) do c, rng
-            _tripod_chunk!(p, param, dt, rng, (c - 1) * SCRATCH_STRIDE, n_abs, n_ref)
+            _tripod_chunk!(p, param, dt, rng, n_abs, n_ref)
         end
     else
         # synapse models without chunk methods: the stages one after the other over the whole population
@@ -208,8 +206,8 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
     end
 end
 
-# one chunk: synapses, the two Heun stages and the state update of the neurons `rng`, `ico` = offset of the scratch slot in `p.ic`
-function _tripod_chunk!(p::Tripod, param::DendNeuronParameter, dt::Float32, rng::UnitRange{Int}, ico::Int, n_abs::Int, n_ref::Int)
+# one chunk: synapses, the two Heun stages and the state update of the neurons `rng`
+function _tripod_chunk!(p::Tripod, param::DendNeuronParameter, dt::Float32, rng::UnitRange{Int}, n_abs::Int, n_ref::Int)
     @unpack Δv, Δv_temp, fire = p
     @unpack soma_syn, dend_syn = p
     update_synapses!(p, soma_syn, p.receptors_s, p.synvars_s, dt, rng)
@@ -224,13 +222,13 @@ function _tripod_chunk!(p::Tripod, param::DendNeuronParameter, dt::Float32, rng:
     @inbounds for i in rng
         fire[i] = false
     end
-    update_neuron!(p, param, Δv, dt, rng, ico)
+    update_neuron!(p, param, Δv, dt, rng)
     @inbounds for k in 1:4
         @simd ivdep for i in rng
             Δv_temp[i, k] = Δv[i, k]
         end
     end
-    update_neuron!(p, param, Δv, dt, rng, ico)
+    update_neuron!(p, param, Δv, dt, rng)
     _tripod_state!(p, dt, rng, n_abs, n_ref)
 end
 
@@ -306,21 +304,20 @@ end
     Δv::Matrix{Float32},
     dt::Float32,
 )
-    update_neuron!(p, param, Δv, dt, 1:Int(p.N), 0)
+    update_neuron!(p, param, Δv, dt, 1:Int(p.N))
 end
 
-# One Heun stage for the neurons `rng`; `ico` is the offset of this chunk's two-element scratch slot in `p.ic` (0: the serial one).
+# One Heun stage for the neurons `rng`.
 @inline function update_neuron!(
     p::Tripod,
     param::DendNeuronParameter,
     Δv::Matrix{Float32},
     dt::Float32,
     rng::UnitRange{Int},
-    ico::Int,
 )
     @unpack v_d1, v_d2, v_s, I_d, I, w_s, θ = p
     @unpack d1, d2 = p
-    @unpack is, ic, v_pred = p
+    @unpack is, v_pred = p
     @unpack adex, soma_syn, dend_syn = p
     @unpack C, gl, El, ΔT, a, τw = adex
     @unpack synvars_s, synvars_d1, synvars_d2 = p
@@ -333,7 +330,7 @@ end
     _check_state_lengths(N, v_s, v_d1, v_d2, w_s, θ, I, I_d, d1gax, d1gm, d1El, d1C, d2gax, d2gm, d2El, d2C)
     (size(Δv, 1) >= N && size(Δv, 2) >= 4 && size(is, 1) >= N && size(is, 2) >= 3 && size(v_pred, 1) >= N && size(v_pred, 2) >= 3) ||
         throw(DimensionMismatch("Δv, is and v_pred must have N rows (4, 3 and 3 columns)"))
-    (last(rng) <= N && ico + 2 <= length(ic)) || throw(BoundsError(ic, ico + 2))
+    last(rng) <= N || throw(BoundsError(v_s, last(rng)))
 
     @inbounds @simd ivdep for i ∈ rng
         v_pred[i, 1] = v_s[i] + Δv[i, 1] * dt
@@ -350,25 +347,25 @@ end
         end
     end
 
-    # This `@fastmath` loop is kept as it was (scalar, `ic` stored and reloaded). Its floating-point result depends on how LLVM reassociates the
-    # fast-math expression: with the axial currents in registers (which lets it vectorise, about 5x faster) the derivatives
-    # differ from this loop in the last bit (1 ulp in `Δv`), so the vectorised variant is not used (see the changelog).
-    # `ic` is per chunk (slot at `ico`), so chunks do not share it.
-    @fastmath @inbounds for i ∈ rng
+    # Axial currents in registers (before 1.10 they were stored to and reloaded from `p.ic`, which kept the loop scalar) and no
+    # `@fastmath`: LLVM neither reassociates nor contracts, so the vector body and the scalar remainder give the same bits for a
+    # neuron whatever its lane or chunk. The derivatives differ from the `@fastmath` loop of SNNModels <= 1.9 by a few ulp
+    # (see the changelog and `test/pop/multicompartment_update_loop.jl`). `ivdep`: as in `_tripod_state!` (chunk ranges not starting at 1).
+    @inbounds @simd ivdep for i ∈ rng
         vs = v_pred[i, 1]
         vd1 = v_pred[i, 2]
         vd2 = v_pred[i, 3]
         ws = w_s[i] + Δv[i, 4] * dt
-        ic[ico+1] = (vs - vd1) * d1gax[i] # axial current soma -> d1
-        ic[ico+2] = (vs - vd2) * d2gax[i] # axial current soma -> d2
-        Δv[i, 2] = ((d1El[i] - vd1) * d1gm[i] - is[i, 2] + ic[ico+1] + I_d[i]) / d1C[i]
-        Δv[i, 3] = ((d2El[i] - vd2) * d2gm[i] - is[i, 3] + ic[ico+2] + I_d[i]) / d2C[i]
+        ic1 = (vs - vd1) * d1gax[i] # axial current soma -> d1
+        ic2 = (vs - vd2) * d2gax[i] # axial current soma -> d2
+        Δv[i, 2] = ((d1El[i] - vd1) * d1gm[i] - is[i, 2] + ic1 + I_d[i]) / d1C[i]
+        Δv[i, 3] = ((d2El[i] - vd2) * d2gm[i] - is[i, 3] + ic2 + I_d[i]) / d2C[i]
         Δv[i, 1] =
             (
                 gl * (El - vs) +
                 gl * ΔT * exp256((vs - θ[i]) / ΔT) - ws  # adaptation
                 - is[i, 1]   # synapses
-                - ic[ico+1] - ic[ico+2] # axial currents
+                - ic1 - ic2 # axial currents
                 + I[i]  # external current
             ) / C
         Δv[i, 4] = (a * (vs - El) - ws) / τw

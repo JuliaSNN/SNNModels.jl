@@ -57,16 +57,28 @@ function _mc_run(kind, N)
     return _arrays_hash(objs), nsp
 end
 
+# the threaded Heun stage keeps the axial currents in registers: the `ic` field is neither grown nor written
+function _mc_ic_untouched(kind)
+    p = kind === :tripod ? Tripod(N = 1537) : BallAndStick(N = 1537)
+    n = length(p.ic)
+    hasproperty(p, :I) ? (p.I .= 600f0) : (p.Is .= 600f0)
+    for _ in 1:20
+        SM.integrate!(p, p.param, 0.1f0)
+    end
+    return length(p.ic) == n && all(iszero, p.ic)
+end
+
 @testset "threaded Tripod / BallAndStick / IF with receptors" begin
     old = SM.neurons_per_thread()
     try
-        for kind in (:tripod, :bas, :if_rec), N in (0, 1, 7, 129, 500, 1000, 2049)
+        for kind in (:tripod, :bas, :if_rec), N in (0, 1, 7, 127, 129, 500, 1000, 1537, 2049, 4097)
             SM.set_neurons_per_thread!(0)
             ref = _mc_run(kind, N)
             for s in (128, 256, 512, 1024, 2048)
                 SM.set_neurons_per_thread!(s)
                 @test _mc_run(kind, N) == ref
             end
+            kind === :if_rec || @test _mc_ic_untouched(kind)
         end
     finally
         SM.set_neurons_per_thread!(old)

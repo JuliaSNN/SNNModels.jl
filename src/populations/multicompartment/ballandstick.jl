@@ -96,7 +96,7 @@ between spikes.
 
 ## Work arrays
 - `Δv`, `Δv_temp::MFT` (`N x 3`): derivatives of `(v_s, v_d, w_s)`; `is::MFT` (`N x 2`);
-  `ic::VFT` (length 1); `v_pred::MFT` (`N x 2`): stage potentials of soma and dendrite.
+  `ic::VFT` (length 1): not written since 1.10, kept for compatibility; `v_pred::MFT` (`N x 2`): stage potentials of soma and dendrite.
 
 # Example
 ```julia
@@ -183,11 +183,9 @@ function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
     (size(p.Δv, 1) >= N && size(p.Δv, 2) >= 3 && size(p.Δv_temp, 1) >= N && size(p.Δv_temp, 2) >= 3) ||
         throw(DimensionMismatch("Δv and Δv_temp must have N rows and 3 columns"))
     if _chunk_synapse(soma_syn) && _chunk_synapse(dend_syn)
-        # one fork/join per population and step, every chunk with its own scratch slot of `ic` (see `Tripod`)
-        nc = nchunks(N, _BPC[])
-        (nc > 1 && Threads.nthreads() > 1 && length(p.ic) < SCRATCH_STRIDE * nc) && resize!(p.ic, SCRATCH_STRIDE * nc)   # serial: the two-element `ic` as before
+        # one fork/join per population and step, no shared scratch (see `Tripod`)
         foreach_chunk_c(N) do c, rng
-            _bas_chunk!(p, param, dt, rng, (c - 1) * SCRATCH_STRIDE, n_abs, n_ref)
+            _bas_chunk!(p, param, dt, rng, n_abs, n_ref)
         end
     else
         update_synapses!(p, soma_syn, p.receptors_s, p.synvars_s, dt)
@@ -202,7 +200,7 @@ function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::Float32)
     end
 end
 
-function _bas_chunk!(p::BallAndStick, param::DendNeuronParameter, dt::Float32, rng::UnitRange{Int}, ico::Int, n_abs::Int, n_ref::Int)
+function _bas_chunk!(p::BallAndStick, param::DendNeuronParameter, dt::Float32, rng::UnitRange{Int}, n_abs::Int, n_ref::Int)
     @unpack Δv, Δv_temp, fire = p
     @unpack soma_syn, dend_syn = p
     update_synapses!(p, soma_syn, p.receptors_s, p.synvars_s, dt, rng)
@@ -216,13 +214,13 @@ function _bas_chunk!(p::BallAndStick, param::DendNeuronParameter, dt::Float32, r
     @inbounds for i in rng
         fire[i] = false
     end
-    update_neuron!(p, param, Δv, dt, rng, ico)
+    update_neuron!(p, param, Δv, dt, rng)
     @inbounds for k in 1:3
         @simd ivdep for i in rng
             Δv_temp[i, k] = Δv[i, k]
         end
     end
-    update_neuron!(p, param, Δv, dt, rng, ico)
+    update_neuron!(p, param, Δv, dt, rng)
     _bas_state!(p, dt, rng, n_abs, n_ref)
 end
 
@@ -278,21 +276,20 @@ end
     Δv::Matrix{Float32},
     dt::Float32,
 )
-    update_neuron!(p, param, Δv, dt, 1:Int(p.N), 0)
+    update_neuron!(p, param, Δv, dt, 1:Int(p.N))
 end
 
-# One Heun stage for the neurons `rng`; `ico` = offset of this chunk's scratch slot in `p.ic` (0: the serial one)
+# One Heun stage for the neurons `rng`
 @inline function update_neuron!(
     p::BallAndStick,
     param::DendNeuronParameter,
     Δv::Matrix{Float32},
     dt::Float32,
     rng::UnitRange{Int},
-    ico::Int,
 )
     @unpack v_d, v_s, w_s, θ, Is, Id = p
     @unpack d = p
-    @unpack is, ic, v_pred = p
+    @unpack is, v_pred = p
     @unpack adex, soma_syn, dend_syn = p
     @unpack C, gl, El, ΔT, a, τw = adex
     @unpack synvars_s, synvars_d = p
@@ -304,7 +301,7 @@ end
     _check_state_lengths(N, v_s, v_d, w_s, θ, Is, Id, dgax, dgm, dEl, dC)
     (size(Δv, 1) >= N && size(Δv, 2) >= 3 && size(is, 1) >= N && size(is, 2) >= 2 && size(v_pred, 1) >= N && size(v_pred, 2) >= 2) ||
         throw(DimensionMismatch("Δv, is and v_pred must have N rows (3, 2 and 2 columns)"))
-    (last(rng) <= N && ico + 1 <= length(ic)) || throw(BoundsError(ic, ico + 1))
+    last(rng) <= N || throw(BoundsError(v_s, last(rng)))
 
     @inbounds @simd ivdep for i ∈ rng
         v_pred[i, 1] = v_s[i] + Δv[i, 1] * dt
@@ -319,22 +316,21 @@ end
         end
     end
 
-    # This `@fastmath` loop is kept as it was (scalar, `ic` stored and reloaded), see `Tripod`: with the axial current in a register it vectorises
-    # (about 5x faster) but the derivatives differ in the last bit. `ic` is per chunk (slot at `ico`).
-    @fastmath @inbounds for i ∈ rng
+    # Axial current in a register and no `@fastmath`, vectorised and lane-independent: see `Tripod`.
+    @inbounds @simd ivdep for i ∈ rng
         vs = v_pred[i, 1]
         vd = v_pred[i, 2]
         ws = w_s[i] + Δv[i, 3] * dt
-        ic[ico+1] = (vs - vd) * dgax[i] # axial current soma -> d
+        icd = (vs - vd) * dgax[i] # axial current soma -> d
         Δv[i, 1] =
             (
                 gl * (El - vs) +
                 gl * ΔT * exp256((vs - θ[i]) / ΔT) - ws  # adaptation
                 - is[i, 1]   # synapses
-                - ic[ico+1] # axial current
+                - icd # axial current
                 + Is[i]  # external current
             ) / C
-        Δv[i, 2] = ((dEl[i] - vd) * dgm[i] - is[i, 2] + ic[ico+1] + Id[i]) / dC[i]
+        Δv[i, 2] = ((dEl[i] - vd) * dgm[i] - is[i, 2] + icd + Id[i]) / dC[i]
         Δv[i, 3] = (a * (vs - El) - ws) / τw
     end
 end
