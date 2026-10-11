@@ -765,6 +765,131 @@ short-term rule, 8 B/syn for `J`/`index` with a rule that needs them, 8 B/syn fo
   hypothesis of the perf README is only weakly supported. Splitting the gain into bytes and instructions per event would need
   hardware counters (not tested).
 
+### Dependencies: unused packages removed (branch dev-diag, pre-1.10 diagnostics, job 1)
+- Removed from `[deps]`/`[compat]` of `Project.toml` (13): `Documenter` (no docs build in this package; the
+  SpikingNeuralNetworks docs environment has its own), `BenchmarkTools` and `Revise` (only in standalone scripts
+  `test/simulation_speed.jl`, `test/pop/multipod.jl`, `_new_feats/`, not run by `runtests.jl`), `Printf` (test only, already
+  in `test/Project.toml`), `ColorSchemes`, `IterTools`, `Parameters` (`@with_kw` only in `sparse_plasticity/dump.jl`, which is
+  not included; `@unpack` comes from `UnPack`), `Profile`, `Requires` (no `@require`), `Roots` (only before commented-out code
+  in `utils/sparse_matrix.jl`), `SGtSNEpi`, `StaticArrays`, `TimerOutputs`. The matching `using` lines were removed from
+  `src/SNNModels.jl`, `src/utils/spatial.jl`, `src/utils/sparse_matrix.jl`, `src/connections/sparse_plasticity/CaRule.jl`.
+  No code path changes; 20 runtime dependencies remain.
+- `test/Project.toml`: `SHA` added (`test/threading_synapses.jl` does `using SHA`; the testset errored with "Package SHA not
+  found" on 6b7addc as well).
+- Measured (`papers/JuliaSNN_publication/validation/profilation_v1.10/perf/pre110_diag/job1_load.csv`, `job1_load.jl`;
+  core 8, `-t 1`, median of 3, precompiled): `julia -e 'using SNNModels'` wall 2.58 s to 2.03 s (bare Julia 0.19 s),
+  VmRSS after `using` 582 MB to 515 MB (bare 221 MB). Packages in the resolved manifest 190 to 138 (`job1_manifest_counts.csv`).
+  Most of the gain is the Documenter tree (Documenter, REPL, `Pkg -> REPLExt`, JSON, Parsers, Git: about 360 of the 392 ms of
+  `@time_imports` entries that disappear, `job1_time_imports_diff.csv`).
+- Per direct dependency (fresh process `using Dep`, `job1_deps.csv`; trees overlap, so these do not add up): load time
+  over bare Documenter 0.68 s, SGtSNEpi 0.60 (was never loaded by SNNModels), DrWatson 0.52, JLD2 0.50, DSP 0.43,
+  MetaGraphs/Graphs 0.39, Interpolations 0.34, Distributions 0.33, LoopVectorization 0.28 s; RSS over bare Documenter
+  +204 MB, DrWatson +162 (pulls in Pkg), DSP +128, JLD2 +127, MetaGraphs +119, LoopVectorization +111, Distributions
+  +106, Interpolations +95 MB. Heavy runtime dependencies left for the maintainer to decide on: DrWatson (`savename`, `@strdict`,
+  `dict2ntuple`, `save`/`load` in `utils/io.jl`), DSP (`conv`, `xcorr` in the analysis), Graphs/MetaGraphs (`graph(model)` only), JLD2.
+- Other packages, `Project.toml` only, each on its own `dev-diag` branch (worktrees `src/snnplots_diag`, `src/snnutils_diag`,
+  `src/snnrl_diag`): SNNPlots drops `Plots` (only in files that are not included: `old_plot.jl`, `backend/plots.jl`), `DrWatson`
+  and `Colors` (not used), and moves `CairoMakie` (used only by the tests and in docstring examples) to `[extras]`/`[targets]`;
+  SNNUtils drops `Dates`, `Interpolations`, `JLD2`, `Requires` (used only in files that are not included, or not at all;
+  `HDF5` stays: `DrWatson.save` of `.h5` files loads it through FileIO); SNNRL moves `ReinforcementLearning` and
+  `ReinforcementLearningTrajectories` (used only by `examples/1d_RW.jl`) to a new `examples/Project.toml`. SpikingNeuralNetworks,
+  CalciumSpike, OptunaLoader: no change (all dependencies used by the loaded source).
+
+### Flush-to-zero during `sim!` / `train!` (branch dev-diag, pre-1.10 diagnostics, job 2)
+- Cause of the p = 0.02 small-N cliff and of the slow quiet `Rate` population (perf README, disadvantage 8): subnormal
+  floats. Every decay integrated as `g += -dt g / τ` (or `x += dt (-x)`) stops changing once `dt g / τ` is below half an ulp
+  of `g`, so a variable with no input ends in the subnormal range and stays there (it never reaches 0); each operation on it
+  takes a microcode assist. Counted (`job2_subnormal_counts.csv`, every 100 steps over 10 s): T4 p = 0.02 N = 500, `E.gi`
+  up to 70 of 400 entries subnormal (mean 58), `I.gi` 17/100, `E.ge` 3, `E.syn_curr` 2; N = 1000 `E.gi` 62/800; N = 2000
+  `E.gi` 34/1600; quiet `Rate` (N = 10000) all of `x` and `r` after 80 ms. Weights, delay buffers, `v` and every other array:
+  none. The same happens with `SingleExpSynapse`, `DoubleExpSynapse`, `DoubleExpCurrentSynapse` and the default `AdEx` synapse
+  (REPL probe, not in a CSV: every synaptic variable subnormal after 2 s without input).
+- Fix: `sim!` and `train!` take `flush_subnormals::Bool = true` and run the step loop inside `with_flush_subnormals`
+  (new file `src/utils/subnormals.jl`): `set_zero_subnormals(true)` on the calling thread and, when the population updates
+  are threaded (`neurons_per_thread > 0`, more than one thread), on every Polyester worker (`@batch per = thread`); the
+  previous mode of each thread is restored afterwards, also on an exception. One change covers every model, synapse and
+  plasticity trace, and leaves the arithmetic of normal numbers, so no kernel and no generated loop changes (a per-loop
+  `ifelse(abs(x) < floatmin)` would have touched about ten `@fastmath` loops, some of which are kept bit-identical to 1.9).
+  `integrate!`/`forward!` called directly (outside `sim!`/`train!`) are not affected.
+- Effect on results: a result that would be subnormal is 0 and a subnormal operand reads as 0, so a decaying variable
+  stops at a small normal value (|g| <= floatmin τ / dt, 5.9e-37 for τ = 5 ms, dt = 0.1 ms) instead of a subnormal one.
+  T4 p = 0.02 N = 500/1000/2000 over 10 s: spike times of E and I and the final `v` bit-identical to the run without it;
+  `ge`/`gi` differ in 1-64 entries per array by at most 5.9e-37 (absolute); quiet `Rate` `x`/`r` by at most 1.2e-37
+  (`job2_correctness.csv`). The multi-threaded path (`-t 4`, `neurons_per_thread = 128`) gives the same `v` with and
+  without the flag and leaves every thread with FTZ off.
+- Measured (`perf/pre110_diag/job2_subnormal.csv`, core 8, `-t 1`, median of 3, load1 4.6-8.3; before = ee48a1f): T4 p = 0.02
+  s per simulated second, IEEE vs `sim!` default after the change: N = 500 0.0512 to 0.0090 (Auryn 0.0107), N = 1000 0.0473 to
+  0.0160, N = 2000 0.0476 to 0.0291; quiet `Rate` through `sim!`, ns per neuron-step: N = 1000 40.8 to 0.86, N = 10000 39.4
+  to 0.68 (driven: 0.67-0.85, unchanged). Setting FTZ by hand on the 1.9/ee48a1f code gives the same numbers.
+- Test: `test/sim/subnormals.jl` (14 tests): a quiet `Rate` and a silent `CurrentSynapse` have no subnormal entries after
+  `sim!`/`train!` (and do with `flush_subnormals = false`), spikes and `v` identical with and without the flag, thread mode
+  restored after the run and after an exception. Full suite `-t 1`: 74620 / 74620 (with OrderedCollections 1.8.2, see below).
+- Found while testing: a fresh resolve of the test environment picks OrderedCollections 2.0.2, which no longer has
+  `sort(::Dict; by)`; `compose` then throws (`utils/util.jl:212-214`, 86 errored tests in `record_test.jl` and others). The
+  known limitation below is now real; not fixed here (outside job 2). The suite was run with OrderedCollections pinned to 1.8.2
+  in a scratch copy of the test environment.
+
+### `compose` without `sort(::Dict)` (branch dev-diag, pre-1.10 diagnostics, job 3 task 0)
+- `compose` (`utils/util.jl`) and `population_indices`, `filter_items`, `subpopulations` (`analysis/populations.jl`) built
+  their `NamedTuple` with `dict2ntuple(sort(d; by))`, i.e. the `sort(::Dict)` method that OrderedCollections 1.x added to
+  `Base.sort` (deprecated there, removed in OrderedCollections 2.0). A fresh resolve now picks OrderedCollections 2.0.2 and
+  `compose` threw (86 errored tests). New internal helper `sorted_ntuple(d; by = identity)`: sorts the keys with `by`
+  (applied to the keys, as before), converts `String` keys to `Symbol` and returns the `NamedTuple` in that order, so the
+  returned objects are unchanged (same key order, same value types; ties of `by` keep the `Dict` iteration order as the
+  stable `sortperm` of the old method did). No new dependency.
+- Full suite `-t 1` in a freshly resolved copy of `test/Project.toml` (OrderedCollections 2.0.2): 74620 / 74620.
+
+### Startup jump N = 10000 -> 20000: a full GC mark, no library change (branch dev-diag, pre-1.10 diagnostics, job 3)
+- Perf README T11: construction of the balanced k100 network 0.064 s at N = 10000, 0.46 s at N = 20000. Measured stage by
+  stage (`perf/pre110_diag/job3_startup.jl`, `job3_startup.csv`, `job3_stages.csv`; idle physical core, 2 or 5, because
+  core 8 was in use by another job; `-t 1`, median of 3 after a warm-up; load1 5.9-8.7) at N = 10000/15000/20000/30000.
+- Cause: one collection that re-marks the whole heap, ~0.27 s, independent of N. It lands inside the construction once
+  the bytes allocated by the construction exceed the GC heap-growth trigger: 151/227 MB (N = 10000/15000) give one cheap
+  young collection; 303/454 MB (N = 20000/30000) give a full sweep (0.04 s) and then a full re-mark (`mark_s` 0.27 s;
+  inside the build in 1 of 6 reps at N = 20000 and 5 of 6 at N = 30000, with and without the 10 s simulation between reps;
+  where it falls is set by the GC, which is why the campaign saw 0.46 s at N = 20000). The mark cost is the base heap: a full GC
+  after `using SNNModels` and the warm-up takes 0.30 s (mark 0.26 s, 36 MB live) against 0.09 s in a bare Julia
+  (`job3_gc_deps.csv`: DrWatson or JLD2 alone 0.16 s, DSP 0.14 s, LoopVectorization 0.13 s). Profile at N = 30000
+  (`job3_profile_N30000.txt`): 56 % of the samples in `ijl_gc_collect`, 47 % in `gc_mark_loop`, entered from a small
+  allocation in `dsparse`/`SpikingSynapse`, i.e. wherever the trigger happens to be crossed.
+- No O(N^2) step, dense intermediate or push!/resize! growth: allocated bytes are linear (15.1 MB per 1000 neurons,
+  ~1240 allocations at every N). With the GC paused during the build (`gcoff=1`) startup is 0.082/0.128/0.180/0.285 s;
+  the library part (4 `SpikingSynapse`) 0.033/0.050/0.072/0.112 s and 62 B allocated per synapse (185 MB at N = 30000);
+  the script part (graph read, masks, `sparse(I, J, V)`) 0.049/0.076/0.109/0.173 s and 89-268 MB.
+- Benchmark-script fix (not applied to perf/scripts, shown in `job3_startup.jl script=lean`): read the Int32 file in place
+  and fill the four CSC blocks in one pass (the file is sorted by (pre, post), i.e. CSC order; identical matrices,
+  `mode=checklean`). Startup 0.073/0.069/0.095/0.158 s at N = 10000/15000/20000/30000 (from 0.073/0.126/0.231/0.537 s),
+  163 MB at N = 20000, no full collection up to N = 30000.
+- Library: nothing cheap to change. Allocation per synapse could drop from 62 B to roughly 40 B (the transposed copy in `dsparse`,
+  the double delay vector and the copy in the keyword constructor of `SpikingSynapse`), which only moves the trigger; the
+  re-mark cost belongs to the Julia runtime and the loaded dependencies.
+
+### No allocation per `sim!`/`train!` step (branch dev-diag, pre-1.10 diagnostics, job 4)
+- Cause of the residual per-step allocations (Performance above: 240 B with a `PoissonStimulus`, 384 B balanced, 560 B
+  `Tripod` in the review measurements): the step loops over abstract component vectors, so `_step_dt(x, dt)` and
+  `integrate!`/`stimulate!`/`forward!` are dynamic calls, and the `Float32` returned by `_step_dt` (and passed on) was
+  boxed: one 16 B box per stimulus, population and connection per step (`Profile.Allocs`, `main.jl` lines of
+  `stimulate!`, `integrate!`, `forward!`; nothing in the component methods). `with_flush_subnormals` and
+  `with_neurons_per_thread` allocate nothing.
+- Fix (`src/utils/main.jl` only): the keyword forms of `sim!`/`train!` share one loop (`_run!`, `_run_loop!`, and
+  `_run_pbar!` for the progress bar) that wraps `dt` in a `Ref` once per call; the step (`_sim_step!`, `_train_step!`)
+  calls one function barrier per component, `_sim_component!(x, param, dtr, T)` / `_train_component!`, with the component and
+  its `param` read from the boxed vector element (some populations hold an abstractly typed `param`; a call dispatched on it
+  from inside a method specialized on the population would box the population again, 176 B for an `IF`) and returns
+  `nothing`, so no argument or result is boxed and everything inside the barrier is statically dispatched. The public
+  per-step methods `sim!(P, C, S, dt, T)` / `train!(P, C, S, dt, T)` remain (16 B each: the `Ref`). The firing-rate `Dict`
+  is only built with `pbar = true`. Order of operations and arithmetic unchanged.
+- Measured (`perf/pre110_diag/job4_alloc.csv`, `job4_alloc.jl`; pinned idle core, `-t 1`, `@allocated` after warm-up,
+  model form, 1/10/100/1000 steps, least-squares slope and constant; before = 7c3d4ad): `IF` E/I with `CurrentSynapse` (2
+  populations, 3 synapses) 80 B per step + 2192 B per call to 0 + 1936; `IF` with a `PoissonStimulus` 48 + 1008 to 0 + 752;
+  `Tripod` with a `PoissonStimulus` 48 + 1376 to 0 + 1120 (same for `train!`). Per-call constant (`job4_percall_sites.csv`):
+  `_args_model` (the component vectors and the boxing of the populations stored in the model NamedTuple), `_allocate_records!`
+  (`utils/record.jl:278-281`, iteration tuples and `Float32` boxes, recording code not changed here), the `Ref` (16 B).
+  Spike counts and final `v` bit-identical before/after for the three cases (`job4_correctness.csv`).
+- Test: `test/sim/allocations.jl` (18 tests): for the three networks, `sim!` and `train!` bytes do not grow with the run
+  length (< 1 B per step between 10 and 400 steps), the per-call constant is below 4 kB, and `_sim_step!`/`_train_step!`
+  allocate 0 B.
+
 ### Known limitations
 - `iSTDPPotential` and the dense vSTDP are not converted (the event-driven vSTDP keeps the postsynaptic filters per step, O(Npost)): their postsynaptic filters follow the membrane potential at every step
   (class C, see "Lazy classification of the plasticity rules"); `SpikeRateSynapse` keeps its dense scans. The clock-driven
