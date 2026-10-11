@@ -332,6 +332,12 @@ Each item gives the migration.
   them at load, but the earlier 1.10 development commits do not and read out of bounds under `@inbounds`). Files written by the
   earlier 1.10 development commits (full arrays; the struct layout is unchanged) are read and run by this version, but this is
   not guaranteed for future versions. Breaking the reading of old files was accepted for this change but was not needed.
+- One spike list per population (see that section). `SpikeIndex` gains a sixth field `owned::Bool`, and the nine
+  integrate-and-fire population types (`IF`, `AdEx`, `ExtendedIF`, `HetRec`, `Tripod`, `BallAndStick`, `HH`, `IZ`,
+  `MorrisLecar`) gain a field `spikes::SpikeIndex` after `fire`. Positional constructors of these structs change arity;
+  keyword construction (`@snn_kw`) is unchanged and is the only path used in the package and its siblings. Because the JLD2
+  layout of these types changed, JLD2 files saved by earlier 1.10 development builds load as reconstructed types and are
+  refused by `load_model`/`load_data` (`check_loaded_model`). This is the same policy as for 1.9.1 files; 1.10 is unreleased.
 
 ### New API
 - `with_plasticity(c::SpikingSynapse; LTP, STP)`: synapse that shares all arrays with `c` and has the new rule
@@ -456,6 +462,12 @@ Each item gives the migration.
 - `update_plasticity!`/`change_plasticity!` reset the state of the new rule (traces, STP variables) as before.
 - First `train!` of a model compiles more (one specialisation per combination of rule types): 0.36 s against 0.08 s
   for a six-synapse E/I network in a warm session.
+- One spike list per population (see that section). For the integrate-and-fire family, `spike_index(p)` returns the
+  population's own list (`p.spikes`, the same object at every call) instead of a new list per call. Inside `sim!`/`train!`
+  the list of a step is built by its first consumer. Flags set by hand in `fire` between `integrate!` of the population
+  and the end of the step are therefore not seen by the later consumers; only a custom component can do this. Direct calls
+  of `forward!`, `plasticity!` and `record!` outside `sim!`/`train!` (tests, manual loops, populations not passed in `P`)
+  rescan `fire` at every call and see such flags, as before.
 
 ### Lazy classification of the plasticity rules
 A = exactly lazy-able (pure exponential decay between events, events at spikes only; Euler decay `x (1 - dt/τ)` counts,
@@ -944,8 +956,9 @@ of the neurons that fired in the step (`src/utils/record.jl` only; population, s
 - Source of the list (`_recording_spike_index`, `_fire_step_list`): the owner's `SpikeIndex` when it is fed (`fed == true`)
   for `Poisson`, `VariablePoisson`, `InhomogeneousPoisson`, `Identity`, `PoissonStimulusLayer` (O(spikes)); otherwise a
   word scan of `fire` into a recorder scratch (`_flags_to_list!`, N/8 `UInt64` loads plus O(spikes)). The IF family (`IF`,
-  `AdEx`, `Tripod`, `HH`, `IZ`, ...) keeps no spike list at record time (`record!` runs after `integrate!` and before the
-  connections), so it takes the scan. `SpikeTimeStimulus` also takes the scan (its `TouchList` is in spike-time order and can
+  `AdEx`, `Tripod`, `HH`, `IZ`, ...) now owns a list shared with its connections: inside the step the recorder reads it,
+  and only outside the step window (`record_zero!`, direct `record!` calls) does it take the scan (see "One spike list per
+  population"). `SpikeTimeStimulus` also takes the scan (its `TouchList` is in spike-time order and can
   hold duplicates). A test checks that every type with its own `spike_index` method has a `_recording_spike_index` method.
 - Capacity growth checked once per step (`_ensure_fire_capacity!`, with `_grow_fire!` as its out-of-line slow path; same single "Fire COO buffer
   overflowed" warning). Subsets (`indices[:fire]`) through a prebuilt membership mask (`_fire_mask!`, rebuilt at every
@@ -992,6 +1005,120 @@ recording overhead rec1/rec0 (`:fire` of E and I / nothing recorded); Auryn, Bri
 - Not fixed here (pre-existing on 48c60eb): `test/Project.toml` lacks `SHA`, which `test/threading_synapses.jl` uses, so that
   file fails in a fresh test environment.
 
+### One spike list per population (integrate-and-fire family)
+Branch `dev-poplist`, commits 94b1415..78165d3, manifest `~/.claude/code-manifests/snnmodels-poplist.md`.
+
+Before this change, `spike_index(p)` returned a new `SpikeIndex` at every call for the IF family. Every `SpikingSynapse`
+therefore kept two private lists (pre and post), and each list scanned the population's `fire` once per connection and step.
+The `:fire` recorder made one more scan.
+
+What changed:
+- **Owned list (D1, D2).** The nine types `IF`, `AdEx`, `ExtendedIF`, `HetRec`, `Tripod`, `BallAndStick`, `HH`, `IZ` and
+  `MorrisLecar` (`const _OWNED_LIST_POPULATIONS`, populations.jl) have a field
+  `spikes::SpikeIndex = owned_spike_index(N)`. `SpikeIndex` has a new flag `owned`, and `_arm!`/`_disarm!` (called by
+  `prepare_spikes!`/`release_spikes!` of each connection) leave owned lists alone.
+- **Shared by the synapses.** `spike_index(p)` returns `p.spikes`, so `pre_spikes`/`post_spikes` of every `SpikingSynapse`
+  built from the population are the same object. `spiking_synapse.jl` is not modified. `with_plasticity`,
+  `without_plasticity`, `modelcopy` and `save_model`/`load_model` keep the sharing.
+- **Lazy step window (D3).** `_publish_spikes!(p)` runs right after `integrate!` in `_sim_component!`/`_train_component!`.
+  It sets `active = true, valid = false` (O(1)); the first consumer of the step (a connection or the recorder) scans `fire`
+  once, and the others reuse the list. `_retire_all_spikes!(P)` closes the window at the end of `_sim_step!`/
+  `_train_step!`. `_run!` and the five-argument `sim!`/`train!` also close it in a `finally`, so an exception leaves no list
+  open. Outside the window an owned list rescans at every call, exactly like an unarmed scratch list. A population that no
+  synapse or recorder reads pays the O(1) publish/retire only.
+- **Recorder (D5).** `_recording_spike_index` returns `p.spikes` for the owners. `_fire_step_list` uses `spike_list!` when
+  the list is owned and active, and otherwise the recorder's scratch scan. `_has_step_list` (renamed from `_has_fed_list`)
+  routes sorted subsets smaller than N/8 to the list path; both paths produce ascending lists, so the output is the same.
+- **Unchanged:** `Identity`, the Poisson family, `PoissonStimulusLayer` and `SpikeTimeStimulus` (fed lists, or one scan per
+  connection in the dense regime). A population type that is not in the Union falls back to a new list per connection.
+
+Why the results are bit-identical (D3): no component writes a population's `fire` between its `integrate!` and the end of
+the step. Stimuli write only their own `fire`; population `plasticity!` is a no-op; connections never write `fire`. Inside
+the window the shared list is therefore `findall(fire)` of the flags `integrate!` left (ascending, `_flags_to_list!`). That is
+exactly the list each connection used to build for itself. If the same population appears twice in `P`, its second
+`integrate!` re-publishes the list and invalidates it.
+
+Threading (D4): publish and retire are flag writes on the stepping thread after `integrate!` returns (the Polyester
+`@batch` is synchronous). Every `spike_list!` call in the package sits at the top of `forward!`/`plasticity!`/kernels, before
+any `foreach_chunk`/`@batch` fork. The single scan therefore runs on the stepping thread, and workers only read the list.
+The lists are identical at any `-t` and `neurons_per_thread`. The `spike_list!` docstring says it must not be called on a
+shared list from inside a `foreach_chunk` body.
+
+Scans of `fire` per step, T4 network (E 8000 / I 2000; EE EI IE II):
+
+| mode | before | after |
+|---|---|---|
+| `sim!` | 4 | 2 |
+| `sim!`, `:fire` of E and I recorded | 6 | 2 |
+| `train!`, STDP on EE | 5 | 2 |
+| `train!`, STDP on EE, `:fire` recorded | 7 | 2 |
+
+Memory: one `Int32` vector of capacity N per owning population, instead of `4 (Npre + Npost)` bytes per synapse. For T4 this
+is 16 N -> 4 N bytes: 160 kB -> 40 kB at N = 1e4, and 320 kB -> 80 kB at N = 2e4. `Base.summarysize(syn)` still counts the
+shared list, so the per-synapse footprint numbers do not change. The constructor allocates 8 N bytes less per synapse.
+
+Bit-identity against c5aac91 (`perf/pop_spikelist/out/check.md`): 20 configurations, each run at `-t 1` and at `-t 8` with
+`neurons_per_thread = 128` and `SYN_MIN_OPS[] = 0`. Each run hashes (SHA1) the final state of every population and synapse,
+the `:fire` record buffers and the raster. The configurations:
+- balanced E/I LIF at N = 2000: rec0, rec1, sorted subset, `hdelay`, STDP `train!` (rec0, rec1, with `hdelay`), Float64;
+- balanced E/I LIF at N = 10000: rec0, rec1;
+- AdEx at N = 2000 (rec0, rec1);
+- Tripod (NE = 400), HH (1000) and IZ (1000), each rec0 and rec1.
+
+Result: **40/40 identical** (after = ceb16d1, whose `src/` equals 78165d3).
+
+Benchmark (T4, K = 100, Float32, `CurrentSynapse`, Dirac 0.8 ms):
+- one thread pinned with `taskset -c 7` (core 7 and its sibling 19 were 95-100 % idle at the start and end of every cell);
+- host ld25-1001 (seroquel), 2026-10-11 22:42-23:05; load average 2.8-4.4 (1-minute load per process 2.7-4.6);
+- 3 processes x 3 repetitions per cell, with before/after processes alternated; IF N = 1e4 rec0 had 3 extra rounds because
+  its before processes disagreed;
+- simulated time 12-30 s, so each timed run lasts 3.4-4.5 s; compilation and build are excluded.
+
+ns per neuron-step: median of the process medians [min-max of the process medians]. after/before: ratio of the medians
+[range of the paired-round ratios].
+
+| cell | before | after | after/before |
+|---|---|---|---|
+| IF N=1e4 rec0 (6 processes) | 1.199 [1.154-1.233] | 1.139 [1.105-1.147] | 0.950 [0.921-0.994] |
+| IF N=1e4 rec1 | 1.425 [1.413-1.428] | 1.208 [1.195-1.215] | 0.848 [0.839-0.855] |
+| IF N=2e4 rec0 | 1.302 [1.301-1.331] | 1.222 [1.201-1.239] | 0.938 [0.923-0.939] |
+| IF N=2e4 rec1 | 1.365 [1.348-1.371] | 1.256 [1.256-1.286] | 0.920 [0.916-0.954] |
+| AdEx N=1e4 rec0 | 3.202 [3.190-3.274] | 3.141 [3.116-3.148] | 0.981 [0.961-0.985] |
+| AdEx N=1e4 rec1 | 3.276 [3.270-3.279] | 3.160 [3.149-3.207] | 0.965 [0.961-0.981] |
+| IF N=1e4 STDP `train!` rec0 | 1.822 [1.815-1.879] | 1.743 [1.725-1.757] | 0.956 [0.935-0.956] |
+
+Recording overhead rec1/rec0 (ratio of the medians [range of the per-round ratios]); Auryn and Brian2 values from the T4
+campaign (`perf/out/t4.csv`):
+
+| | before | after | Auryn | Brian2 |
+|---|---|---|---|---|
+| IF N=1e4 | 1.19 [1.15-1.23] | 1.06 [1.04-1.07] | 1.08 | 0.99 |
+| IF N=2e4 | 1.05 [1.03-1.05] | 1.03 [1.01-1.05] | 1.08 | 0.99 |
+| AdEx N=1e4 | 1.02 [1.00-1.03] | 1.01 [1.00-1.02] | - | - |
+
+- All 24 paired before/after processes favour after; the largest paired ratio is 0.994. Every acceptance criterion of the
+  manifest is met: rec0 <= 1.00, rec1 <= 0.97 at IF N = 1e4, no cell slower, rec1/rec0 after <= before.
+- The gains are larger than the manifest estimate (3.5 % rec0 / 7 % rec1). How large they are is uncertain where the spread
+  is large. IF N = 1e4 rec0 before has a 6.6 % spread between processes (the repetitions inside one process agree within
+  0.2-1.8 %), so its 5 % gain could be anywhere from about 1 % to 8 %. The rec1/rec0 improvement at N = 2e4 and for AdEx is
+  within the round spread. The clear effects are the absolute rec1 times (-8 % to -15 % for IF) and the IF rec0 times at
+  N = 2e4 (-6 %).
+- Absolute values are lower than in the record_fix benchmark (1.14-1.23 here against 1.49 for IF N = 1e4 rec0). That run
+  was in a different session, at a higher load, on another core, with 10 s simulated. Compare ratios, not absolute values.
+- Spike counts in the timed rec1 runs are identical before/after (IF N = 1e4 2028745, N = 2e4 2026592, AdEx 1319787).
+- Scripts, CSVs, README and figure: `papers/JuliaSNN_publication/validation/profilation_v1.10/perf/pop_spikelist/`
+  (`scripts/pl_balanced.jl`, `run_pl.py`, `pl_tables.py`, `plot_pl.jl`; bit-identity `run_pl_check.py`, `pl_check.jl`,
+  `pl_hash.jl`; `out/summary.csv`, `out/overhead.csv`, `out/time.csv`, `out/uptime.txt`, `out/check.csv`/`check.md`;
+  `fig/F_pop_spikelist.png`/`.pdf`).
+
+Files:
+- `src/populations/spike_index.jl`: `owned`, `owned_spike_index`, the window functions, docstrings;
+- the nine population files: one field and one docstring line each;
+- `src/populations/populations.jl`: the Union, `spike_index`, publish/retire for the owners;
+- `src/utils/main.jl`: publish after `integrate!`, retire at the end of the step and in `finally`, docstrings;
+- `src/utils/record.jl`: the owner method of `_recording_spike_index`, `_fire_step_list`, `_has_step_list`;
+- tests: `test/syn/population_spike_list.jl` (new, L1-L14) and `test/utils/record_spikeindex_test.jl` (T9).
+
 ### Known limitations
 - A record closed by a switch (rule variable the new rule does not have) is not reopened by a later switch; re-monitoring the
   same key needs `clear_records!`/`clear_monitor!` first. `records` is shared, so the source synapse stops sampling it too.
@@ -1004,7 +1131,9 @@ recording overhead rec1/rec0 (`:fire` of E and I / nothing recorded); Auryn, Bri
   count and it is the dense reference of the event rule) and the traces of `ActivityDependentTurnover` (read once per
   turnover period) are lazy-able and not converted.
 - The sparse hand-off needs every writer of an `Identity` to be a `SpikeTimeStimulus` (any other writer, such as a connection or
-  a stimulus without a log, makes the population use the dense update; results are the same, only slower). Other populations (`Poisson`, `IF`, ...) do not keep a spike list: their synapses scan `fire` once per step.
+  a stimulus without a log, makes the population use the dense update; results are the same, only slower). Cases that still scan `fire` once per connection and step: the Poisson family in the dense regime (`fed = false`) and an
+  `Identity` that is not driven by list-aware stimuli. The integrate-and-fire family scans once per step (see "One spike list
+  per population").
 - Models and JLD2 files saved with 1.9.1 or earlier are refused by `load_model`/`load_data`/`SNNload` with an `ArgumentError`
   (see Breaking changes); direct `JLD2.load` of such a file returns placeholder objects.
 - If the delay buffer is resized (`dt` or delays changed while spikes are in flight), the queued increments are
@@ -1020,10 +1149,11 @@ recording overhead rec1/rec0 (`:fire` of E and I / nothing recorded); Auryn, Bri
 - JLD2 upgrade (typemap `Upgrade`) so that models saved with 1.9.1 load.
 - Parallel plasticity (partition by postsynaptic neuron for the post pass, by presynaptic neuron for the pre pass).
 - Integer clock (`wip-clock`).
-- A spike list owned by the integrate-and-fire family (`IF`, `AdEx`, `Tripod`, `HH`, `IZ`, ...), built in the threshold loop and
-  shared with the connections through `spike_index(p)`: recording would become O(spikes) for every type (today these types
-  pay an N/8-word flag scan per step, about 0.1 ns per neuron) and the connections' own scans of `fire` would go too.
-  Touches the population files, to be coordinated with `dev-popfix`.
+- `SpikingSynapse` docstring: it still describes `pre_spikes`/`post_spikes` as scratch lists (spiking_synapse.jl:158). To be
+  updated after the dev-chplast merge, which edits that file. The population-owned list itself is done (see "One spike list
+  per population"); it is built by one flag scan per step, not in the threshold loop.
+- Optional: owned lists for the Poisson family in the dense regime and for an undriven `Identity`. These still scan once per
+  connection.
 - Documentation pages of SpikingNeuralNetworks that still describe `change_plasticity!`/`update_plasticity!` as
   replacing a rule of any type (`docs/src/plasticity.md`, `docs/src/catalogue/connections.md`) and the delay queue entry
   of `claude/performance.md` ("Remaining known performance issues"); release notes entry (with the breaking-changes
