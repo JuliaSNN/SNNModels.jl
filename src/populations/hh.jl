@@ -54,6 +54,7 @@ end
     ge::VFT = (1.5randn(N) .+ 4) .* 10nS
     gi::VFT = (12randn(N) .+ 20) .* 10nS
     fire::VBT = zeros(Bool, N)
+    spikes::SpikeIndex = owned_spike_index(N)
     I::VFT = zeros(N)
     records::Dict = Dict()
 end
@@ -124,6 +125,8 @@ test `v > -20mV`, true for every step above -20 mV, i.e. several flags per actio
 - `ge = (1.5randn(N) .+ 4) .* 10nS`, `gi = (12randn(N) .+ 20) .* 10nS`: synaptic conductances
   (nS), random initial values.
 - `fire::Vector{Bool}`; `I`: external current (pA); `records::Dict`.
+- `spikes::SpikeIndex`: ascending list of the neurons that fired in the step, owned by the population and shared by its
+  connections and recorder (see `spike_index`).
 
 # References
 The code links only the Wikipedia page of the Hodgkin-Huxley model. Canonical model:

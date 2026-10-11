@@ -99,6 +99,8 @@ between spikes.
 - `w_s::VFT`: somatic adaptation current (pA).
 - `Is`, `Id::VFT`: external currents into the soma and the dendrite (pA), zeros.
 - `fire::VBT`, `tabs::VFT`, `θ::VFT`: spike flags, refractory counters (steps), dynamic threshold (mV).
+- `spikes::SpikeIndex`: ascending list of the neurons that fired in the step, owned by the population and shared by its
+  connections and recorder (see `spike_index`).
 
 ## Synapses
 - `synvars_s`, `synvars_d`: synaptic state variables; `receptors_s`, `receptors_d::NamedTuple`: input buffers.
@@ -163,6 +165,7 @@ BallAndStick
 
     # Spike model and threshold
     fire::VBT = zeros(Bool, N)
+    spikes::SpikeIndex = owned_spike_index(N)
     tabs::VFT = zeros(Int, N)
     θ::VFT = ones(N) * adex.Vt
     records::Dict = Dict()

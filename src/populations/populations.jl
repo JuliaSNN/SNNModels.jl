@@ -166,6 +166,28 @@ include("multicompartment/tripod.jl")
 include("multicompartment/ballandstick.jl")
 # include("multicompartment/multipod.jl")
 
+## Spike lists owned by the integrate-and-fire family
+# Populations that keep only their `fire` flags and own one `SpikeIndex` (field `spikes`, `owned_spike_index`), shared
+# by every `SpikingSynapse` that reads them and by their `:fire` recorder (`_recording_spike_index`). The set is written
+# once here; a population type added later and not listed falls back to a new list per connection (correct, slower).
+const _OWNED_LIST_POPULATIONS = Union{IF,AdEx,ExtendedIF,HetRec,Tripod,BallAndStick,HH,IZ,MorrisLecar}
+
+spike_index(p::_OWNED_LIST_POPULATIONS) = getfield(p, :spikes)
+
+function _publish_spikes!(p::_OWNED_LIST_POPULATIONS)
+    s = getfield(p, :spikes)
+    s.active = true
+    s.valid = false
+    return nothing
+end
+
+function _retire_spikes!(p::_OWNED_LIST_POPULATIONS)
+    s = getfield(p, :spikes)
+    s.active = false
+    s.valid = false
+    return nothing
+end
+
 ## Population constructor
 """
     Population(param; kwargs...)

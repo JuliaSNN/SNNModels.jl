@@ -109,6 +109,8 @@ After a spike the neuron is therefore clamped for `round(Int, τabs / dt) - 1` s
   `Float64` population (`param`, `synapse`, `spike`, the synaptic variables and receptor buffers follow; see `float_type`).
 - `w::VFT`: adaptation current (pA), zeros.
 - `fire::Vector{Bool}`: spike flags.
+- `spikes::SpikeIndex`: ascending list of the neurons that fired in the step, owned by the population and shared by its
+  connections and recorder (see `spike_index`).
 - `θ::VFT`: adaptive threshold of the exponential term (mV), initialised to `Vt`.
 - `tabs::Vector{Int}`: refractory counters (steps), ones.
 - `I::VFT`: external current (pA).
@@ -154,6 +156,7 @@ AdEx
     w::VFT = zeros(eltype(VFT), N) # Adaptation current
 
     fire::VBT = zeros(Bool, N) # Store spikes
+    spikes::SpikeIndex = owned_spike_index(N)
     θ::VFT = ones(eltype(VFT), N) .* param.Vt # Array with membrane potential thresholds
     tabs::VIT = ones(Int, N) # Membrane time constant
     I::VFT = zeros(eltype(VFT), N) # Current

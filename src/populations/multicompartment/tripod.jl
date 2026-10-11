@@ -99,6 +99,8 @@ between spikes.
   each of the two dendrites (pA).
 - `fire::VBT`: spike flags; `tabs::VFT`: refractory counters (steps); `θ::VFT`: dynamic
   threshold of the exponential term (mV), initialised to `Vt`.
+- `spikes::SpikeIndex`: ascending list of the neurons that fired in the step, owned by the population and shared by its
+  connections and recorder (see `spike_index`).
 
 ## Synapses
 - `synvars_s`, `synvars_d1`, `synvars_d2`: synaptic state variables (`synaptic_variables`).
@@ -174,6 +176,7 @@ Tripod
 
     # Spike model and threshold
     fire::VBT = zeros(Bool, N)
+    spikes::SpikeIndex = owned_spike_index(N)
     tabs::VFT = zeros(Int, N)
     θ::VFT = ones(N) * adex.Vt
     records::Dict = Dict()

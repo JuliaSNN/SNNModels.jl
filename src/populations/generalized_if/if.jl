@@ -108,6 +108,8 @@ Then, only if `τw > 0`, for every neuron `w += b` if it fired and
   follow (see `float_type`). Mixing precisions in one population is an `ArgumentError`.
 - `w::VFT`: adaptation current (pA), zeros.
 - `fire::Vector{Bool}`: spike flags of the last step.
+- `spikes::SpikeIndex`: ascending list of the neurons that fired in the step, owned by the population and shared by its
+  connections and recorder (see `spike_index`).
 - `tabs::Vector{Int}`: refractory counters (steps), ones.
 - `I::VFT`: external current (pA), zeros.
 - `syn_curr::VFT`: total synaptic current (pA).
@@ -149,6 +151,7 @@ IF
     v::VFT = param.Vr .+ rand(eltype(VFT), N) .* (param.Vt - param.Vr)
     w::VFT = zeros(eltype(VFT), N) # Adaptation current
     fire::VBT = zeros(Bool, N) # Store spikes
+    spikes::SpikeIndex = owned_spike_index(N)
     tabs::VIT = ones(Int, N) # Membrane time constant
     I::VFT = zeros(eltype(VFT), N) # Current
 
