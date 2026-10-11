@@ -193,7 +193,7 @@ end
     a = _fp_net(); b = _fp_net()
     c2 = with_plasticity(b.C[1]; LTP = STDPGerstner())
     c3 = with_plasticity(b.C[2]; STP = MarkramSTPParameter())
-    @test c2.W === b.C[1].W && c3.ρ === b.C[2].ρ
+    @test c2.W === b.C[1].W && length(c3.ρ) == length(c3.W) && isempty(b.C[2].ρ)   # ρ is new: the source is not modified
     @test b.C[1].LTPParam isa NoLTP && b.C[2].STPParam isa NoSTP
     sim!(a.P, a.C; duration = 50ms); sim!(b.P, b.C; duration = 50ms)
     @test _fp_state(a) == _fp_state(b)
