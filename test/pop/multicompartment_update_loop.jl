@@ -234,7 +234,8 @@ const _STAGE_ULPS = 4          # other targets: |Δv - Δv_ref| <= 4 ulp of the 
 const _STATE_RTOL = 3f-5       # other targets: potentials within 3e-5 relative after one whole step from the same state
 # x86-64 with hardware FMA: the target on which the `muladd` order of `update_neuron!` is the compiled order of the `@fastmath`
 # reference (checked on Sapphire Rapids, Julia 1.12), so the comparison is bit for bit.
-const _BITWISE = Sys.ARCH === :x86_64 && isdefined(Core.Intrinsics, :have_fma) && Core.Intrinsics.have_fma(Float32)
+# Pkg.test runs with --check-bounds=yes, which changes how the reference loop is compiled (no @inbounds, other fusion): bitwise only without it.
+const _BITWISE = Sys.ARCH === :x86_64 && isdefined(Core.Intrinsics, :have_fma) && Core.Intrinsics.have_fma(Float32) && Base.JLOptions().check_bounds != 1
 
 # Error of a Heun-stage derivative in units of the last place of its terms. The derivative is a sum of terms (leak, exponential,
 # adaptation, synaptic, axial, external) that cancel: an element-wise ulp distance of the result is unbounded near zero, while
