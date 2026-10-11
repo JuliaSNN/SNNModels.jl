@@ -17,7 +17,7 @@ a ring buffer indexed by arrival step: at the first `forward!` (and whenever `dt
 change) every delay is rounded up to a whole number of steps, `ceil(delay / dt)`, the first step
 whose time is not before the arrival time (so 0.8 ms at `dt = 0.125` ms arrives 7 steps later).
 A delay stored once (common to all synapses) is delivered through one ring column per step; without LTP and STP the spike lists
-are delayed instead (`spike_ring`, `W` read at arrival, the buffer has 0 rows); switching path drops the spikes in flight
+are delayed instead (`spike_ring`, `W` read at arrival, the buffer has 0 rows); switching path carries the spikes in flight over (ring to buffer column, buffer drained for `d` steps)
 (`delay_kernels.jl`).
 
 # Fields
@@ -29,6 +29,7 @@ are delayed instead (`spike_ring`, `W` read at arrival, the buffer has 0 rows); 
 - `dt::Vector{FT}`: the step `delaysteps` was computed for (`NaN` before the first `forward!`).
 - `pos::Vector{Int}`: ring slot (0-based) of the current step.
 - `spike_ring::Vector{Vector{Int32}}`: without plasticity and with a delay of `d` steps stored once, the spike lists of the last `d + 1` steps (delayed instead of the increments).
+- `drain::Vector{Int}`: steps left to deliver increments still in the buffer after a switch from the buffer path to the spike-list path.
 """
 SpikingSynapseDelayParameter
 
@@ -40,6 +41,7 @@ const SpikeRing = Vector{Vector{Int32}}   # spike lists of the delayed constant-
     dt::VFT = [eltype(delaytime)(NaN)]
     pos::VPT = [0]
     spike_ring::SpikeRing = Vector{Int32}[]
+    drain::VPT = [0]
 end
 
 # Round the delays to steps of `dt` (up) and size the ring buffer; a no-op while `dt` and the delays are unchanged.
@@ -579,7 +581,7 @@ function forward!(c::SpikingSynapse, param::SpikingSynapseDelayParameter, dt::Ab
     Npost = length(c.fireI)
     _delay_steps!(param, dt, Npost)
     _use_spike_ring(c) && return _forward_spike_ring!(c, param, Npost)   # constant delay, no plasticity (delay_kernels.jl)
-    _delay_buffer!(param, Npost)
+    _delay_buffer!(c, param, Npost)
     @unpack delaysteps, buffer = param
     nslots = size(buffer, 2)
     pos = param.pos[1]

@@ -62,14 +62,21 @@ function _forward_spike_ring!(c::SpikingSynapse, param::SpikingSynapseDelayParam
     @unpack colptr, I, W, g = c
     ring = param.spike_ring
     nslots = _dconst(param) + 1
-    # no buffer rows on this path; pending increments of the buffer path (plasticity switched off) are dropped, never delivered later
-    size(param.buffer, 1) == 0 || (param.buffer = zeros(eltype(param.buffer), 0, size(param.buffer, 2)))
-    if length(ring) != nslots          # first call, new delay in steps or back from the buffer path: empty ring (spikes in flight dropped)
+    if length(ring) != nslots          # first call or new delay in steps: empty ring (spikes in flight dropped, as the buffer)
         resize!(ring, nslots)
         for k in eachindex(ring)
             ring[k] = Int32[]
         end
-        param.pos[1] = 0
+    end
+    # increments still in flight in the buffer (plasticity switched off with `without_plasticity`): delivered on their arrival step
+    # (`pos` is common to the buffer columns and the ring slots), then the buffer is released
+    buf = param.buffer
+    if size(buf, 1) > 0 && param.drain[1] == 0     # fresh from the buffer path: the d columns ahead hold increments
+        if nslots > 1
+            param.drain[1] = nslots - 1
+        else
+            param.buffer = zeros(eltype(buf), 0, nslots)
+        end
     end
     pos = param.pos[1]
     spikes = presynaptic_spikes(c)
@@ -80,6 +87,14 @@ function _forward_spike_ring!(c::SpikingSynapse, param::SpikingSynapseDelayParam
     arr = ring[nxt+1]                  # emitted d steps ago ((pos - d) mod nslots); `cur` itself when d == 0
     ptr = _syn_chunk_ptr(c.chunkptr, Npost, colptr, I, arr)
     _ring_deliver!(g, W, _efficacy_or_nothing(c), I, colptr, ptr, arr, Npost)   # function barrier on the efficacy
+    if param.drain[1] > 0
+        @inbounds @simd for i ∈ 1:size(buf, 1)
+            g[i] += buf[i, pos+1]
+            buf[i, pos+1] = 0
+        end
+        param.drain[1] -= 1
+        param.drain[1] == 0 && (param.buffer = zeros(eltype(buf), 0, nslots))
+    end
     return param.pos[1] = nxt
 end
 
@@ -100,9 +115,30 @@ end
 
 # Buffer path: allocate the `Npost` rows of the buffer (`_delay_steps!` only sets the number of columns) and drop the spike lists of
 # the spike-list path (plasticity switched on with `with_plasticity`): the two paths never hold spikes in flight at the same time.
-@inline function _delay_buffer!(param::SpikingSynapseDelayParameter, Npost::Int)
+# The spikes in flight of the spike-list path (emitted `a = 1..d` steps ago, arriving in `d - a` steps) are moved into the buffer column of
+# their arrival with the weight `W` they have now (the one the spike-list path reads at arrival); the buffer content still pending from a
+# previous drain stays where it is (`pos` is common to the buffer columns and the ring slots).
+@inline function _delay_buffer!(c::SpikingSynapse, param::SpikingSynapseDelayParameter, Npost::Int)
     size(param.buffer, 1) == Npost || (param.buffer = zeros(eltype(param.buffer), Npost, size(param.buffer, 2)))
-    isempty(param.spike_ring) || empty!(param.spike_ring)
+    param.drain[1] = 0
+    ring = param.spike_ring
+    if !isempty(ring)
+        ns = size(param.buffer, 2)
+        if length(ring) == ns && Npost > 0
+            @unpack colptr, I, W = c
+            buffer, pos = param.buffer, param.pos[1]
+            for a ∈ 1:(ns-1)
+                list = ring[mod(pos - a, ns)+1]
+                off = mod(pos + ns - 1 - a, ns) * Npost       # column pos + d - a, d = ns - 1
+                @inbounds for j ∈ list
+                    for s ∈ colptr[j]:(colptr[j+1]-1)
+                        buffer[off+I[s]] += W[s]
+                    end
+                end
+            end
+        end
+        empty!(ring)
+    end
     return nothing
 end
 

@@ -378,8 +378,9 @@ Each item gives the migration.
   step are added to `g` one at a time (rounding differences of a few ulp, chaotic trajectories diverge after some hundred steps,
   statistics unchanged). Delays that differ between synapses, and synapses with LTP or STP, keep the buffer (increment at emission).
   Switching between the two paths with spikes in flight (`with_plasticity` installing or removing LTP/STP; the old and the new
-  connection share `param`) drops them: the ring is cleared when the buffer path runs and the buffer when the spike list runs, so a
-  spike is never delivered late. A change of `dt` that keeps the delay in steps keeps the spikes in flight (as the buffer); one that
+  connection share `param`) delivers each of them once: on the way to the buffer the pending lists are scattered into the columns of
+  their arrival step with the current `W` (no efficacy: they were emitted before the rule existed); on the way to the spike list the
+  buffer is kept and drained for `d` steps (`param.drain`) and then released. (Fix: the first 1.10 version dropped them.) A change of `dt` that keeps the delay in steps keeps the spikes in flight (as the buffer); one that
   changes it drops them (as the buffer, whose columns are rebuilt). After `update_sparse_matrix!` (rewiring) with the same delay in
   steps the spikes in flight are delivered through the new connectivity (targets and weights of the presynaptic neuron at arrival),
   where the buffer delivers the increments computed with the old one.

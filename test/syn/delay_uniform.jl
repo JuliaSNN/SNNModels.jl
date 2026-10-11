@@ -214,36 +214,46 @@ end
 
 # ---- switching between the spike-list path and the buffer path; dt changes and rewiring with spikes in flight ----
 # one spike of both presynaptic neurons at `fire_at`; returns the steps at which `g` was nonzero. `events[n]` is called before step n.
-function _du_arrivals(c, dts, fire_at; events = Dict{Int,Function}(), steps = length(dts))
+function _du_arrivals(c, dts, fire_at; events = Dict{Int,Function}(), steps = length(dts), vals = nothing)
     pre = c.fireJ; T = Time(); arr = Int[]
     for n in 1:steps
         haskey(events, n) && (c = events[n](c))
         pre .= (n in fire_at)
         update_time!(T, dts[n])
         _DU.forward!(c, c.param, dts[n], T)
-        any(!iszero, c.g) && (push!(arr, n); c.g .= 0)
+        any(!iszero, c.g) && (push!(arr, n); isnothing(vals) || push!(vals, copy(c.g)); c.g .= 0)
     end
     return arr, c
 end
 _du_mk(d; kw...) = SpikingSynapse(Identity(N = 2), Identity(N = 3), :g; conn = Float32[1 0; 0 2; 3 0], delay_dist = _DUD.Dirac(d), kw...)
 const _DU_STDP = _DU.STDPGerstner(A_pre = 0.0, A_post = 0.0)   # a rule that leaves W unchanged: only the path changes
 
-@testset "spike-list delay: switching the rule drops the spikes in flight, no phantom arrival" begin
+@testset "spike-list delay: switching the rule carries the spikes in flight over, each arrives once with its weight" begin
     sw(rule) = c -> _DU.with_plasticity(c; LTP = rule)
     dts = fill(0.1f0, 20)                                     # Dirac(0.5): 5 steps
-    # NoLTP -> STDP -> NoLTP with a spike in the ring (step 2) and one in the buffer (step 4)
-    arr, c = _du_arrivals(_du_mk(0.5), dts, (2, 4); events = Dict(3 => sw(_DU_STDP), 5 => sw(_DU.NoLTP())))
-    @test isempty(arr)
-    @test _DU._use_spike_ring(c) && size(c.param.buffer, 1) == 0     # no buffer rows on the spike-list path
-    # STDP -> NoLTP -> STDP with a spike in the buffer (step 2) and one in the ring (step 4)
-    arr, c = _du_arrivals(_du_mk(0.5; LTPParam = _DU_STDP), dts, (2, 4); events = Dict(3 => sw(_DU.NoLTP()), 5 => sw(_DU_STDP)))
-    @test isempty(arr)
+    Wsum = Float32[1, 2, 3]                                   # both presynaptic neurons fire: one W per target
+    # NoLTP -> STDP -> NoLTP, spike in the ring at the first switch (step 2), in the buffer at the second (step 4)
+    vals = Vector{Float32}[]
+    arr, c = _du_arrivals(_du_mk(0.5), dts, (2, 4); events = Dict(3 => sw(_DU_STDP), 5 => sw(_DU.NoLTP())), vals)
+    @test arr == [7, 9] && all(==(Wsum), vals)
+    @test _DU._use_spike_ring(c)
+    # the buffer path was drained d steps after the second switch and released
+    @test size(c.param.buffer, 1) == 0
+    # STDP -> NoLTP -> STDP, spike in the buffer at the first switch (step 2), in the ring at the second (step 4)
+    vals = Vector{Float32}[]
+    arr, c = _du_arrivals(_du_mk(0.5; LTPParam = _DU_STDP), dts, (2, 4); events = Dict(3 => sw(_DU.NoLTP()), 5 => sw(_DU_STDP)), vals)
+    @test arr == [7, 9] && all(==(Wsum), vals)
     @test !_DU._use_spike_ring(c) && isempty(c.param.spike_ring) && size(c.param.buffer) == (3, 6)
-    # after the switches the delay is unchanged: a new spike arrives once, 5 steps later
-    arr, _ = _du_arrivals(_du_mk(0.5), dts, (2, 12); events = Dict(3 => sw(_DU_STDP), 5 => sw(_DU.NoLTP())))
-    @test arr == [17]
-    arr, _ = _du_arrivals(_du_mk(0.5; LTPParam = _DU_STDP), dts, (2, 12); events = Dict(3 => sw(_DU.NoLTP()), 5 => sw(_DU_STDP)))
-    @test arr == [17]
+    # a switch on the very step of the emission, on the arrival step, and with a train of spikes
+    for (fire_at, sws) in (((2,), (2, 7)), ((2, 3, 5, 6), (4, 7, 9)), ((1, 2, 3, 4, 5, 6, 7, 8), (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)))
+        # alternate the rule at every step of `sws`, starting with `first`
+        ev(first, other) = Dict(n => sw(isodd(k) ? first : other) for (k, n) in enumerate(sws))
+        ref, _ = _du_arrivals(_du_mk(0.5), dts, fire_at)
+        r1, _ = _du_arrivals(_du_mk(0.5), dts, fire_at; events = ev(_DU_STDP, _DU.NoLTP()))
+        r2, _ = _du_arrivals(_du_mk(0.5; LTPParam = _DU_STDP), dts, fire_at; events = ev(_DU.NoLTP(), _DU_STDP))
+        @test r1 == ref && r2 == ref
+        @test ref == sort(unique(fire_at .+ 5))
+    end
 end
 
 @testset "spike-list delay: dt change with spikes in flight, as the general path" begin

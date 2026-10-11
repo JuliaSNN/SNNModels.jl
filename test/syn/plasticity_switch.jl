@@ -117,12 +117,14 @@ function _ps_roundtrip(i, r1, r2; FT = Float32, delay = nothing, alt = false)
     never = _ps_net(; FT, delay)
     _ps_sim!(never, 20ms)
     @test typeof(off) === typeof(never.C[i])
-    @test _ps_bps(off) <= _ps_bps(never.C[i]) + 0.05
-    @test _ps_bps(off) < _ps_bound(delay, FT)
-    @test _ps_bps(off) < _ps_bps(on)
     a.C[i] = off
     X = _ps_rebuilt(a, i)
     _ps_train!(a, 50ms); _ps_train!(X, 50ms)
+    # footprint once the increments of the buffer path still in flight at the switch have arrived (a delayed synapse delivers them
+    # for d steps and then releases the buffer)
+    @test _ps_bps(off) <= _ps_bps(never.C[i]) + 0.05
+    @test _ps_bps(off) < _ps_bound(delay, FT)
+    @test _ps_bps(off) < _ps_bps(on)
     @test off.W == Wfinal
     @test _ps_state(a) == _ps_state(X)
     _ps_sim!(a, 20ms); _ps_sim!(X, 20ms)
