@@ -19,7 +19,7 @@ carries the morphology only; the somatic parameters are in the population field 
 # Fields
 - `ds::DT = [(200um, 400um), (200um, 400um)]`: one entry per dendrite, either a length (cm)
   or a `(min, max)` range from which `create_dendrite` draws the length of each neuron.
-- `physiology::PT = human_dend`: cable properties (`Physiology`).
+- `physiology::PT = human_dend`: cable properties (`Physiology`: `Ri`, `Rd`, `Cd`), used by `Tripod` and `BallAndStick` to build their dendrites (since 1.10; earlier versions always used `human_dend`).
 - `geometry::GT = [(:s=>:d1), (:s=>:d2)]`: connectivity of the compartments. Stored for
   bookkeeping; `Tripod` and `BallAndStick` hard-code soma-dendrite coupling.
 - `type::NT`: `BallAndStickNeuron()` if `length(ds) == 1`, `TripodNeuron()` if

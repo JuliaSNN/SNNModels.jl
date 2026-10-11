@@ -362,6 +362,15 @@ Each item gives the migration.
 - `fed_spike_index(N)` and `spike_index(::PoissonStimulusLayer)` (not exported): the list of the layer neurons that fired.
 - Tests: `test/syn/spike_index.jl`, `test/syn/spike_handoff.jl`, `test/syn/lazy_traces.jl`, `test/syn/lazy_traces_euler.jl`, `test/stim/poisson_sparse.jl`.
 
+### Bug fixes
+
+- `Tripod` and `BallAndStick` now build their dendrites with `param.physiology` (`DendNeuronParameter.physiology`, `Ri`, `Rd`, `Cd`). Before they
+  called `create_dendrite` without it and always used the default `human_dend`, whatever the parameter held (in Float32 and in the decimal Float64
+  path alike). Behaviour change only for users who passed a non-default physiology (e.g. `mouse_dend`, `Rd = 1700 Ω cm²`, `Cd = 1 μF/cm²`): their
+  dendrites now get the constants they asked for. The default is `human_dend` and is unchanged: the state of default `Tripod` and `BallAndStick`
+  is bit-identical over 2000 steps (SHA1 of every array field, Float32 and Float64, `-t 1` and `-t 8`). No compatibility shim. Test:
+  `test/pop/dendrite.jl` (dendrite arrays equal `create_dendrite` of the physiology, `mouse_dend` against `human_dend`, Float32 and Float64, still spikes).
+
 ### Behaviour notes
 - Constant delays without plasticity (`NoLTP`, `NoSTP`, a delay stored once for all synapses, e.g. `Dirac`) deliver the spike list
   emitted `d` steps ago (see Performance): the weight `W` is read at arrival, not at emission, so a weight changed in between by
@@ -657,8 +666,7 @@ no global flag, no separate precision argument.
     Float32 lengths and the RNG states are equal. Test: every default reachable from a Float64 population of every model, and from every Float64 synapse model and
     parameter type, is checked not to be a Float32-rounded value. Still `Float32`-rounded in a Float64 model: values the user writes
     with the inexact unit constants (`10Hz`, `150um` outside the dendrite lengths) and any non-predefined `Float32` object converted with
-    `convert_precision` (converted value by value), the `Float32` field `Tripod.Vspike`. Not changed (found while checking): `Tripod` and
-    `BallAndStick` build their dendrites with the default `physiology = human_dend` and ignore `param.physiology`, as before 1.10.
+    `convert_precision` (converted value by value), the `Float32` field `Tripod.Vspike`.
   - Steps of another precision (review round 1). Every population model with a Float64 method converts a `dt` of another type to
     `float_type(p)` at the top of `integrate!` (as `IF`/`AdEx` through the generalized-IF `integrate!`, `Tripod`, `BallAndStick`, the point
     models and the Poisson family alike): `integrate!(p, p.param, 0.1)` on a Float32 population steps with `0.1f0`, a Float64 population
