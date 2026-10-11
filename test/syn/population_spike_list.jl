@@ -259,7 +259,7 @@ end
     @test _PL._retire_spikes!(E) === nothing
     @test !E.spikes.active && !E.spikes.valid
     @test _PL.spike_list!(E.spikes, E.fire) == [1, 2, 3, 5, 6]
-    Pn = Poisson(N = 3)                              # generic no-ops
+    Pn = SNNModels.Poisson(N = 3)                              # generic no-ops
     @test _PL._publish_spikes!(Pn) === nothing && _PL._retire_spikes!(Pn) === nothing
     _PL._publish_spikes!(E)
     @test _PL._retire_all_spikes!(_PL.AbstractPopulation[E, Pn]) === nothing
@@ -317,7 +317,7 @@ end
         @test net.c.pre_spikes === p.spikes && net.c.post_spikes === p.spikes
     end
     # Identity and Poisson unchanged: their own (fed) list
-    Pn = Poisson(N = 8); Id = Identity(N = 8)
+    Pn = SNNModels.Poisson(N = 8); Id = Identity(N = 8)
     sP = SpikingSynapse(Pn, E, :ge; conn = (p = 0.5, μ = 1.0))
     sI = SpikingSynapse(Id, E, :ge; conn = (p = 0.5, μ = 1.0))
     @test sP.pre_spikes === Pn.spikes && sI.pre_spikes === Id.spikes
