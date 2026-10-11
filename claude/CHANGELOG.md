@@ -575,10 +575,17 @@ no global flag, no separate precision argument.
   known limitation below is now real; not fixed here (outside job 2). The suite was run with OrderedCollections pinned to 1.8.2
   in a scratch copy of the test environment.
 
+### `compose` without `sort(::Dict)` (branch dev-diag, pre-1.10 diagnostics, job 3 task 0)
+- `compose` (`utils/util.jl`) and `population_indices`, `filter_items`, `subpopulations` (`analysis/populations.jl`) built
+  their `NamedTuple` with `dict2ntuple(sort(d; by))`, i.e. the `sort(::Dict)` method that OrderedCollections 1.x added to
+  `Base.sort` (deprecated there, removed in OrderedCollections 2.0). A fresh resolve now picks OrderedCollections 2.0.2 and
+  `compose` threw (86 errored tests). New internal helper `sorted_ntuple(d; by = identity)`: sorts the keys with `by`
+  (applied to the keys, as before), converts `String` keys to `Symbol` and returns the `NamedTuple` in that order, so the
+  returned objects are unchanged (same key order, same value types; ties of `by` keep the `Dict` iteration order as the
+  stable `sortperm` of the old method did). No new dependency.
+- Full suite `-t 1` in a freshly resolved copy of `test/Project.toml` (OrderedCollections 2.0.2): 74620 / 74620.
+
 ### Known limitations
-- `SNNModels.compose` (`utils/util.jl:212-214`) calls `sort(::Dict; by)`, a deprecated method that OrderedCollections adds
-  to `Base.sort` (warning "`sort(d::Dict; args...)` is deprecated" in the SNNPlots/SNNUtils test runs); SNNModels does not
-  depend on OrderedCollections directly, so a release of OrderedCollections that drops the method breaks `compose`.
 - `iSTDPPotential` and the dense vSTDP are not converted (the event-driven vSTDP keeps the postsynaptic filters per step, O(Npost)): their postsynaptic filters follow the membrane potential at every step
   (class C, see "Lazy classification of the plasticity rules"); `SpikeRateSynapse` keeps its dense scans. The clock-driven
   `MarkramSTPParameterTimestep` (lazy-able with the Euler factor per elapsed step, but that needs a dt-aware elapsed step

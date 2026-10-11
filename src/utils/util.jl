@@ -158,6 +158,19 @@ str_name(pre::String, k = nothing) = isnothing(k) ? "$pre" : "$(pre)_$(k)"
 
 
 """
+    sorted_ntuple(d::AbstractDict; by = identity)
+
+`NamedTuple` with the entries of `d` ordered by `sort(keys; by)` (the function `by` is applied to
+the keys). `String` keys are converted to `Symbol`. Same result as
+`DrWatson.dict2ntuple(sort(d; by))` with OrderedCollections 1.x, which provided `sort(::Dict)`;
+OrderedCollections 2 removed that method.
+"""
+function sorted_ntuple(d::AbstractDict; by = identity)
+    ks = sort!(collect(keys(d)); by = by)
+    return NamedTuple{Tuple(Symbol.(ks))}(Tuple(d[k] for k in ks))
+end
+
+"""
     compose(args...; name = randstring(10), silent = false, time = nothing, kwargs...)
 
 Assemble populations, connections and stimuli (or whole models) into one network model.
@@ -209,9 +222,9 @@ function compose(args...; name = randstring(10), silent = false, time = nothing,
         v isa Time && continue
         extract_items(k, v, pop = pop, syn = syn, stim = stim, time = time)
     end
-    pop = DrWatson.dict2ntuple(sort(pop, by = x -> x))
-    syn = DrWatson.dict2ntuple(sort(syn, by = x -> x))
-    stim = DrWatson.dict2ntuple(sort(stim, by = x -> stim[x].name))
+    pop = sorted_ntuple(pop)
+    syn = sorted_ntuple(syn)
+    stim = sorted_ntuple(stim, by = x -> stim[x].name)
     time = isnothing(time) ? Time{_model_float(values(pop))}() : time
     model = (pop = pop, syn = syn, stim = stim, name = name, time = time)
     if !silent

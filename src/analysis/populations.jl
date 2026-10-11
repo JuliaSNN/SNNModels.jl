@@ -22,7 +22,7 @@ function population_indices(P)
         indices[k] = n:(n+p.N-1)
         n += p.N
     end
-    return dict2ntuple(sort(indices))
+    return sorted_ntuple(indices)
 end
 
 no_noise(p) = !occursin(string("noise"), string(p.name))
@@ -45,7 +45,7 @@ function filter_items(P; condition::Function = no_noise)
         p = getfield(P, k)
         push!(populations, k => p)
     end
-    return dict2ntuple(sort(populations, by = x -> getfield(P, x).name))
+    return sorted_ntuple(populations, by = x -> getfield(P, x).name)
 end
 
 
@@ -71,7 +71,7 @@ function subpopulations(stim, subset=nothing)
         !isnothing(subset) && !(string(name) ∈ subset) && continue
         populations[name] = vcat(neurons(getfield(stim, key))...) |> unique |> collect
     end
-    return dict2ntuple(sort(populations))
+    return sorted_ntuple(populations)
 end
 
 """
