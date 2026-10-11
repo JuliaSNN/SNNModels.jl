@@ -511,7 +511,40 @@ no global flag, no separate precision argument.
   (event), against 2.4e-6 / 2.9e-6 between them in Float32: the Float32 difference is the accumulation error of the dense rule (hypothesis confirmed).
   Float64 costs 13 % on the dense rule at 1e4 synapses (2.09 s against 1.88 s, unpinned) and nothing measurable on the event-driven one.
 
+### Dependencies: unused packages removed (branch dev-diag, pre-1.10 diagnostics, job 1)
+- Removed from `[deps]`/`[compat]` of `Project.toml` (13): `Documenter` (no docs build in this package; the
+  SpikingNeuralNetworks docs environment has its own), `BenchmarkTools` and `Revise` (only in standalone scripts
+  `test/simulation_speed.jl`, `test/pop/multipod.jl`, `_new_feats/`, not run by `runtests.jl`), `Printf` (test only, already
+  in `test/Project.toml`), `ColorSchemes`, `IterTools`, `Parameters` (`@with_kw` only in `sparse_plasticity/dump.jl`, which is
+  not included; `@unpack` comes from `UnPack`), `Profile`, `Requires` (no `@require`), `Roots` (only before commented-out code
+  in `utils/sparse_matrix.jl`), `SGtSNEpi`, `StaticArrays`, `TimerOutputs`. The matching `using` lines were removed from
+  `src/SNNModels.jl`, `src/utils/spatial.jl`, `src/utils/sparse_matrix.jl`, `src/connections/sparse_plasticity/CaRule.jl`.
+  No code path changes; 20 runtime dependencies remain.
+- `test/Project.toml`: `SHA` added (`test/threading_synapses.jl` does `using SHA`; the testset errored with "Package SHA not
+  found" on 6b7addc as well).
+- Measured (`papers/JuliaSNN_publication/validation/profilation_v1.10/perf/pre110_diag/job1_load.csv`, `job1_load.jl`;
+  core 8, `-t 1`, median of 3, precompiled): `julia -e 'using SNNModels'` wall 2.58 s to 2.03 s (bare Julia 0.19 s),
+  VmRSS after `using` 582 MB to 515 MB (bare 221 MB). Packages in the resolved manifest 190 to 138 (`job1_manifest_counts.csv`).
+  Most of the gain is the Documenter tree (Documenter, REPL, `Pkg -> REPLExt`, JSON, Parsers, Git: about 360 of the 392 ms of
+  `@time_imports` entries that disappear, `job1_time_imports_diff.csv`).
+- Per direct dependency (fresh process `using Dep`, `job1_deps.csv`; trees overlap, so these do not add up): load time
+  over bare Documenter 0.68 s, SGtSNEpi 0.60 (was never loaded by SNNModels), DrWatson 0.52, JLD2 0.50, DSP 0.43,
+  MetaGraphs/Graphs 0.39, Interpolations 0.34, Distributions 0.33, LoopVectorization 0.28 s; RSS over bare Documenter
+  +204 MB, DrWatson +162 (pulls in Pkg), DSP +128, JLD2 +127, MetaGraphs +119, LoopVectorization +111, Distributions
+  +106, Interpolations +95 MB. Heavy runtime dependencies left for the maintainer to decide on: DrWatson (`savename`, `@strdict`,
+  `dict2ntuple`, `save`/`load` in `utils/io.jl`), DSP (`conv`, `xcorr` in the analysis), Graphs/MetaGraphs (`graph(model)` only), JLD2.
+- Other packages, `Project.toml` only, each on its own `dev-diag` branch (worktrees `src/snnplots_diag`, `src/snnutils_diag`,
+  `src/snnrl_diag`): SNNPlots drops `Plots` (only in files that are not included: `old_plot.jl`, `backend/plots.jl`), `DrWatson`
+  and `Colors` (not used), and moves `CairoMakie` (used only by the tests and in docstring examples) to `[extras]`/`[targets]`;
+  SNNUtils drops `Dates`, `Interpolations`, `JLD2`, `Requires` (used only in files that are not included, or not at all;
+  `HDF5` stays: `DrWatson.save` of `.h5` files loads it through FileIO); SNNRL moves `ReinforcementLearning` and
+  `ReinforcementLearningTrajectories` (used only by `examples/1d_RW.jl`) to a new `examples/Project.toml`. SpikingNeuralNetworks,
+  CalciumSpike, OptunaLoader: no change (all dependencies used by the loaded source).
+
 ### Known limitations
+- `SNNModels.compose` (`utils/util.jl:212-214`) calls `sort(::Dict; by)`, a deprecated method that OrderedCollections adds
+  to `Base.sort` (warning "`sort(d::Dict; args...)` is deprecated" in the SNNPlots/SNNUtils test runs); SNNModels does not
+  depend on OrderedCollections directly, so a release of OrderedCollections that drops the method breaks `compose`.
 - `iSTDPPotential` and the dense vSTDP are not converted (the event-driven vSTDP keeps the postsynaptic filters per step, O(Npost)): their postsynaptic filters follow the membrane potential at every step
   (class C, see "Lazy classification of the plasticity rules"); `SpikeRateSynapse` keeps its dense scans. The clock-driven
   `MarkramSTPParameterTimestep` (lazy-able with the Euler factor per elapsed step, but that needs a dt-aware elapsed step

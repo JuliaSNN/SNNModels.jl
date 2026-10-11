@@ -278,7 +278,6 @@ function has_plasticity(synapse::AbstractConnection)
 end
 # """function dsparse
 
-using SpecialFunctions, Roots
 
 # function gamma_for_mean(μ::Float64, kmin::Int=1; γ_max::Float64=5.0)
 #     # Define the function to find the root of

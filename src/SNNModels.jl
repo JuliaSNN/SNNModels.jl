@@ -18,15 +18,10 @@ import Dates: now
 using JLD2
 using LinearAlgebra
 using SparseArrays
-using Requires
-using Documenter
-using IterTools
 using UnPack
 using Random
 using Logging
-using StaticArrays
 using ProgressBars
-using Parameters
 using LoopVectorization
 using ThreadTools
 using Polyester
