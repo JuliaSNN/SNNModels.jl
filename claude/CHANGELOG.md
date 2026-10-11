@@ -603,11 +603,11 @@ its per-step work, and gives the same run as a synapse rebuilt by the constructo
   1.603 (`train!`) / 1.547 (`sim!`), plastic 2.123, switched off 1.525, rebuilt by the constructor 1.547; B/syn network 9.24 / EE
   8.77 for never, off and rebuilt, 14.49 / 16.97 plastic. Switched off and rebuilt fire identically (535904 E / 134448 I spikes in
   the timed window). Scripts, CSV, figure: `papers/JuliaSNN_publication/validation/profilation_v1.10/perf/plasticity_switch/README.md`.
-- Tests: `test/syn/plasticity_switch.jl` (432): round trip on, off, on again for pair, triplet, weight-dependent, event and dense
+- Tests: `test/syn/plasticity_switch.jl` (434): round trip on, off, on again for pair, triplet, weight-dependent, event and dense
   vSTDP, iSTDPRate, Markram event/timestep and pair STDP + Markram (no delay, Dirac, heterogeneous delays) against twins built by
   the constructor; the source of a switch still simulates as an untouched twin; records across the switch; Float64; threaded vs
   serial; normalization and `presynaptic` build `J`/`index` at use; the early return. `test/syn/synapse_footprint.jl`: one assertion
-  that encoded the old aliasing of `ρ` updated. Full suite (fresh resolved test env, Julia 1.12.6): `-t 1` 75146 pass, 0 fail, 0 error (baseline 48c60eb, run from a git-archive snapshot: 74711 pass, 1 fail, 1 error, 74713 total; the fail is `io_test.jl:81`, `get_git_commit_hash` needs a git repo, and the error a vstdp data-path skip; the same tree run in place has 74714 tests; +432 new); `-t 4` 75150 pass; the new file alone with `-t 4` and with `--check-bounds=yes` 432 pass each.
+  that encoded the old aliasing of `ρ` updated. Full suite (fresh resolved test env, Julia 1.12.6): `-t 1` 75148 pass, 0 fail, 0 error (baseline 48c60eb, run from a git-archive snapshot: 74711 pass, 1 fail, 1 error, 74713 total; the fail is `io_test.jl:81`, `get_git_commit_hash` needs a git repo, and the error a vstdp data-path skip; the same tree run in place has 74714 tests; +434 new); `-t 4` 75150 pass (at 81874f3); the new file alone with `-t 4` and with `--check-bounds=yes` pass (-t 4 rerun at 3e3f19e: 434; --check-bounds run at 81874f3: 432).
 
 ### Known limitations
 - A record closed by a switch (rule variable the new rule does not have) is not reopened by a later switch; re-monitoring the
