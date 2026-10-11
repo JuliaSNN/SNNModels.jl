@@ -541,6 +541,40 @@ no global flag, no separate precision argument.
   `ReinforcementLearningTrajectories` (used only by `examples/1d_RW.jl`) to a new `examples/Project.toml`. SpikingNeuralNetworks,
   CalciumSpike, OptunaLoader: no change (all dependencies used by the loaded source).
 
+### Flush-to-zero during `sim!` / `train!` (branch dev-diag, pre-1.10 diagnostics, job 2)
+- Cause of the p = 0.02 small-N cliff and of the slow quiet `Rate` population (perf README, disadvantage 8): subnormal
+  floats. Every decay integrated as `g += -dt g / τ` (or `x += dt (-x)`) stops changing once `dt g / τ` is below half an ulp
+  of `g`, so a variable with no input ends in the subnormal range and stays there (it never reaches 0); each operation on it
+  takes a microcode assist. Counted (`job2_subnormal_counts.csv`, every 100 steps over 10 s): T4 p = 0.02 N = 500, `E.gi`
+  up to 70 of 400 entries subnormal (mean 58), `I.gi` 17/100, `E.ge` 3, `E.syn_curr` 2; N = 1000 `E.gi` 62/800; N = 2000
+  `E.gi` 34/1600; quiet `Rate` (N = 10000) all of `x` and `r` after 80 ms. Weights, delay buffers, `v` and every other array:
+  none. The same happens with `SingleExpSynapse`, `DoubleExpSynapse`, `DoubleExpCurrentSynapse` and the default `AdEx` synapse
+  (REPL probe, not in a CSV: every synaptic variable subnormal after 2 s without input).
+- Fix: `sim!` and `train!` take `flush_subnormals::Bool = true` and run the step loop inside `with_flush_subnormals`
+  (new file `src/utils/subnormals.jl`): `set_zero_subnormals(true)` on the calling thread and, when the population updates
+  are threaded (`neurons_per_thread > 0`, more than one thread), on every Polyester worker (`@batch per = thread`); the
+  previous mode of each thread is restored afterwards, also on an exception. One change covers every model, synapse and
+  plasticity trace, and leaves the arithmetic of normal numbers, so no kernel and no generated loop changes (a per-loop
+  `ifelse(abs(x) < floatmin)` would have touched about ten `@fastmath` loops, some of which are kept bit-identical to 1.9).
+  `integrate!`/`forward!` called directly (outside `sim!`/`train!`) are not affected.
+- Effect on results: a result that would be subnormal is 0 and a subnormal operand reads as 0, so a decaying variable
+  stops at a small normal value (|g| <= floatmin τ / dt, 5.9e-37 for τ = 5 ms, dt = 0.1 ms) instead of a subnormal one.
+  T4 p = 0.02 N = 500/1000/2000 over 10 s: spike times of E and I and the final `v` bit-identical to the run without it;
+  `ge`/`gi` differ in 1-64 entries per array by at most 5.9e-37 (absolute); quiet `Rate` `x`/`r` by at most 1.2e-37
+  (`job2_correctness.csv`). The multi-threaded path (`-t 4`, `neurons_per_thread = 128`) gives the same `v` with and
+  without the flag and leaves every thread with FTZ off.
+- Measured (`perf/pre110_diag/job2_subnormal.csv`, core 8, `-t 1`, median of 3, load1 4.6-8.3; before = ee48a1f): T4 p = 0.02
+  s per simulated second, IEEE vs `sim!` default after the change: N = 500 0.0512 to 0.0090 (Auryn 0.0107), N = 1000 0.0473 to
+  0.0160, N = 2000 0.0476 to 0.0291; quiet `Rate` through `sim!`, ns per neuron-step: N = 1000 40.8 to 0.86, N = 10000 39.4
+  to 0.68 (driven: 0.67-0.85, unchanged). Setting FTZ by hand on the 1.9/ee48a1f code gives the same numbers.
+- Test: `test/sim/subnormals.jl` (14 tests): a quiet `Rate` and a silent `CurrentSynapse` have no subnormal entries after
+  `sim!`/`train!` (and do with `flush_subnormals = false`), spikes and `v` identical with and without the flag, thread mode
+  restored after the run and after an exception. Full suite `-t 1`: 74620 / 74620 (with OrderedCollections 1.8.2, see below).
+- Found while testing: a fresh resolve of the test environment picks OrderedCollections 2.0.2, which no longer has
+  `sort(::Dict; by)`; `compose` then throws (`utils/util.jl:212-214`, 86 errored tests in `record_test.jl` and others). The
+  known limitation below is now real; not fixed here (outside job 2). The suite was run with OrderedCollections pinned to 1.8.2
+  in a scratch copy of the test environment.
+
 ### Known limitations
 - `SNNModels.compose` (`utils/util.jl:212-214`) calls `sort(::Dict; by)`, a deprecated method that OrderedCollections adds
   to `Base.sort` (warning "`sort(d::Dict; args...)` is deprecated" in the SNNPlots/SNNUtils test runs); SNNModels does not

@@ -33,6 +33,12 @@ plasticity, metaplasticity components).
   record `:fire`.
 - `neurons_per_thread = nothing`: chunk size of the threaded population updates for the duration of the run (`nothing`: keep
   the current setting, default 0: threading off; a positive value such as 512 turns it on, `0` or `Inf` off). See [`neurons_per_thread`](@ref) and [`foreach_chunk`](@ref).
+- `flush_subnormals = true`: run with the flush-to-zero floating-point mode (`set_zero_subnormals(true)` on the stepping thread and,
+  when threaded, on the worker threads; restored afterwards). Results that would be subnormal (below `floatmin`, 1.2e-38 in
+  Float32) are 0, so decaying variables of silent synapses and quiet populations stop at a tiny normal value instead of
+  staying subnormal, which avoids the slow subnormal arithmetic (up to 60x per step); spikes and states above `floatmin` are
+  unchanged. `false` keeps IEEE gradual underflow.
+  See `SNNModels.with_flush_subnormals`.
 
 Recording buffers are sized before the loop from `duration` (see `monitor!`). If the model
 time is 0, a first sample of every record is taken before the first step.
@@ -62,6 +68,7 @@ function train!(
     perturbation! = nothing,
     pbar = false,
     neurons_per_thread = nothing,
+    flush_subnormals::Bool = true,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
     FT = eltype(time.t)
     dt = FT(dt)
@@ -72,6 +79,7 @@ function train!(
     firing_rates = Dict{String, Float32}(p.name => 0.f0 for p in P if haskey(p.records, :fire))
     τ_rate = 100.0f0
     with_neurons_per_thread(neurons_per_thread) do
+    with_flush_subnormals(flush_subnormals) do
     for t in iter
         if pbar
             map(P) do p
@@ -90,6 +98,7 @@ function train!(
             perturbation!(;P, C, S, t=t, dt=dt, start_time = start_time)
         end
         train!(P, C, S, dt, time)
+    end
     end
     end
     return time
@@ -229,6 +238,12 @@ or `STPParam`. Use [`train!`](@ref) for plastic networks.
   record `:fire`.
 - `neurons_per_thread = nothing`: chunk size of the threaded population updates for the duration of the run (`nothing`: keep
   the current setting, default 0: threading off; a positive value such as 512 turns it on, `0` or `Inf` off). See [`neurons_per_thread`](@ref) and [`foreach_chunk`](@ref).
+- `flush_subnormals = true`: run with the flush-to-zero floating-point mode (`set_zero_subnormals(true)` on the stepping thread and,
+  when threaded, on the worker threads; restored afterwards). Results that would be subnormal (below `floatmin`, 1.2e-38 in
+  Float32) are 0, so decaying variables of silent synapses and quiet populations stop at a tiny normal value instead of
+  staying subnormal, which avoids the slow subnormal arithmetic (up to 60x per step); spikes and states above `floatmin` are
+  unchanged. `false` keeps IEEE gradual underflow.
+  See `SNNModels.with_flush_subnormals`.
 
 Recording buffers are sized before the loop (see `monitor!`). If the model time is 0, a first
 sample of every record is taken before the first step. Simulations can be continued by
@@ -260,6 +275,7 @@ function sim!(
     time = Time{_model_float(P)}(),
     perturbation! = nothing,
     neurons_per_thread = nothing,
+    flush_subnormals::Bool = true,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
     FT = eltype(time.t)
     dt = FT(dt)
@@ -271,6 +287,7 @@ function sim!(
     firing_rates = Dict{String, Float32}(p.name => 0.f0 for p in P if haskey(p.records, :fire))
     τ_rate = 100.0f0
     with_neurons_per_thread(neurons_per_thread) do
+    with_flush_subnormals(flush_subnormals) do
     for t in iter
         if pbar
             map(P) do p
@@ -289,6 +306,7 @@ function sim!(
             perturbation!(; P, C, S, t=t, dt=dt, start_time=start_time)
         end
         sim!(P, C, S, dt, time)
+    end
     end
     end
     return time
