@@ -585,6 +585,31 @@ no global flag, no separate precision argument.
   stable `sortperm` of the old method did). No new dependency.
 - Full suite `-t 1` in a freshly resolved copy of `test/Project.toml` (OrderedCollections 2.0.2): 74620 / 74620.
 
+### Startup jump N = 10000 -> 20000: a full GC mark, no library change (branch dev-diag, pre-1.10 diagnostics, job 3)
+- Perf README T11: construction of the balanced k100 network 0.064 s at N = 10000, 0.46 s at N = 20000. Measured stage by
+  stage (`perf/pre110_diag/job3_startup.jl`, `job3_startup.csv`, `job3_stages.csv`; idle physical core, 2 or 5, because
+  core 8 was in use by another job; `-t 1`, median of 3 after a warm-up; load1 5.9-8.7) at N = 10000/15000/20000/30000.
+- Cause: one collection that re-marks the whole heap, ~0.27 s, independent of N. It lands inside the construction once
+  the bytes allocated by the construction exceed the GC heap-growth trigger: 151/227 MB (N = 10000/15000) give one cheap
+  young collection; 303/454 MB (N = 20000/30000) give a full sweep (0.04 s) and then a full re-mark (`mark_s` 0.27 s;
+  inside the build in 1 of 6 reps at N = 20000 and 5 of 6 at N = 30000, with and without the 10 s simulation between reps;
+  where it falls is set by the GC, which is why the campaign saw 0.46 s at N = 20000). The mark cost is the base heap: a full GC
+  after `using SNNModels` and the warm-up takes 0.30 s (mark 0.26 s, 36 MB live) against 0.09 s in a bare Julia
+  (`job3_gc_deps.csv`: DrWatson or JLD2 alone 0.16 s, DSP 0.14 s, LoopVectorization 0.13 s). Profile at N = 30000
+  (`job3_profile_N30000.txt`): 56 % of the samples in `ijl_gc_collect`, 47 % in `gc_mark_loop`, entered from a small
+  allocation in `dsparse`/`SpikingSynapse`, i.e. wherever the trigger happens to be crossed.
+- No O(N^2) step, dense intermediate or push!/resize! growth: allocated bytes are linear (15.1 MB per 1000 neurons,
+  ~1240 allocations at every N). With the GC paused during the build (`gcoff=1`) startup is 0.082/0.128/0.180/0.285 s;
+  the library part (4 `SpikingSynapse`) 0.033/0.050/0.072/0.112 s and 62 B allocated per synapse (185 MB at N = 30000);
+  the script part (graph read, masks, `sparse(I, J, V)`) 0.049/0.076/0.109/0.173 s and 89-268 MB.
+- Benchmark-script fix (not applied to perf/scripts, shown in `job3_startup.jl script=lean`): read the Int32 file in place
+  and fill the four CSC blocks in one pass (the file is sorted by (pre, post), i.e. CSC order; identical matrices,
+  `mode=checklean`). Startup 0.073/0.069/0.095/0.158 s at N = 10000/15000/20000/30000 (from 0.073/0.126/0.231/0.537 s),
+  163 MB at N = 20000, no full collection up to N = 30000.
+- Library: nothing cheap to change. Allocation per synapse could drop from 62 B to roughly 40 B (the transposed copy in `dsparse`,
+  the double delay vector and the copy in the keyword constructor of `SpikingSynapse`), which only moves the trigger; the
+  re-mark cost belongs to the Julia runtime and the loaded dependencies.
+
 ### Known limitations
 - `iSTDPPotential` and the dense vSTDP are not converted (the event-driven vSTDP keeps the postsynaptic filters per step, O(Npost)): their postsynaptic filters follow the membrane potential at every step
   (class C, see "Lazy classification of the plasticity rules"); `SpikeRateSynapse` keeps its dense scans. The clock-driven
