@@ -113,6 +113,10 @@ needs_transpose(::PlasticityParameter) = true
 needs_transpose(::NoLTP) = false
 needs_transpose(::NoSTP) = false
 
+# whether a sparse synapse has a rule at all (a type-level constant for `SpikingSynapse`, method in spiking_synapse.jl):
+# the step entry points below return at once without one
+_has_rules(c) = true
+
 """
     plasticity!(c::AbstractSparseSynapse, param::AbstractSpikingSynapseParameter, dt::AbstractFloat, T::Time)
 
@@ -131,6 +135,7 @@ function plasticity!(
     dt::AbstractFloat,
     T::Time,
 ) where {PT<:AbstractSparseSynapse, ST<:AbstractSpikingSynapseParameter}
+    _has_rules(c) || return nothing
     _ensure_rule_arrays!(c)   # serial, before the rule kernels fork
     any(c.STPVars.active) && plasticity!(c, c.STPParam, c.STPVars, dt, T)
     any(c.LTPVars.active) && plasticity!(c, c.LTPParam, c.LTPVars, dt, T)
@@ -153,6 +158,7 @@ function update_traces!(
     dt::AbstractFloat,
     T::Time,
 ) where {PT<:AbstractSparseSynapse, ST<:AbstractSpikingSynapseParameter}
+    _has_rules(c) || return nothing
     _ensure_rule_arrays!(c)
     any(c.STPVars.active) && update_traces!(c, c.STPParam, c.STPVars, dt, T)
     any(c.LTPVars.active) && update_traces!(c, c.LTPParam, c.LTPVars, dt, T)

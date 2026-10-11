@@ -142,7 +142,8 @@ rule types are `LTPParameter` and `STPParameter`.
   to CSC position); `W::Vector{FT}` holds the weights in CSC order (`FT` = precision of the synapse).
   `J` and `index` are empty unless something reads them: a plasticity rule that walks the inputs of a
   neuron (`needs_transpose`), `presynaptic`, `presynaptic_idxs`, `SynapseNormalization`, `AggregateScaling`;
-  call `SNNModels.ensure_transpose!(c)` before reading them in user code (since 1.10).
+  call `SNNModels.ensure_transpose!(c)` before reading them in user code (since 1.10). `with_plasticity`/`without_plasticity`
+  hand `J`, `index` and `ρ` over only to a synapse whose rules need them.
 - `ρ::Vector{FT}`: short-term efficacy per synapse (initialised to 1), stored only with a short-term rule
   (`STPParam`); otherwise empty (ρ = 1). Read it with `SNNModels.efficacy(c)`; call
   `SNNModels.materialize_efficacy!(c)` before writing to it (since 1.10).
@@ -298,6 +299,7 @@ has_transpose(c::SpikingSynapse) = length(c.index) == length(c.W) && length(c.J)
 # whether a rule of `c` reads `J`/`index` (a constant per synapse type)
 needs_transpose(c::SpikingSynapse) = needs_transpose(c.LTPParam) || needs_transpose(c.STPParam)
 needs_transpose(c::AbstractConnection) = true
+_has_rules(c::SpikingSynapse) = !(c.LTPParam isa NoLTP && c.STPParam isa NoSTP)
 
 # step guard of the rules (serial, before any threaded kernel): a synapse loaded from a file, built with the keyword
 # constructor or whose arrays were emptied gets `J`/`index` before a rule reads them, and `ρ` before a short-term rule
@@ -381,25 +383,58 @@ _plasticity_type_error(kind) = ArgumentError(
 
 """
     with_plasticity(c::SpikingSynapse; LTP = nothing, STP = nothing)
+    without_plasticity(c::SpikingSynapse)
 
-New `SpikingSynapse` that shares all arrays (`W`, `ρ`, `g`, `fireI`, `fireJ`, the connectivity, ...)
-with `c` but has the rule `LTP` and/or `STP`, with fresh state (`plasticityvariables`). Rules left to
-`nothing` are kept with their state. Since the rule types are type parameters of `SpikingSynapse`,
-this is how a rule of another type is installed; the caller replaces `c` by the result in its model.
-`update_plasticity!` and `change_plasticity!` only accept a rule of the same type as the current one.
+New `SpikingSynapse` with the connectivity, weights and delays of `c` and the long-term rule `LTP` and/or the short-term
+rule `STP`. A rule left to `nothing` is kept, with its state; `NoLTP()` / `NoSTP()` switch that part off;
+`without_plasticity(c)` switches both off. The rule types are type parameters of `SpikingSynapse`, so this is how a rule of
+another type is installed (`update_plasticity!` and `change_plasticity!` only accept a rule of the same type as the current
+one); the caller replaces `c` by the result in its model. `c` itself is not modified.
 
-!!! note
-    The result shares its vectors with `c` (no copy): the weights, conductances, efficacy `ρ` and index arrays are the
-    same objects, so simulating one changes the state seen by the other. `c` itself stays a valid synapse (with its own
-    rules) and can still be simulated; use only one of the two in a model, or `deepcopy(c)` first for independent copies.
+# Switching on
+A rule of any type, converted to the precision of the synapse, with fresh state (`plasticityvariables`). The arrays the new
+rules need are created in the new synapse: the transposed index `J`/`index` (+8 B/syn) for a rule that `needs_transpose`
+(pair, triplet, weight-dependent, structured and inhibitory STDP), the efficacy `ρ` (+4 B/syn, ones) for a short-term rule.
+They are shared with `c` when `c` already has them; the vectors of `c` are never resized or refilled.
+
+# Switching off
+The deferred weight updates of the old rule are written back first (`sync_weights!`, event-driven vSTDP); the new synapse
+holds the frozen weights `W`, no `J`/`index`, no `ρ` and `NoVariables` state: it has the type, the memory (about 9 B/syn with
+a delay common to all synapses) and the per-step work of a synapse built without plasticity, and gives the same run. With
+`STP = NoSTP()` the efficacy is 1 again, also when the old short-term rule had moved it (to freeze `ρ` at its current
+values instead, keep the rule and call `set_STP!(c, false)`). The final values of the old rule stay readable on `c`, e.g.
+`plasticity_value(c, :LTPVars, :tpre, T)`.
+
+# What is shared
+`W`, the connectivity (`I`, `colptr`, `rowptr`), `g`, `v_post`, `fireI`, `fireJ`, `param` (delays and delay queue),
+`records`, `id`, `name`, the spike lists and the chunk cache are the same objects in `c` and in the result, as is a kept
+rule with its state: simulating one changes the state seen by the other, so use only one of the two in a model (or
+`deepcopy(c)` first). `c` stays a valid synapse with its own rules. The arrays the result does not take over are freed when
+nothing references `c` any more; a `SynapseNormalization` or `AggregateScaling` built on `c` keeps using `c` and its
+`J`/`index`, one built on the result builds them there.
+
+# Records
+`:W`, `:ρ` (a recorded `ρ` is kept, as ones after a switch-off) and the population records continue across the switch.
+The record of a rule variable continues if the new rule has that variable (e.g. `:tpre` from `STDPGerstner` to
+`STDPWeightDependent`); otherwise it stops at the switch and stays readable (`getvariable`, `record`); since `records`
+is shared, `c` stops sampling it too. A stopped record is not reopened by a later switch (`clear_records!` first).
+
+# Replacing the synapse in a model
+`model = compose(; pop = model.pop, syn = merge(model.syn, (; EE = EE2)), stim = model.stim, time = model.time)`, or
+assign into a `Vector{AbstractConnection}` (a concretely typed vector cannot hold a synapse with other rule types).
 
 # Example
 ```julia
 using SpikingNeuralNetworks
 SNN.@load_units
-E = SNN.IF(N = 50)
-EE = SNN.SpikingSynapse(E, E, :ge; conn = (p = 0.2, μ = 2.0))
-EE = SNN.SNNModels.with_plasticity(EE; LTP = SNN.STDPGerstner())
+E = SNN.IF(N = 100); E.I .= 300.0
+EE = SNN.SpikingSynapse(E, E, :ge; conn = (p = 0.2, μ = 0.5))
+EE = SNN.with_plasticity(EE; LTP = SNN.STDPGerstner())    # J/index built (+8 B/syn)
+model = SNN.compose(; E, EE)
+SNN.train!(; model, duration = 100ms)
+EE = SNN.without_plasticity(model.syn.EE)                  # W frozen, back to a never-plastic synapse
+model = SNN.compose(; pop = model.pop, syn = (; EE), time = model.time)
+SNN.sim!(; model, duration = 100ms)
 ```
 """
 function with_plasticity(c::SpikingSynapse; LTP = nothing, STP = nothing)
@@ -419,11 +454,56 @@ function with_plasticity(c::SpikingSynapse; LTP = nothing, STP = nothing)
         fields[:STPParam] = STP
         fields[:STPVars] = plasticityvariables(STP, Npre, Npost)
     end
+    newLTP = isnothing(LTP) ? c.LTPParam : LTP
+    newSTP = isnothing(STP) ? c.STPParam : STP
+    # the lazy arrays go only to a synapse whose rules need them; the vectors of `c` are never resized or refilled
+    needT = needs_transpose(newLTP) || needs_transpose(newSTP)
+    if needT && has_transpose(c)
+        fields[:J], fields[:index] = c.J, c.index          # shared, already built
+    else
+        fields[:J], fields[:index] = typeof(c.J)(), typeof(c.index)()   # fresh: filled below if needed, else released
+    end
+    if isnothing(STP)
+        fields[:ρ] = c.ρ                                   # rule kept: its efficacy too, whatever its state
+    elseif !(STP isa NoSTP)
+        fields[:ρ] = length(c.ρ) == length(c.W) ? c.ρ : ones(eltype(c.W), length(c.W))
+    else
+        # switched off: efficacy 1 (empty), or stored ones if `ρ` is being recorded (the record continues with its value)
+        fields[:ρ] = _records_key(c, :ρ) ? ones(eltype(c.W), length(c.W)) : typeof(c.ρ)()
+    end
     new = SpikingSynapse(; fields...)
-    new.STPParam isa NoSTP || materialize_efficacy!(new)   # a short-term rule writes ρ (shared with `c`: ones in both)
-    needs_transpose(new) && ensure_transpose!(new)           # J/index are shared with `c` too
+    needT && ensure_transpose!(new)                        # no-op when shared; fills the fresh vectors otherwise
+    isnothing(LTP) || _close_rule_records!(new, :LTPVars)
+    isnothing(STP) || _close_rule_records!(new, :STPVars)
     return new
 end
+
+# whether `key` is being sampled by the recorder of `c`
+_records_key(c, key::Symbol) = haskey(c.records, :data) && key in c.records[:data]
+
+# Records of the variables of a replaced rule (`group` = :LTPVars or :STPVars): a key whose field the new state has goes on
+# being sampled; any other key is closed (removed from `records[:data]`): its samples, times and `var_map` entry stay
+# readable, no further sample is taken. `records` is shared with the source synapse, which stops sampling it too.
+function _close_rule_records!(new::SpikingSynapse, group::Symbol)
+    records = new.records
+    (haskey(records, :data) && haskey(records, :meta)) || return new
+    var_map = get(records[:meta], :var_map, nothing)
+    isnothing(var_map) && return new
+    vars = getfield(new, group)
+    filter!(records[:data]) do k
+        m = get(var_map, k, nothing)
+        isnothing(m) || m[1] !== group || hasproperty(vars, m[2])
+    end
+    return new
+end
+
+"""
+    without_plasticity(c::SpikingSynapse)
+
+`with_plasticity(c; LTP = NoLTP(), STP = NoSTP())`: a synapse with the weights of `c` frozen and no rule, with the type, memory
+and per-step work of a synapse built without plasticity. See [`with_plasticity`](@ref).
+"""
+without_plasticity(c::SpikingSynapse) = with_plasticity(c; LTP = NoLTP(), STP = NoSTP())
 
 
 @doc raw"""
@@ -550,7 +630,7 @@ end
 end
 
 
-export SpikingSynapse, update_plasticity!, with_plasticity
+export SpikingSynapse, update_plasticity!, with_plasticity, without_plasticity
 
 
 # precision of a synapse onto `post`: the element type of the variable it writes into; it must be that of the membrane

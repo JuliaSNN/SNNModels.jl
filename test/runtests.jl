@@ -104,6 +104,7 @@ end
     _ts("stp_mongillo",      "syn/stp_mongillo.jl")
     _ts("metaplasticity",    "syn/metaplasticity.jl")
     _ts("synapse_footprint", "syn/synapse_footprint.jl")
+    _ts("plasticity_switch", "syn/plasticity_switch.jl")
 end
 
 # ── Analysis ──────────────────────────────────────────────────────────────────

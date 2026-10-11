@@ -890,7 +890,48 @@ short-term rule, 8 B/syn for `J`/`index` with a rule that needs them, 8 B/syn fo
   length (< 1 B per step between 10 and 400 steps), the per-call constant is below 4 kB, and `_sim_step!`/`_train_step!`
   allocate 0 B.
 
+### Switching plasticity on and off (`with_plasticity`, `without_plasticity`)
+`with_plasticity(c; LTP = nothing, STP = nothing)` returns a new synapse with the connectivity, weights and delays of `c`; a rule
+left to `nothing` is kept with its state, `NoLTP()`/`NoSTP()` switch that part off. The lazy arrays are handed over by one rule:
+`J`/`index` go to the new synapse only if one of its rules `needs_transpose` (the source's vectors if it has them, else fresh vectors
+built by `ensure_transpose!` on the new synapse; otherwise fresh empty vectors); `ρ` is the source's with `STP = nothing`, the
+source's (if stored) or fresh ones with a new short-term rule, and a fresh empty vector (efficacy 1) with `STP = NoSTP()` (fresh
+ones while `:ρ` is recorded, so that the record continues with the value 1). Everything else (`W`, `I`, `colptr`, `rowptr`, `g`,
+`v_post`, `fireI`, `fireJ`, `param`, `targets`, `records`, `id`, `name`, spike lists, chunk cache) is shared, as before. The vectors
+of the source are never resized or refilled. New: `without_plasticity(c) = with_plasticity(c; LTP = NoLTP(), STP = NoSTP())`
+(exported). The switched-off synapse has the type of a never-plastic synapse (`NoLTP`, `NoSTP`, `NoVariables`), its memory and
+its per-step work, and gives the same run as a synapse rebuilt by the constructor from the frozen weights (tested bit for bit).
+- Behaviour changes. (1) The source is not modified any more: before, a switch-on materialised `ρ` and `J`/`index` in the source
+  (aliased vectors resized in place: a never-plastic source grew from 8.73 to 20.73 B/syn and its `ρ` was then written by the new
+  short-term rule). (2) `STP = NoSTP()` resets the efficacy to 1: before, the switched-off synapse kept the last STP efficacy in
+  transmission (and the `ρ` kernel); to freeze `ρ` at its value keep the rule and call `set_STP!(c, false)`. (3) Records of a rule
+  variable that the new rule does not have (`meta[:var_map]` entry of the replaced group whose field the new state lacks, e.g.
+  `:LTPVars_tpre` after switch-off or Gerstner -> Triplet) are closed: removed from `records[:data]`, buffer, times and `var_map`
+  kept and readable; before, the next sampling step threw a `FieldError` mid-run. A record whose field the new rule has
+  (Gerstner -> WeightDependent `:tpre`) continues. `:W`, `:ρ`, `:fire` and population records are untouched.
+- `plasticity!`/`update_traces!` of a sparse synapse return at once when it has no rule (`_has_rules`, a type-level constant for
+  `SpikingSynapse`): the two `any(active)` reads per call of a never-plastic or switched-off synapse are gone; results unchanged.
+- Memory (B/syn = `Base.summarysize / nnz`). Small test network (E 1600 / I 400, Dirac 0.8 ms, EE 127918 synapses), EE switched on
+  (`STDPGerstner + MarkramSTPParameter`), trained, switched off: never-plastic 8.73; plastic 21.13; source after the switch-on 20.73
+  before / 8.73 after; switched off 20.73 before / 8.73 after. T4 network (N = 10000, 1e6 synapses, k100, Dirac 0.8 ms,
+  `CurrentSynapse`, STDPGerstner on EE): switched-off EE 16.77 before / 8.77 after (network 14.36 / 9.24), equal to never-plastic.
+- Time, T4 network, pinned core 8 of seroquel (Xeon w5-3425), `-t 1`, 1 s pre-phase then 10 s timed (1e5 steps), median of 3
+  processes x median of 3 reps, 1-min load average 5.6-8.9 (shared machine), commit e10795c. ns per neuron-step: never-plastic
+  1.603 (`train!`) / 1.547 (`sim!`), plastic 2.123, switched off 1.525, rebuilt by the constructor 1.547; B/syn network 9.24 / EE
+  8.77 for never, off and rebuilt, 14.49 / 16.97 plastic. Switched off and rebuilt fire identically (535904 E / 134448 I spikes in
+  the timed window). Scripts, CSV, figure: `papers/JuliaSNN_publication/validation/profilation_v1.10/perf/plasticity_switch/README.md`.
+- Tests: `test/syn/plasticity_switch.jl` (434): round trip on, off, on again for pair, triplet, weight-dependent, event and dense
+  vSTDP, iSTDPRate, Markram event/timestep and pair STDP + Markram (no delay, Dirac, heterogeneous delays) against twins built by
+  the constructor; the source of a switch still simulates as an untouched twin; records across the switch; Float64; threaded vs
+  serial; normalization and `presynaptic` build `J`/`index` at use; the early return. `test/syn/synapse_footprint.jl`: one assertion
+  that encoded the old aliasing of `ρ` updated. Full suite (fresh resolved test env, Julia 1.12.6): `-t 1` 75148 pass, 0 fail, 0 error (baseline 48c60eb, run from a git-archive snapshot: 74711 pass, 1 fail, 1 error, 74713 total; the fail is `io_test.jl:81`, `get_git_commit_hash` needs a git repo, and the error a vstdp data-path skip; the same tree run in place has 74714 tests; +434 new); `-t 4` 75150 pass (at 81874f3); the new file alone with `-t 4` and with `--check-bounds=yes` pass (-t 4 rerun at 3e3f19e: 434; --check-bounds run at 81874f3: 432).
+
 ### Known limitations
+- A record closed by a switch (rule variable the new rule does not have) is not reopened by a later switch; re-monitoring the
+  same key needs `clear_records!`/`clear_monitor!` first. `records` is shared, so the source synapse stops sampling it too.
+- `compose` cannot replace a component by name (`compose(; model..., EE = new)` fails with a misleading "Receptors EE already
+  exists"); recipe: `compose(; pop = model.pop, syn = merge(model.syn, (; EE = new)), stim = model.stim, time = model.time)`, or a
+  `Vector{AbstractConnection}`. `iSTDPTime` has no `plasticity!` kernel (a synapse built with it errors under `train!`).
 - `iSTDPPotential` and the dense vSTDP are not converted (the event-driven vSTDP keeps the postsynaptic filters per step, O(Npost)): their postsynaptic filters follow the membrane potential at every step
   (class C, see "Lazy classification of the plasticity rules"); `SpikeRateSynapse` keeps its dense scans. The clock-driven
   `MarkramSTPParameterTimestep` (lazy-able with the Euler factor per elapsed step, but that needs a dt-aware elapsed step
