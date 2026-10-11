@@ -80,11 +80,15 @@ between spikes.
   (resting value of the threshold ``\theta``), `Vr`, `a`, `b`, `τw`.
 - `soma_syn::SYNS = TripodSomaSynapse`, `dend_syn::SYND = TripodDendSynapse`: synapse models.
 - `spike::PST = PostSpike()`: `AP_membrane`, `up`, `τabs`, `At`, `τA`.
-- `d1::VDT`, `d2::VDT`: `Dendrite`s built with `create_dendrite(N, param.ds[k]; El = adex.El)`.
-- `Vspike::Float32 = -10mV`: spike detection threshold on the predicted somatic potential.
+- `d1::VDT`, `d2::VDT`: `Dendrite`s built with `create_dendrite(N, param.ds[k]; El = adex.El, FT = eltype(VFT))`.
+- `Vspike::Float32 = -10mV`: spike detection threshold on the predicted somatic potential (`Float32` in both precisions;
+  compared after promotion).
 
 ## State variables
 - `v_s`, `v_d1`, `v_d2::VFT`: compartment potentials (mV), initialised uniformly in `[Vr, Vt]`.
+  `VFT = Vector{Float32}` by default; `VFT = Vector{Float64}` gives a `Float64` population: `adex`, `spike`, the synapse models
+  (`convert_precision` of the defaults), the dendrites, the synaptic variables, receptor buffers and work arrays follow (see
+  `float_type`); `param` (morphology) and `Vspike` stay `Float32`.
 - `w_s::VFT`: somatic adaptation current (pA), zeros.
 - `I::VFT`: external current into the soma (pA); `I_d::VFT`: external current injected in
   each of the two dendrites (pA).
@@ -121,8 +125,8 @@ SNN.sim!(; model, duration = 200ms)
 Tripod
 @snn_kw struct Tripod{
     VFT = Vector{Float32},
-    MFT = Matrix{Float32},
-    VDT = Dendrite{Vector{Float32}},
+    MFT = Matrix{eltype(VFT)},
+    VDT = Dendrite{VFT},
     SYNS<:AbstractSynapseParameter,
     SYND<:AbstractSynapseParameter,
     SYNSV<:AbstractSynapseVariable,
@@ -138,13 +142,13 @@ Tripod
     ## These are compulsory parameters
     N::IT = 100
     param::DendNeuronParameter = TripodParameter()
-    adex::SOMAT = AdExParameter()
-    soma_syn::SYNS = TripodSomaSynapse
-    dend_syn::SYND = TripodDendSynapse
-    spike::PST = PostSpike()
+    adex::SOMAT = AdExParameter(FT = eltype(VFT))
+    soma_syn::SYNS = convert_precision(TripodSomaSynapse, eltype(VFT))
+    dend_syn::SYND = convert_precision(TripodDendSynapse, eltype(VFT))
+    spike::PST = PostSpike(FT = eltype(VFT))
     Vspike::Float32 = -10mV
-    d1::VDT = create_dendrite(N, param.ds[1]; El = adex.El)
-    d2::VDT = create_dendrite(N, param.ds[2]; El = adex.El)
+    d1::VDT = create_dendrite(N, param.ds[1]; El = adex.El, FT = eltype(VFT))
+    d2::VDT = create_dendrite(N, param.ds[2]; El = adex.El, FT = eltype(VFT))
 
     # Membrane potential and adaptation
     v_s::VFT = rand_value(N, adex.Vt, adex.Vr)
@@ -155,13 +159,13 @@ Tripod
     I_d::VFT = zeros(N)
 
     # Synapses dendrites
-    synvars_s::SYNSV = synaptic_variables(soma_syn, N)
-    synvars_d1::SYNDV = synaptic_variables(dend_syn, N)
-    synvars_d2::SYNDV = synaptic_variables(dend_syn, N)
+    synvars_s::SYNSV = synaptic_variables(soma_syn, N, eltype(VFT))
+    synvars_d1::SYNDV = synaptic_variables(dend_syn, N, eltype(VFT))
+    synvars_d2::SYNDV = synaptic_variables(dend_syn, N, eltype(VFT))
 
-    receptors_s::RECTS = synaptic_receptors(soma_syn, N)
-    receptors_d1::RECTD = synaptic_receptors(dend_syn, N)
-    receptors_d2::RECTD = synaptic_receptors(dend_syn, N)
+    receptors_s::RECTS = synaptic_receptors(soma_syn, N, eltype(VFT))
+    receptors_d1::RECTD = synaptic_receptors(dend_syn, N, eltype(VFT))
+    receptors_d2::RECTD = synaptic_receptors(dend_syn, N, eltype(VFT))
 
     # Spike model and threshold
     fire::VBT = zeros(Bool, N)
@@ -178,13 +182,13 @@ Tripod
 end
 
 """
-    integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
+    integrate!(p::Tripod, param::DendNeuronParameter, dt::AbstractFloat)
 
 Advance a `Tripod` population by `dt`: update the synapses of the three compartments, then
 integrate the membrane equations with the Heun method and handle spikes and refractoriness
 (see `Tripod`).
 """
-function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
+function integrate!(p::Tripod, param::DendNeuronParameter, dt::AbstractFloat)
     N = Int(p.N)
     @unpack spike, adex, soma_syn, dend_syn = p
     @unpack τabs, up = spike
@@ -207,7 +211,7 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt::Float32)
 end
 
 # one chunk: synapses, the two Heun stages and the state update of the neurons `rng`
-function _tripod_chunk!(p::Tripod, param::DendNeuronParameter, dt::Float32, rng::UnitRange{Int}, n_abs::Int, n_ref::Int)
+function _tripod_chunk!(p::Tripod, param::DendNeuronParameter, dt::AbstractFloat, rng::UnitRange{Int}, n_abs::Int, n_ref::Int)
     @unpack Δv, Δv_temp, fire = p
     @unpack soma_syn, dend_syn = p
     update_synapses!(p, soma_syn, p.receptors_s, p.synvars_s, dt, rng)
@@ -215,8 +219,8 @@ function _tripod_chunk!(p::Tripod, param::DendNeuronParameter, dt::Float32, rng:
     update_synapses!(p, dend_syn, p.receptors_d2, p.synvars_d2, dt, rng)
     @inbounds for k in 1:4
         @simd ivdep for i in rng
-            Δv[i, k] = 0.0f0
-            Δv_temp[i, k] = 0.0f0
+            Δv[i, k] = zero(eltype(Δv))
+            Δv_temp[i, k] = zero(eltype(Δv_temp))
         end
     end
     @inbounds for i in rng
@@ -233,14 +237,14 @@ function _tripod_chunk!(p::Tripod, param::DendNeuronParameter, dt::Float32, rng:
 end
 
 # the same stages over the whole population, for synapse models that have no chunk methods
-function _tripod_serial!(p::Tripod, param::DendNeuronParameter, dt::Float32, n_abs::Int, n_ref::Int)
+function _tripod_serial!(p::Tripod, param::DendNeuronParameter, dt::AbstractFloat, n_abs::Int, n_ref::Int)
     @unpack Δv, Δv_temp, fire = p
     @unpack soma_syn, dend_syn = p
     update_synapses!(p, soma_syn, p.receptors_s, p.synvars_s, dt)
     update_synapses!(p, dend_syn, p.receptors_d1, p.synvars_d1, dt)
     update_synapses!(p, dend_syn, p.receptors_d2, p.synvars_d2, dt)
-    fill!(Δv, 0.0f0)
-    fill!(Δv_temp, 0.0f0)
+    fill!(Δv, zero(eltype(Δv)))
+    fill!(Δv_temp, zero(eltype(Δv_temp)))
     fill!(fire, false)
     update_neuron!(p, param, Δv, dt)
     Δv_temp .= Δv
@@ -249,13 +253,14 @@ function _tripod_serial!(p::Tripod, param::DendNeuronParameter, dt::Float32, n_a
 end
 
 # state update after the Heun stages (spike detection, refractoriness, clamping), neurons `rng`
-function _tripod_state!(p::Tripod, dt::Float32, rng::UnitRange{Int}, n_abs::Int, n_ref::Int)
+function _tripod_state!(p::Tripod, dt::AbstractFloat, rng::UnitRange{Int}, n_abs::Int, n_ref::Int)
     @unpack v_s, w_s, v_d1, v_d2, fire, θ, tabs, Δv, Δv_temp, d1, d2 = p
     @unpack spike, adex, Vspike = p
     @unpack AP_membrane, At, τA = spike
     @unpack Vr, Vt, b = adex
     gax1, C1, gax2, C2 = d1.gax, d1.C, d2.gax, d2.C
-    nabs_f = convert(eltype(tabs), n_abs)    # the counters are `Float32`: compare and store without mixing types
+    nabs_f = convert(eltype(tabs), n_abs)    # the counters are floats (type of the state): compare and store without mixing types
+    FT = eltype(v_s)
     nref_f = convert(eltype(tabs), n_ref)
     # Branchless (`ifelse`) and vectorised, bit-identical to the branching loop of SNNModels <= 1.9 (backpropagation period,
     # absolute refractory period, free integration or spike): all the cases are evaluated and the one that applies is kept.
@@ -281,10 +286,10 @@ function _tripod_state!(p::Tripod, dt::Float32, rng::UnitRange{Int}, n_abs::Int,
         # act: spike or Heun update
         spk = act & (vs0 + dv1 * dt >= Vspike)
         keep = act & !spk
-        vs_h = convert(Float32, vs0 + 0.5 * dt * (Δv_temp[i, 1] + dv1))   # the old loop stored the Float64 sum into a Float32 array
-        vd1_h = convert(Float32, vd1 + 0.5 * dt * (Δv_temp[i, 2] + Δv[i, 2]))   # the old loop stored the Float64 sum into a Float32 array
-        vd2_h = convert(Float32, vd2 + 0.5 * dt * (Δv_temp[i, 3] + Δv[i, 3]))   # the old loop stored the Float64 sum into a Float32 array
-        ws_h = convert(Float32, ws0 + 0.5 * dt * (Δv_temp[i, 4] + Δv[i, 4]))   # the old loop stored the Float64 sum into a Float32 array
+        vs_h = convert(FT, vs0 + 0.5 * dt * (Δv_temp[i, 1] + dv1))   # the old loop stored the Float64 sum into a Float32 array
+        vd1_h = convert(FT, vd1 + 0.5 * dt * (Δv_temp[i, 2] + Δv[i, 2]))   # the old loop stored the Float64 sum into a Float32 array
+        vd2_h = convert(FT, vd2 + 0.5 * dt * (Δv_temp[i, 3] + Δv[i, 3]))   # the old loop stored the Float64 sum into a Float32 array
+        ws_h = convert(FT, ws0 + 0.5 * dt * (Δv_temp[i, 4] + Δv[i, 4]))   # the old loop stored the Float64 sum into a Float32 array
 
         clamped = bp | rf
         fire[i] = spk
@@ -301,9 +306,9 @@ end
 @inline function update_neuron!(
     p::Tripod,
     param::DendNeuronParameter,
-    Δv::Matrix{Float32},
-    dt::Float32,
-)
+    Δv::Matrix{FT},
+    dt::FT,
+) where {FT<:AbstractFloat}
     update_neuron!(p, param, Δv, dt, 1:Int(p.N))
 end
 
@@ -311,10 +316,10 @@ end
 @inline function update_neuron!(
     p::Tripod,
     param::DendNeuronParameter,
-    Δv::Matrix{Float32},
-    dt::Float32,
+    Δv::Matrix{FT},
+    dt::FT,
     rng::UnitRange{Int},
-)
+) where {FT<:AbstractFloat}
     @unpack v_d1, v_d2, v_s, I_d, I, w_s, θ = p
     @unpack d1, d2 = p
     @unpack is, v_pred = p
@@ -343,7 +348,7 @@ end
     @views _synaptic_current!(p, dend_syn, synvars_d2, v_pred[:, 3], is[:, 3], rng)
     @inbounds for k in 1:3
         @simd ivdep for i in rng
-            is[i, k] = clamp(is[i, k], -1500.0f0, 1500.0f0)
+            is[i, k] = clamp(is[i, k], FT(-1500), FT(1500))
         end
     end
 
@@ -370,5 +375,11 @@ end
     end
 end
 
+# one precision per population (see `IF`); `param` holds the morphology only (precision-agnostic)
+function snn_kw_finalize(::Type{T}, f::NamedTuple) where {T<:Tripod}
+    _check_precision("Tripod", _state_float(T, :v_s), "adex" => f.adex, "soma_syn" => f.soma_syn, "dend_syn" => f.dend_syn,
+                     "spike" => f.spike)
+    return f
+end
 
 export Tripod
