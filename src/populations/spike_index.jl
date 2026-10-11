@@ -1,19 +1,27 @@
 """
     SpikeIndex(N)
 
-Scratch list of the indices of the neurons that fired in the current step, built from the
-`Bool` firing vector of a population by one scan (`spike_list!`). Populations and stimuli keep
-writing `fire`; the list is a derived view of it used by `forward!` and the event-driven
-plasticity kernels, so that the spike flags are scanned once per step instead of once per
-consumer. `active` is set by `prepare_spikes!` at the start of the step of a connection and
-cleared by `release_spikes!` at its end: only while active is the list reused (`valid`);
-otherwise every call scans `fire` again, so direct calls of `forward!` or `plasticity!` with a
+List of the indices of the neurons that fired in the current step, built from the `Bool` firing
+vector of a population by one scan (`spike_list!`). Populations and stimuli keep writing `fire`;
+the list is a derived view of it used by `forward!`, the event-driven plasticity kernels and the
+`:fire` recorder, so that the spike flags are scanned once per step instead of once per consumer.
+While `active`, the list is scanned at most once (`valid` after the scan) and reused; otherwise
+every call scans `fire` again, so direct calls of `forward!`, `plasticity!` or `record!` with a
 modified `fire` always see it.
 
-A list can also be `fed`: its owner (a population that learns its spikes from a stimulus, see
-`Identity`) writes `idx[1:n]` itself every step, in ascending order, and `spike_list!` returns it
-without scanning `fire` at all. The connections that read the population share the owner's
-`SpikeIndex`; `prepare_spikes!`/`release_spikes!` leave a fed list alone.
+Three kinds of lists:
+- scratch (`SpikeIndex(N)`): `active` is set by `prepare_spikes!` at the start of the step of a
+  connection and cleared by `release_spikes!` at its end (one scan per connection and step).
+- `owned` (`owned_spike_index(N)`): the list of a population of the integrate-and-fire family
+  (field `spikes`, see `spike_index`), shared by every `SpikingSynapse` that reads the population
+  and by its recorder. The simulation loop opens its window after `integrate!`
+  (`_publish_spikes!`: `active`, not yet `valid`; the first consumer of the step scans) and
+  closes it at the end of the step (`_retire_spikes!`); `prepare_spikes!`/`release_spikes!`
+  leave it alone.
+- `fed`: its owner (a population that learns its spikes from a stimulus, see `Identity`) writes
+  `idx[1:n]` itself every step, in ascending order, and `spike_list!` returns it without scanning
+  `fire` at all. The connections that read the population share the owner's `SpikeIndex`;
+  `prepare_spikes!`/`release_spikes!` leave a fed list alone.
 """
 mutable struct SpikeIndex
     idx::Vector{Int32}
@@ -21,8 +29,9 @@ mutable struct SpikeIndex
     valid::Bool
     active::Bool
     fed::Bool
+    owned::Bool
 end
-SpikeIndex(N::Integer) = SpikeIndex(Vector{Int32}(undef, N), 0, false, false, false)
+SpikeIndex(N::Integer) = SpikeIndex(Vector{Int32}(undef, N), 0, false, false, false, false)
 
 # Index list of the set flags, scanning 8 flags per UInt64 load (most steps have no spike in most words).
 function _flags_to_list!(idx::Vector{Int32}, fire::Vector{Bool})
@@ -68,6 +77,8 @@ end
 
 Indices (ascending, `Int32`) of the `true` entries of `fire`, as a view of the buffer of `s`.
 Scans `fire` unless `s` is fed by its owner or is active and already holds the list of this step.
+On a list shared by several consumers (an owned list, see `spike_index`) it must be called on the
+stepping thread, never from inside a `foreach_chunk` body: the scan writes the shared buffer.
 """
 @inline function spike_list!(s::SpikeIndex, fire::AbstractVector{Bool})
     s.fed && return @inbounds view(s.idx, 1:s.n)
@@ -85,10 +96,40 @@ end
 `SpikeIndex` of capacity `N` whose owner writes the ascending list `idx[1:n]` of the firing neurons itself
 every step (`fed`), as the `Identity` population and the Poisson stimuli do.
 """
-fed_spike_index(N::Integer) = SpikeIndex(Vector{Int32}(undef, N), 0, false, false, true)
+fed_spike_index(N::Integer) = SpikeIndex(Vector{Int32}(undef, N), 0, false, false, true, false)
 
-_arm!(s::SpikeIndex) = (s.fed || (s.active = true; s.valid = false); nothing)
-_disarm!(s::SpikeIndex) = (s.fed || (s.active = false; s.valid = false); nothing)
+"""
+    owned_spike_index(N)
+
+`SpikeIndex` of capacity `N` owned by a population of the integrate-and-fire family (its `spikes` field): shared by the
+connections and the recorder of the population, opened and closed by the simulation loop (`_publish_spikes!`,
+`_retire_spikes!`), never by the connections.
+"""
+owned_spike_index(N::Integer) = SpikeIndex(Vector{Int32}(undef, N), 0, false, false, false, true)
+
+# per-connection window of a scratch list; fed and owned lists are left to their owner
+_arm!(s::SpikeIndex) = ((s.fed || s.owned) || (s.active = true; s.valid = false); nothing)
+_disarm!(s::SpikeIndex) = ((s.fed || s.owned) || (s.active = false; s.valid = false); nothing)
+
+"""
+    _publish_spikes!(p::AbstractPopulation)
+    _retire_spikes!(p::AbstractPopulation)
+    _retire_all_spikes!(P)
+
+Window of the list owned by a population (`spike_index`). `_publish_spikes!` is called by `sim!`/`train!` right after
+`integrate!` and opens it lazily (`active`, not `valid`: the first consumer of the step scans `fire`, the others reuse
+the list); `_retire_spikes!` closes it (`_retire_all_spikes!(P)` at the end of every step, and in a `finally` around the
+run), after which every `spike_list!` call rescans `fire`. No-ops for populations without an owned list. O(1), no
+allocation.
+"""
+_publish_spikes!(::AbstractPopulation) = nothing
+_retire_spikes!(::AbstractPopulation) = nothing
+function _retire_all_spikes!(P)
+    for p in P
+        _retire_spikes!(p)
+    end
+    return nothing
+end
 
 """
     TouchList(N)
@@ -139,8 +180,18 @@ attach_driver!(::AbstractPopulation) = nothing
 """
     spike_index(pop::AbstractPopulation)
 
-`SpikeIndex` that a connection reading the spikes of `pop` uses: a new scratch list, except for
-populations that keep their own list up to date (`Identity` with list-aware stimuli), which
-return it so that the connections share it and never scan `pop.fire`.
+`SpikeIndex` that a connection reading the spikes of `pop` uses, a new scratch list by default. Populations that keep
+their own list return it, so that the connections share it:
+- the integrate-and-fire family (`IF`, `AdEx`, `ExtendedIF`, `HetRec`, `Tripod`, `BallAndStick`, `HH`, `IZ`,
+  `MorrisLecar`) owns one list (`pop.spikes`, `owned`), the same object at every call. `sim!`/`train!` open its window
+  after `integrate!` of the population and close it at the end of the step: inside the window `fire` is scanned once,
+  by the first consumer (a connection or the `:fire` recorder), and every later consumer of the step reuses the list.
+  Contract: no component may write `pop.fire` between `integrate!` of `pop` and the end of the step (flags set by hand
+  from a custom component are not seen by the consumers after the first). Outside the window (direct calls of
+  `forward!`, `plasticity!`, `record!`, manual loops, populations not passed to `sim!`) every call rescans `fire`.
+  A step interrupted by an exception leaves the list open until the next step publishes or retires it; `sim!` and
+  `train!` close every list of `P` on exit.
+- populations that write the list themselves (`Identity` with list-aware stimuli, the Poisson populations in the
+  sparse regime) return their fed list, and the connections never scan `pop.fire`.
 """
 spike_index(p::AbstractPopulation) = SpikeIndex(length(p.fire))
