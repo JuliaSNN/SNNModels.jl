@@ -50,6 +50,63 @@ function SNNpath(path, name, info, type, count)
 end
 
 """
+    check_loaded_model(x; what = "file")
+
+Throw an `ArgumentError` if `x` (a loaded model, params or `NamedTuple`/`Dict` of them) contains
+a `JLD2.ReconstructedMutable` or `JLD2.ReconstructedStatic` placeholder, searching recursively
+through tuples, dictionaries, arrays of non-bits elements and struct fields. JLD2 builds such
+placeholders when the file holds a type whose layout no longer exists in the running SNNModels.
+This is the case for the `model` of files saved with SNNModels <= 1.9.1 (the clock `Time`, and
+`SpikingSynapse`, `SpikeTimeStimulus`, `Identity` or the STDP rule objects changed layout). They
+load without error and then fail in `train!` with an unrelated message. No migration is attempted. Returns `x`.
+"""
+function check_loaded_model(x; what::AbstractString = "file")
+    seen = Base.IdSet{Any}()
+    _check_reconstructed(x, seen, what, "")
+    return x
+end
+
+# the deepest placeholder below `x`: names the layout that changed rather than its container
+function _innermost_placeholder(x)
+    for v in getfield(x, :fields)
+        (v isa JLD2.ReconstructedMutable || v isa JLD2.ReconstructedStatic) && return _innermost_placeholder(v)
+    end
+    return x
+end
+
+function _check_reconstructed(x, seen, what, path)
+    if x isa JLD2.ReconstructedMutable || x isa JLD2.ReconstructedStatic
+        x = _innermost_placeholder(x)
+        tn = string(typeof(x).parameters[1])
+        length(tn) > 90 && (tn = first(tn, 87) * "...")
+        throw(ArgumentError(
+            "The $what holds an object of the type `$tn` that JLD2 could not rebuild" *
+            (isempty(path) ? "" : " (at $path)") * ": it was saved with an older SNNModels " *
+            "(<= 1.9.1) layout that this version cannot read. Rebuild the model from its " *
+            "configuration, or open the file with SNNModels 1.9.1.",
+        ))
+    end
+    (x === nothing || x isa Union{Number,AbstractString,Symbol,Function,Type,Module}) && return
+    x isa AbstractArray && isbitstype(eltype(x)) && return
+    ismutable(x) && (x in seen ? (return) : push!(seen, x))
+    if x isa AbstractDict
+        for (k, v) in x
+            _check_reconstructed(v, seen, what, string(path, "[", repr(k), "]"))
+        end
+    elseif x isa AbstractArray || x isa Tuple
+        for (i, v) in enumerate(x)
+            _check_reconstructed(v, seen, what, string(path, "[", i, "]"))
+        end
+    elseif isstructtype(typeof(x))
+        for f in fieldnames(typeof(x))
+            isdefined(x, f) || continue
+            _check_reconstructed(getfield(x, f), seen, what, string(path, ".", f))
+        end
+    end
+    return
+end
+
+"""
     SNNload(; path, name = "", info = nothing, count = 0, suffix = "", type = :model)
     SNNload(path, name = "", info = nothing)
 
@@ -95,7 +152,7 @@ function SNNload(;
     ## Check if path is a directory
     if isfile(path)
         @info "Loading $(path)"
-        return dict2ntuple(DrWatson.load(path))
+        return dict2ntuple(check_loaded_model(DrWatson.load(path); what = "file $(path)"))
     else
         if isempty(name) || isnothing(info)
             throw(
@@ -119,6 +176,7 @@ function SNNload(;
     DATA = JLD2.load(file)
     @info "$type $(name)"
     @info "Loading time:  $(round(time()-tic, digits=2)) seconds"
+    check_loaded_model(DATA; what = "$type file $(file)")
     return dict2ntuple(DATA)
 end
 
@@ -287,7 +345,7 @@ function _sync_model_weights!(model)
     return model
 end
 
-export load, save, load_model, load_data, SNNload, SNNsave, SNNpath, SNNfolder, savename
+export check_loaded_model, load, save, load_model, load_data, SNNload, SNNsave, SNNpath, SNNfolder, savename
 
 """
     save_model(; model, path, name, info, config = nothing, kwargs...)

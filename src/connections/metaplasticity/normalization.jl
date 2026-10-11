@@ -157,6 +157,7 @@ function SynapseNormalization(synapses; param::NormParam, kwargs...)
     targets[:synapses] = [syn.id for syn in synapses]
     for syn in synapses
         @assert isa(syn, AbstractSparseSynapse)
+        sync_weights!(syn)   # event-driven rules (vSTDPParameter) keep `W` stale between syncs
         @unpack rowptr, W, index = syn
         Is = 1:(length(rowptr)-1)
         @assert length(Is) == N

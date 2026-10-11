@@ -149,6 +149,7 @@ function AggregateScaling(N, synapses; param::AggregateScalingParameter, kwargs.
     fire = synapses[1].fireI
     for syn in synapses
         @assert isa(syn, AbstractSparseSynapse)
+        sync_weights!(syn)   # event-driven rules (vSTDPParameter) keep `W` stale between syncs
         @unpack rowptr, W, index, fireI = syn
         Is = 1:(length(rowptr)-1)
         @assert length(Is) == N

@@ -6,7 +6,7 @@ plasticity calls, no per-step passes over the neurons when a `SpikeTimeStimulus`
 Weights of the event-driven STDP rules are no longer bit-identical to 1.9.1 (lazy trace decay, differences up
 to about 1e-5 relative, see "Behaviour notes"); the other models checked are, except delayed transmission at a
 `dt` that is not exactly representable in Float32. Breaking changes in the types (listed with their migration below);
-saved models from 1.9.1 or earlier cannot be loaded. `vSTDPParameter` is now the event-driven voltage-based rule (the dense one
+saved models from 1.9.1 or earlier cannot be used (`load_model` throws an `ArgumentError` at load time, see "Saved models and parameters"). `vSTDPParameter` is now the event-driven voltage-based rule (the dense one
 is `vSTDPDenseParameter`) and its weights are read through `plasticity_value(syn, :W)`; the library runs in Float64 when the
 populations are built with `Float64` state (see "Precision from the population type").
 
@@ -19,7 +19,10 @@ populations are built with `Float64` state (see "Precision from the population t
   0.020 s (pinned core; traces always lazy, 0.017 s and 0.032 s with the previous dense decay). Same task against compiled Brian2 and Auryn: see the README of that directory.
 - Delayed synapses (audit measurement, 1000 x 1000 neurons, p = 0.1, `delay_dist = Uniform(0.5, 5)`, `sim!` of 1 s):
   0.119 s to 0.046 s.
-- The pair-STDP `train!` step with `Identity` populations driven by `SpikeTimeStimulus` allocates 0 B (was 336 B).
+- The pair-STDP `train!` step with `Identity` populations driven by `SpikeTimeStimulus` allocates 0 B (was 336 B). Allocation per `train!`
+  step measured in the independent review (bytes, 1.9.1 to 1.10): delayed `IF` network 17000 to 240; STP event 272 to 240;
+  `vSTDPParameter` 848 to 240; balanced `sim!` 596 to 384; `AdEx` 0 to 0; `Tripod` 560 to 560 (unchanged: per-step allocations remain
+  in the network step, 240 B with a `PoissonStimulus`).
 - Sparse Poisson stimuli (`PoissonStimulus`, `PoissonStimulusLayer` with `PoissonLayer` and `PoissonLayerHet`): the
   spikes are sampled without one random number per input neuron and step, and the stimuli use the sparse hand-off
   of `SpikeTimeStimulus`. Microbenchmarks (`julia -t 1`, median of 3, `dt = 0.1`, us per `train!` step, whole network):
@@ -27,7 +30,9 @@ populations are built with `Float64` state (see "Precision from the population t
   `PoissonStimulus` at 10 Hz) 7.43 to 0.23 (33x); the same with a 1000-neuron `PoissonLayer` (one-to-one) 1.28 to 0.25;
   Vogels-Abbott-like 3200 E + 800 I `IF` network (p = 0.02) with a `PoissonStimulus` of 20 Hz per neuron
   86.6 to 56.0, with two 1000-neuron `PoissonLayer`s at 10 Hz (p = 0.1) 63.9 to 56.5 (the rest of these two is the
-  integration of 4000 `IF` neurons and the recurrent `forward!`). A `stimulate!` step allocates 0 B.
+  integration of 4000 `IF` neurons and the recurrent `forward!`). Allocation of `stimulate!` of a `PoissonStimulus`: 0 B
+  was not verified in isolation; an `IF` network with a `PoissonStimulus` allocates 240 B per `train!` step in 1.10 and in 1.9.1 (measured in the
+  independent review, whole step, source not isolated).
   - Sampler. `PoissonStimulus` draws a Poisson count per neuron (as before). A neuron has at least one spike with
     probability `q = 1 - exp(-rate dt)`, independently, so the neurons that spike form a Bernoulli(`q`) sequence along
     `neurons`: the gap to the next one is `floor(-log(1 - U) / (rate dt))` (geometric), and the count of a visited neuron
@@ -205,18 +210,26 @@ Each item gives the migration.
   `lazy_decay` field: `STDPGerstner(lazy_decay = ...)` is a `MethodError`). `STDPStructuredVariables` is now a
   `LTPVariables`. Reading `syn.LTPVars.tpre` (`tpost`, `r1`, `r2`, `o1`, `o2`, `to_x`, `to_y`, `tr_x`, `tr_y`) directly
   returns the STORED values, not the traces, and `syn.STPVars.u`, `.x` of the event-driven Markram
-  rules are the values at the last presynaptic spike, not relaxed to the current time. Migration: read through
+  rules are the values at the last presynaptic spike, not relaxed to the current time. Recorded `u` and `x` of the event Markram
+  rules (and recorded traces) therefore change meaning: 1.9.1 recorded the stored values at the last spike, 1.10 records the true
+  values; the recordings of the two versions differ by up to 0.135 (`u`) and 0.77 (`x`) (independent review, event and `Het`
+  rules), and the new event recordings agree with the new `Timestep` rule to 1.1e-4 (`u`) and 5.1e-4 (`x`). The `rho` is
+  bit-identical. Comparisons of recordings across versions break for these variables. Migration: read through
   `trace_values(syn, :tpre)` / `plasticity_value(syn, :LTPVars, :tpre, t)`, or call `sync_traces!(syn)` first;
   `monitor!`, `getvariable` and `record` already return values. The internal `_decay!(x, f)` is now `_rescale!(x, s)`.
-- Saved models and parameters. A model saved with SNNModels 1.9.1 or earlier by `save_model`/`SNNsave` (JLD2) that
-  contains a `SpikingSynapse`, a `SpikeTimeStimulus` or an `Identity` cannot be loaded: `load_model` throws a
-  `MethodError` (JLD2 reconstructs the objects, then cannot convert them to the new types; checked on models
-  with a plain, a plastic and a delayed synapse, a stimulus, and an `Identity`). Parameter objects of
+- Saved models and parameters. A model file saved with SNNModels 1.9.1 or earlier by `save_model`/`SNNsave` (JLD2) cannot be
+  used. JLD2 does not fail at load for most of them: for population-only, plain, STDP and delayed-synapse models alike it
+  returns placeholder objects (`JLD2.ReconstructedMutable`: the clock `Time` of the model, `SpikingSynapse`, `SpikeTimeStimulus`
+  and the STDP rule objects changed layout), and `train!` on them fails with an unrelated "Invalid argument type" error
+  (independent review; 1.9.1 files of a plain, a plastic and a delayed synapse, a population only; an `Identity` file raises a
+  `MethodError` inside JLD2 at load). `load_model`, `load_data` and `SNNload` now check the loaded object recursively
+  (`check_loaded_model`, exported) and throw an `ArgumentError` at load time that names the offending type and states that the file was
+  saved with an older SNNModels (<= 1.9.1) layout. No migration is attempted. Parameter objects of
   `STDPGerstner`, `STDPTriplet`, `STDPWeightDependent`, `STDPConfavreux2025` saved in any JLD2 file (a
-  configuration, an Optuna artifact) are also reconstructed, together with the container that holds them.
-  Models with populations only, and the parameters `iSTDPRate`, `MarkramSTPParameter*`, `IFParameter`,
-  `STDPMexicanHat`, `NoLTP`, load. Migration: re-create the model from its configuration and save it again with
-  1.10, or load the old file with 1.9.1; the raw arrays of an old file stay readable with `JLD2.load` (fields of
+  configuration, an Optuna artifact) are also reconstructed, together with the container that holds them; the check is only
+  applied by the SNNModels load functions (`OptunaLoader` skips the stripping of such files). The parameters `iSTDPRate`,
+  `MarkramSTPParameter*`, `IFParameter`, `STDPMexicanHat`, `NoLTP` load. Migration: re-create the model from its configuration and
+  save it again with 1.10, or load the old file with 1.9.1; the raw arrays of an old file stay readable with `JLD2.load` (fields of
   the reconstructed objects). No JLD2 upgrade (typemap) is provided.
 - `vSTDPParameter` is the event-driven voltage-based rule, `vSTDPDenseParameter` the dense one (breaking). Up to 1.9 and in the
   1.10 development tree before this change `vSTDPParameter` was the clock-driven rule (now `vSTDPDenseParameter`,
@@ -301,9 +314,14 @@ Each item gives the migration.
   A non-finite `τabs` makes `AdEx` and `ExtendedIF` throw at the first step instead of at the first spike.
 - Delays at a `dt` that is not exactly representable in Float32 (0.1, 0.05, 0.025 ms) are not bit-identical to
   1.9.1: 1.9.1 compared the arrival time with the Float32 clock, which accumulates `dt` and drifts, so a delay that
-  is an exact multiple of `dt` arrived one step late in about 40 % of the emissions and a continuous delay arrives a
-  step late in 0.3 % (`dt = 0.1`) to 0.8 % (`dt = 0.05`). The ring buffer counts steps and is exact. Trajectories of
-  chaotic networks differ from 1.9.1 accordingly (statistics do not). At `dt = 0.125` (a power of two) results are
+  is an exact multiple of `dt` arrived one step late in 59.6 % of the events at `dt = 0.1`, 80 % at 0.05, 39 % at 0.025 and
+  22 % at 0.2 (measured in the independent review, delays 0.8, 1.0, 2.5 ms and Dirac; fraction of events delivered one step earlier
+  by 1.10 than by 1.9.1). A continuous delay (`Uniform(0.5, 5)`) arrived a step late in 0.08 % of the events at `dt = 0.1`; at
+  `dt = 0.05` 0.04 % late and 0.24 % early (1.9.1 also delivered some events a step early). The ring buffer counts steps and is exact.
+  Trajectories of chaotic networks differ from 1.9.1 accordingly. Statistics: balanced E/I network, 10 s, `dt = 0.1`, delay 0.8:
+  N = 500 unchanged (rate 6.11 to 6.22 Hz, KS p = 0.22, CV p = 0.93); N = 2000 the rate distribution shifts by 1.6 %
+  (6.51 to 6.61 Hz, KS D = 0.064, p < 1e-3, CV p = 0.11). The shift is the 1.9.1 delay bias: 1.10 is closer to Auryn (6.61 Hz) and
+  Brian2 (6.73 Hz) than 1.9.1 (KS against Auryn: D = 0.022, p = 0.71 for 1.10, D = 0.056, p = 0.004 for 1.9.1). At `dt = 0.125` (a power of two) results are
   identical.
 - Lazy decay is not bit-identical to the 1.9.1 dense decay (the dense Float32 product chain and `x * scale` round
   differently): weights differ from 1.9.1 by a few Float32 rounding steps, up to about 1e-5 relative in long chaotic
@@ -317,7 +335,9 @@ Each item gives the migration.
   structured rules read the traces of the previous step; `STDPMexicanHat` reads traces that contain this step's spikes).
   Against the dense Float32 kernels of 1.9.1 (1500 steps, 50 x 40 synapses, 5 % spikes per step; `test/syn/lazy_traces_euler.jl`):
   max|dW| 9.5e-6 (`iSTDPRate`, weights up to 32), 3.8e-6 (`STDPMexicanHat`), 7.6e-6 (`STDPSymmetric`), 8.6e-6
-  (`STDPAntiSymmetric`), i.e. 3e-7 to 8e-7 of the largest weight (a few ulps). Against a Float64 run of the dense
+  (`STDPAntiSymmetric`), i.e. 3e-7 to 8e-7 of the largest weight (a few ulps). The independent review (random trains, 10 s, weights
+  15 to 25) measured 3.5e-5 absolute for `STDPSymmetric` (2.3e-6 relative to the largest weight), 9.5e-6 for `STDPMexicanHat`, 7.6e-6 for
+  `iSTDPRate`, at most 3.8e-6 for the others: all below 1e-4 but `STDPSymmetric` is 3 to 5 times the figure above. Against a Float64 run of the dense
   kernel the lazy weights are as close as the Float32 dense ones (1.6e-5 / 8.9e-6 / 9.2e-6 against 1.5e-5 / 9.9e-6 /
   9.5e-6 for `iSTDPRate` / `STDPSymmetric` / `STDPAntiSymmetric`). The factor is kept in `Float64`; a Float32 factor
   biased the effective time constant by 1e-5 and the weights by 1e-4 (measured, rejected). Recorded traces equal an
@@ -417,7 +437,7 @@ A rule that defers its weight update (the event-driven `vSTDPParameter`) now use
 - Readers of `syn.W` in the library, and what was done: `matrix(c)` reads through the accessor (a new sparse matrix; was stale);
   `update_weights!` (both forms), `update_sparse_matrix!` (both forms, hence `connect!`) and `synaptic_turnover!` materialise first (a value set
   by the user must not receive the pending potentiation, and the per-synapse snapshot is not reordered by a rewiring); `SynapseNormalization`,
-  `AggregateScaling`, `Turnover` (immediate `plasticity!` methods) materialise the synapses before they rescale (the pending increment was not
+  `AggregateScaling`, `Turnover` (immediate `plasticity!` methods; and the constructors of `SynapseNormalization` and `AggregateScaling`, which sum the weights into `W0`/`WT`) materialise the synapses before they rescale (the pending increment was not
   rescaled before: a limitation of the first version, now removed); `with_plasticity` and `update_plasticity!` materialise before the state of the old rule is dropped;
   `save_model`/`SNNsave` (both files) materialise every sparse synapse of the model before writing, so a saved model never stores a stale `W` (the epoch
   restarts: a perturbation of the later trajectory at the rounding level; the saved state is otherwise the live one); `modelcopy` copies the deferred
@@ -434,8 +454,9 @@ A rule that defers its weight update (the event-driven `vSTDPParameter`) now use
   `examples/tutorials/plasticity/AdEx_plasticity.jl` (updated), its docs (`plasticity.md`, `catalogue/plasticity_rules.md`, updated),
   `SpikingNeuralNetworks` explicit export list (`vSTDPDenseParameter` added), `docs/src/catalogue/snnutils_models.md` (describes the parameter sets), commented
   uses in `examples/utils/{load_cluster,get_graph,load_model}.jl`, and the validation scripts in `papers/JuliaSNN_publication/validation/sweep_bugs`
-  (`measure_other.jl`, a one-synapse dt-independence check: reads `syn.W` and `LTPVars.x` directly, so it measures the dense rule only if
-  changed to `vSTDPDenseParameter`).
+  (`measure_other.jl`, a one-synapse dt-independence check: now reads `W` and `x` through `plasticity_value`; rerun with 1.10: dW of the
+  one-pre-spike test 0.30327 / 0.30306 / 0.30293 at dt 0.125 / 0.0625 / 0.025, peak x 0.0667, dW at rest 0, i.e. the dt independence holds, as in
+  the 1.9.x data).
 - Tests: `test/syn/lazy_weights.jl` (41).
 
 ### Precision from the population type (Float32 default, Float64 by the type of the populations)
@@ -498,8 +519,8 @@ no global flag, no separate precision argument.
   turnover period) are lazy-able and not converted.
 - The sparse hand-off needs every writer of an `Identity` to be a `SpikeTimeStimulus` (any other writer, such as a connection or
   a stimulus without a log, makes the population use the dense update; results are the same, only slower). Other populations (`Poisson`, `IF`, ...) do not keep a spike list: their synapses scan `fire` once per step.
-- Models and JLD2 files saved with 1.9.1 or earlier that contain `SpikingSynapse`, `SpikeTimeStimulus`, `Identity`
-  or the four STDP rule parameters cannot be loaded (see Breaking changes).
+- Models and JLD2 files saved with 1.9.1 or earlier are refused by `load_model`/`load_data`/`SNNload` with an `ArgumentError`
+  (see Breaking changes); direct `JLD2.load` of such a file returns placeholder objects.
 - If the delay buffer is resized (`dt` or delays changed while spikes are in flight), the queued increments are
   dropped; the in-flight increments are not rescaled when `dt` changes without a size change.
 - The Float32 clock `T.t[1] += dt` still drifts (work in progress on the local branch `wip-clock`): stimuli that

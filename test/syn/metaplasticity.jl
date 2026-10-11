@@ -73,5 +73,28 @@ using Test
         @test at.fraction ≈ 0.05f0
     end
 
+    @testset "constructors read synced weights (event-driven vSTDPParameter)" begin
+        # `W` of an event-driven vSTDP synapse is stale between syncs: the constructors must sync first
+        function build_vs()
+            dt = 0.125f0; nsteps = 4000
+            clock = accumulate((a, _) -> a + dt, 1:nsteps; init = 0.0f0)
+            rng = SNNModels.Random.MersenneTwister(4)
+            idx = [(k, i) for k in 1:nsteps-1 for i in 1:40 if rand(rng) < 40 * dt * 1e-3]
+            src  = Identity(N = 40, name = "src")
+            post = IF(N = 20, param = IFParameter(El = -49mV), name = "post")
+            stim = SpikeTimeStimulusIdentity(src, :g, param = SpikeTimeParameter(Float32.(clock[first.(idx)]), last.(idx)), name = "stim")
+            B = SpikingSynapse(src, post, :ge; conn = (p = 0.5, μ = 2.0), LTPParam = vSTDPParameter(θ_LTD = -60.0f0, θ_LTP = -55.0f0, A_LTP = 5f-3, A_LTD = 1f-3), name = "B")
+            return compose(; src, post, B, stim, silent = true), B
+        end
+        rowsums(B) = (Wc = Float64.(plasticity_value(B, :W)); w = zeros(20); for (s_, i_) in enumerate(B.I); w[i_] += Wc[s_]; end; w)
+        m, B = build_vs(); train!(m, 400ms)
+        @test maximum(abs.(Float64.(B.W) .- Float64.(plasticity_value(B, :W)))) > 1f-4   # the premise: W is stale here
+        nrm = SynapseNormalization([B]; param = MultiplicativeNorm(τ = 100ms))
+        @test nrm.W0 ≈ rowsums(B) atol = 1e-4
+        m, B = build_vs(); train!(m, 400ms)
+        agg = AggregateScaling(20, [B]; param = AggregateScalingParameter(20, 5Hz))
+        @test agg.WT ≈ rowsums(B) atol = 1e-4
+    end
+
 end
 true
