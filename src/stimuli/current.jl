@@ -1,9 +1,8 @@
 """
     CurrentParameter <: AbstractStimulusParameter
 
-Supertype of the parameters of a [`CurrentStimulus`](@ref). The only subtype loaded in
-SNNModels 1.8.4 is [`CurrentNoise`](@ref). (A time-dependent current parameter exists in
-`src/stimuli/variable_inputs.jl`, which is not included by the package.)
+Supertype of the parameters of a [`CurrentStimulus`](@ref). The only subtype is
+[`CurrentNoise`](@ref).
 """
 abstract type CurrentParameter <: AbstractStimulusParameter end
 

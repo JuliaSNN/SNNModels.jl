@@ -60,9 +60,7 @@ SNNModels.jl/src/
 │   │   ├── STDP_triplet.jl  STDPTriplet, STDPTripletVariables (Pfister-Gerstner 2006)
 │   │   ├── iSTDP.jl         iSTDPRate, iSTDPPotential
 │   │   ├── vSTDP.jl         vSTDPParameter
-│   │   ├── CaRule.jl        CaPlasticityParameter (legacy; uses c.plasticity)
-│   │   ├── STDP_structured.jl  STDPSymmetric, STDPAntiSymmetric (Festa 2024)
-│   │   └── dump.jl          (utility/debug)
+│   │   └── STDP_structured.jl  STDPSymmetric, STDPAntiSymmetric (Festa 2024)
 │   ├── metaplasticity/
 │   │   ├── normalization.jl    SynapseNormalization (MultiplicativeNorm/AdditiveNorm)
 │   │   ├── aggregate_scaling.jl  AggregateScaling
@@ -82,7 +80,6 @@ SNNModels.jl/src/
 │   ├── timed.jl         SpikeTimeParameter, SpikeTimeStimulusParameter → SpikeTimeStimulus
 │   ├── balanced.jl      BalancedParameter → BalancedStimulus
 │   ├── stimulus_group.jl  StimulusGroup
-│   ├── variable_inputs.jl VariableInputParameter (func-driven current; INCOMPLETE)
 │   └── empty.jl         EmptyStimulus
 └── analysis/
     ├── spikes.jl        spiketimes, firing_rate, bin_spiketimes, gaussian_smooth, kernels,
@@ -397,7 +394,6 @@ set_plasticity!(syn, param, state)
 | `vSTDPParameter` | **continuous** u(post), v(post), x(pre) `@turbo` | `Threads.@threads` over pre chunks | yes | `A_LTD, A_LTP, θ_LTD, θ_LTP, τu, τv, τx, Wmax, Wmin` |
 | `iSTDPRate` | **continuous** dt decay `@turbo` | clamp on spike `@turbo` col/row | none | `η, r, τy, Wmax, Wmin` |
 | `iSTDPPotential` | **continuous** tpost tracks v_post | on spike, no `@turbo` | none | `η, v0, τy, Wmax, Wmin` |
-| `CaPlasticityParameter` | **continuous** dt decay `@turbo` | row+col scan on spike | none | `A_pre, A_post, τpre, τpost, Wmax, Wmin` |
 | `STDPSymmetric` | **continuous** to_x/tr_x `@turbo` | row+col on spike | none | `A_x, A_y, τ_x, τ_y, αpre, αpost, Wmax, Wmin` |
 | `STDPAntiSymmetric` | same | same | none | same |
 
@@ -489,12 +485,6 @@ neurons(stim)                   # → vector of targeted neuron indices
 **`BalancedStimulus`** (balanced.jl):
 - Maintains separate `ge, gi` conductance vectors
 - `kIE`: inhibitory scaling factor; `β`: OU noise amplitude; `same_input`: broadcast vs per-neuron
-
-**`VariableInputParameter`** (variable_inputs.jl):
-- `VariableInputParameter(variables::Dict, target::Symbol, func::Function)`
-- `stimulate!` calls `func(variables, t, neuron_id)` → I[i] each step
-- Helper functions: `ramping_current`, `OrnsteinUhlenbeckProcess`, `SinWaveNoise`
-- **INCOMPLETE**: `stimulate!` dispatches on `VariablesParameter` which is undefined in this file
 
 ---
 
@@ -844,12 +834,9 @@ Fix candidate: `Threads.@threads` over pre chunks, with per-thread g-buffer to a
 If Npre ≠ Npost this silently reads/writes wrong memory.
 Fix: `x::VFT = zeros(Npre)`.
 
-### 10.4 CaRule.jl is legacy/broken
+### 10.4 Removed in 2.0
 
-`CaRule.jl` defines its own duplicate `STDPVariables` struct and dispatches on `c.plasticity`
-(not `c.LTPVars`). `SpikingSynapse` has no `plasticity` field — this code is dead.
-Either the rule was never ported from an older SpikingSynapse design, or it was replaced by
-the STDP_traces.jl rules. **Needs cleanup or port.**
+`CaRule.jl` (legacy, never included) was deleted; restore from git history if needed.
 
 ### 10.5 change_plasticity! has undefined variable
 
@@ -858,15 +845,14 @@ in scope (should be `LTP`). Same bug in STP branch.
 This function silently fails at runtime whenever called.
 Fix: replace `param` with `LTP` / `STP` in the respective branches.
 
-### 10.6 variable_inputs.jl: stimulate! dispatches on undefined type
+### 10.6 Removed in 2.0
 
-`stimulate!(p, param::VariablesParameter, ...)` — `VariablesParameter` is not defined anywhere.
-Should be `VariableInputParameter`. The stimulus is therefore unreachable via the normal sim loop.
+`stimuli/variable_inputs.jl` (never included) was deleted; restore from git history if needed.
 
 ### 10.7 Trace update scheme inconsistent across STDP rules
 
 `STDPGerstner`/`STDPConfavreux2025`/`STDPWeightDependent`/`STDPTriplet`: exact multiplicative decay per step (Auryn style, event-driven weight updates).
-`STDPMexicanHat`/`iSTDP`/`vSTDP`/`CaRule`/`STDPStructured`: continuous per-dt decay.
+`STDPMexicanHat`/`iSTDP`/`vSTDP`/`STDPStructured`: continuous per-dt decay.
 Mixed schemes in same codebase → different numerical precision and behaviour under the same model.
 
 ### 10.8 Recording allocates on every retrieval

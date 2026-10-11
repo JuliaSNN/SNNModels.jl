@@ -71,7 +71,6 @@ Neuron Models:
 - [ ] populations/identity.jl - Identity/pass-through
 - [ ] populations/generalized_if/if_extended.jl - Extended IF model
 - [ ] populations/generalized_if/adex.jl - Adaptive exponential IF
-- [ ] populations/generalized_if/if_CANAHP.jl - IF with calcium-activated K
 - [ ] populations/morrislecar.jl - Morris-Lecar model
 - [ ] populations/wilsoncowan.jl - Wilson-Cowan model
 
@@ -79,7 +78,6 @@ Multi-compartment Models:
 - [ ] populations/multicompartment/ballandstick.jl
 - [ ] populations/multicompartment/dendrite.jl
 - [ ] populations/multicompartment/tripod.jl
-- [ ] populations/multicompartment/multipod.jl
 
 ### Priority 3: Document Synapse Models (≈10 files)
 - [ ] populations/synapse/synapses.jl - Main synapse interface
@@ -106,7 +104,6 @@ Multi-compartment Models:
 - [ ] connections/sparse_plasticity/iSTDP.jl
 - [ ] connections/sparse_plasticity/vSTDP.jl
 - [ ] connections/sparse_plasticity/STP.jl
-- [ ] connections/sparse_plasticity/CaRule.jl
 
 ### Priority 5: Document Metaplasticity & Stimuli (≈12 files)
 Metaplasticity:
@@ -122,7 +119,6 @@ Stimuli:
 - [ ] stimuli/timed.jl
 - [ ] stimuli/balanced.jl
 - [ ] stimuli/stimulus_group.jl
-- [ ] stimuli/variable_inputs.jl
 
 ### Priority 6: Document Analysis (3 files)
 - [ ] analysis/spikes.jl

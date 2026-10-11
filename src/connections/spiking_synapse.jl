@@ -168,7 +168,7 @@ weight-dependent, structured and inhibitory event-driven STDP rules and the even
 same chunks as the postsynaptic population: chunk `c` adds to `g[post chunk c]` (and the delay buffer rows of that range) and updates the weights of the
 synapses that end there, using the sub-row pointers `chunkptr` (built on first use, 4 (nchunks + 1) bytes per presynaptic neuron, invalidated by
 `update_sparse_matrix!`). Every target receives its additions in the order of the serial loop, so the results are bit-identical for any chunking and any
-number of threads. Synapses with less work than `SNNModels.SYN_MIN_OPS[]` operations per step run on the calling thread. The voltage-based vSTDP, CaRule and
+number of threads. Synapses with less work than `SNNModels.SYN_MIN_OPS[]` operations per step run on the calling thread. The voltage-based vSTDP and
 `iSTDPPotential` plasticity stays serial.
 
 # Notes

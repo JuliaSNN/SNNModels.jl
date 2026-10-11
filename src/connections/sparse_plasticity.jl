@@ -378,7 +378,6 @@ Non-constant global holding `NoLTP()`, kept for backward compatibility. Use `NoL
 NoSTDP
 include("sparse_plasticity/vSTDP.jl")
 include("sparse_plasticity/iSTDP.jl")
-# include("sparse_plasticity/longshortSP.jl")
 include("sparse_plasticity/STDP_kernels.jl")
 include("sparse_plasticity/STDP_traces.jl")
 include("sparse_plasticity/STDP_weight_dependent.jl")
