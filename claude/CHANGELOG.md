@@ -157,7 +157,8 @@ populations are built with `Float64` state (see "Precision from the population t
     STDP and STP, a change of dt) and `threading_synapses.jl` (1, 4, 8 threads); spike rasters and final `v`, `g`, buffers SHA1-identical
     to the previous commit for T8 (N = 2000, 500 Hz), T4 (delay 0.8), T7 (delay 5 ms) and the Float64 DoubleExp network.
   - Constant delays without plasticity (`NoLTP` and `NoSTP`, a delay of `d` steps stored once) delay the spike list instead of the
-    increments (`param.spike_ring`: the lists of the last `d + 1` steps, capacity kept, 0 B per step after warm-up): the list emitted `d`
+    increments, so on this path the weight `W` is read at arrival, not at emission (`param.spike_ring`: the lists of the last `d + 1`
+    steps, capacity kept, 0 B per step after warm-up): the list emitted `d`
     steps ago is scattered straight into `g` (one touch, `@simd ivdep`), with no arrival pass over the targets; the buffer is not
     allocated on this path (0 rows; its `Npost` rows are created when the buffer path runs, e.g. after `with_plasticity`). Adopted by
     the rule of the plan: after the previous item the arrival pass was still 55 % of `forward!` at 1 Hz (1.36 of 2.49 us per step at
