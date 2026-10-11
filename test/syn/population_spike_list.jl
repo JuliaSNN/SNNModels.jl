@@ -30,8 +30,14 @@ function _PL.forward!(c::_PLProbe, ::_PLProbeParam, dt::AbstractFloat, T::_PL.Ti
     pop = c.pop
     s = pop.spikes
     active, valid = s.active, s.valid          # state left by the consumers that ran before the probe
+    ref = Int32.(findall(pop.fire))
+    # one scan per step: invert `fire` before reading the list. A rescan would return findall(.!fire) != ref; the
+    # list built by the first consumer of the step is returned unchanged. `fire` is restored before returning.
+    saved = copy(pop.fire)
+    pop.fire .= .!saved
     list = collect(_PL.spike_list!(s, pop.fire))
-    push!(c.log, (list, Int32.(findall(pop.fire)), active, valid))
+    copyto!(pop.fire, saved)
+    push!(c.log, (list, ref, active, valid))
     return nothing
 end
 _PL.plasticity!(c::_PLProbe, ::_PLProbeParam, dt::AbstractFloat, T::_PL.Time) = nothing
@@ -271,7 +277,7 @@ end
         ok_list, ok_sorted, ok_window, nspk = _pl_check_probe(probe)
         @testset "$(nameof(kind)) $mode" begin
             @test length(probe.log) == 400
-            @test ok_list
+            @test ok_list                            # read with `fire` inverted: no rescan by the second consumer
             @test ok_sorted
             @test ok_window                          # the synapse already scanned: the probe reuses the list
             @test nspk >= 50
@@ -532,12 +538,24 @@ end
     Random.seed!(1)
     Wd = Float32.(rand(N, N) .< 0.01)
     E = IF(N = N); pl = _PLPlain(N)
-    _ctor(pre, post) = @allocated SpikingSynapse(pre, post, :ge; conn = Wd)
+    # lists a synapse allocates: those not owned by its populations (owner pre: none; plain pre: one list of N Int32)
+    _new_lists(c, pre, post) = filter(x -> !any(p -> hasproperty(p, :spikes) && x === p.spikes, (pre, post)),
+                                      unique(objectid, [c.pre_spikes, c.post_spikes]))
+    so = SpikingSynapse(E, E, :ge; conn = Wd)
+    sp = SpikingSynapse(pl, E, :ge; conn = Wd)
+    @test so.pre_spikes === E.spikes && so.post_spikes === E.spikes
+    @test isempty(_new_lists(so, E, E))
+    lp = _new_lists(sp, pl, E)
+    @test length(lp) == 1 && lp[1] === sp.pre_spikes && sp.post_spikes === E.spikes
+    @test sum(l -> length(l.idx), lp) == N && eltype(lp[1].idx) == Int32
+    # allocation: 4N bytes saved per non-owner side (8N per synapse at c5aac91, where both lists were per synapse);
+    # loose bound, the rest of the constructor varies by tens of bytes between calls; a full collection before each
+    # call keeps pending finalizers (earlier tests) from running, and being counted, inside the measured call
+    _ctor(pre, post) = (GC.gc(); @allocated SpikingSynapse(pre, post, :ge; conn = Wd))
     _ctor(E, E); _ctor(pl, E)
-    a_owner = minimum(_ctor(E, E) for _ in 1:3)
-    a_plain = minimum(_ctor(pl, E) for _ in 1:3)
-    @test a_owner < a_plain
-    @test a_plain - a_owner >= 4N             # one list of N Int32 fewer (pre is an owner)
+    a_owner = minimum(_ctor(E, E) for _ in 1:5)
+    a_plain = minimum(_ctor(pl, E) for _ in 1:5)
+    @test a_plain - a_owner >= 3N
 end
 
 @testset "L13: no allocation per step" begin
@@ -570,7 +588,8 @@ end
         nsp += sum(pre.fire)
     end
     @test nsp > 50
-    @test all(e -> e[1] == e[2] && !e[3], probe.log)  # never published: every call rescans
+    # never published: every call rescans, so the probe (which inverts `fire`) reads the complement of the spikes
+    @test all(e -> e[1] == Int32.(setdiff(1:60, e[2])) && !e[3], probe.log)
 end
 
 end
