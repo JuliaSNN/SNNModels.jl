@@ -338,11 +338,17 @@ end
     off = without_plasticity(c)
     @test off !== c && typeof(off) === typeof(c) && _ps_lazy(off) && isempty(off.ρ)
     @test off.W === c.W && off.id == c.id
-    # no keyword: everything shared as it is
+    # no keyword: rules and state are kept; J/index are shared only if a rule of the source needs them
     m = _ps_net(ltpEE = STDPGerstner(), stpEE = MarkramSTPParameter())
     c = m.C[1]
     same = with_plasticity(c)
     @test same.J === c.J && same.index === c.index && same.ρ === c.ρ && same.LTPVars === c.LTPVars && same.STPVars === c.STPVars
+    # a never-plastic source whose transpose a reader built: no rule needs it, so the copy gets fresh empty J/index
+    r = _ps_net().C[1]
+    presynaptic(r, 1)
+    @test _ps_built(r)
+    r2 = with_plasticity(r)
+    @test _ps_lazy(r2) && _ps_built(r)
     # nothing keeps a rule and its state; only the given part is replaced
     k = with_plasticity(c; STP = NoSTP())
     @test k.LTPVars === c.LTPVars && k.J === c.J && isempty(k.ρ) && length(c.ρ) == length(c.W)
