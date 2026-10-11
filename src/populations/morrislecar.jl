@@ -116,7 +116,8 @@ SNN.sim!([E]; duration = 200ms, dt = 0.05ms)
 """
 MorrisLecar
 
-function integrate!(p::MorrisLecar, param::MorrisLecarParameter, dt::AbstractFloat)
+function integrate!(p::MorrisLecar, param::MorrisLecarParameter, dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
     @unpack N, v, w, ge, gi, fire, I = p
     @unpack Cm, τe, τi = param
     @unpack Ee, Ei = param

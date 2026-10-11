@@ -125,7 +125,8 @@ One step of the Izhikevich population: exponential decay of `ge`, `gi` (forward 
 half steps of the quadratic membrane equation, one step of `u`, the synaptic term, then spike
 detection (`v > 30`) with reset `v = c`, `u += d`. See `IZ`.
 """
-function integrate!(p::IZ, param::IZParameter, dt::AbstractFloat)
+function integrate!(p::IZ, param::IZParameter, dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
     @unpack N, v, u, fire, I = p
     @unpack a, b, c, d, τe, τi, Ee, Ei = param
     @unpack ge, gi = p

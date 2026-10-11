@@ -181,7 +181,8 @@ end
 Advance a `BallAndStick` population by `dt` (synapses, Heun step of soma and dendrite, spikes
 and refractoriness; see `BallAndStick`).
 """
-function integrate!(p::BallAndStick, param::DendNeuronParameter, dt::AbstractFloat)
+function integrate!(p::BallAndStick, param::DendNeuronParameter, dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
     N = Int(p.N)
     @unpack spike, soma_syn, dend_syn = p
     @unpack τabs, up = spike

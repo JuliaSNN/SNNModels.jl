@@ -55,7 +55,8 @@ WilsonCowan
     records::Dict = Dict()
 end
 
-function integrate!(p::WilsonCowan, param::WCParameter, dt::AbstractFloat)
+function integrate!(p::WilsonCowan, param::WCParameter, dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
     @unpack N, x, r, g, I = p
     _check_state_lengths(N, x, r, g, I)
     # `_tanh_inl`: the bits of `tanh`, with the exponential inlined so that the loop vectorises

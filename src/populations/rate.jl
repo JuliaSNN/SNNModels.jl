@@ -89,7 +89,8 @@ end
 One forward-Euler step of the rate units: `x += dt * (-x + g + I)`, `r = tanh(x)`, then
 `g = 0` (see `Rate`).
 """
-function integrate!(p::Rate, param::RateParameter, dt::AbstractFloat)
+function integrate!(p::Rate, param::RateParameter, dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
     @unpack N, x, r, g, I = p
     _check_state_lengths(N, x, r, g, I)
     # `_tanh_inl`: the bits of `tanh`, with the exponential inlined so that the loop vectorises

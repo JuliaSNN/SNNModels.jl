@@ -193,7 +193,8 @@ Advance a `Tripod` population by `dt`: update the synapses of the three compartm
 integrate the membrane equations with the Heun method and handle spikes and refractoriness
 (see `Tripod`).
 """
-function integrate!(p::Tripod, param::DendNeuronParameter, dt::AbstractFloat)
+function integrate!(p::Tripod, param::DendNeuronParameter, dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
     N = Int(p.N)
     @unpack spike, adex, soma_syn, dend_syn = p
     @unpack τabs, up = spike

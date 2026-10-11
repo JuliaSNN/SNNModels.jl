@@ -113,7 +113,8 @@ ExtendedIF
     Δv_temp::VFT = zeros(eltype(VFT), N)
 end
 
-function integrate!(p::ExtendedIF, param::ExtendedIFParameter, dt::AbstractFloat)
+function integrate!(p::ExtendedIF, param::ExtendedIFParameter, dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
     update_synapses!(p, param, dt)
     update_neuron!(p, param, dt)
 end

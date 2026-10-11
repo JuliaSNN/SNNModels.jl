@@ -75,7 +75,8 @@ end
 # the sparse update is valid while every writer of g logs its writes in `inbox`
 @inline _list_driven(p::Identity) = p.ndrivers > 0 && p.ndrivers == p.nwriters
 
-function integrate!(p::Identity, param::IdentityParam, dt::AbstractFloat)
+function integrate!(p::Identity, param::IdentityParam, dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
     driven = _list_driven(p)
     if driven && p.tracked && p.inbox.n <= length(p.inbox.idx)
         _integrate_sparse!(p)

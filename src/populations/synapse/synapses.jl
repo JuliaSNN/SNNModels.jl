@@ -95,7 +95,20 @@ the fallback throws an error.
 """
 synaptic_variables(synapse::AbstractSynapseParameter, N::Int) = synaptic_variables(synapse, N, float_type(synapse))
 function synaptic_variables(synapse::AbstractSynapseParameter, N::Int, ::Type{FT}) where {FT<:AbstractFloat}
+    _two_argument_only(synaptic_variables, synapse, FT) && return synaptic_variables(synapse, N)
     error("synaptic_variables not implemented for synapse type $(typeof(synapse))")
+end
+
+# Synapse models written for SNNModels <= 1.9 define only the two-argument `synaptic_variables(synapse, N)` /
+# `synaptic_receptors(synapse, N)`, while the populations call the three-argument form with their precision (1.10). The
+# generic three-argument methods use the model's own two-argument method when it has one and `FT` is the precision of the
+# model (`float_type(synapse)`, Float32 for such models), so that existing models keep working in Float32 populations; for
+# another precision they ask for the three-argument method.
+function _two_argument_only(f, synapse, ::Type{FT}) where {FT}
+    which(f, Tuple{typeof(synapse),Int}).sig == Tuple{typeof(f),AbstractSynapseParameter,Int} && return false
+    FT === float_type(synapse) && return true
+    error("synapse type $(typeof(synapse)) defines only `$(nameof(f))(synapse, N)` (precision $(float_type(synapse))); " *
+          "a $FT population needs the method `$(nameof(f))(synapse, N, FT)` (SNNModels 1.10)")
 end
 
 """
@@ -109,6 +122,7 @@ model, `float_type(synapse)`.
 """
 synaptic_receptors(synapse::AbstractSynapseParameter, N::Int) = synaptic_receptors(synapse, N, float_type(synapse))
 function synaptic_receptors(synapse::AbstractSynapseParameter, N::Int, ::Type{FT}) where {FT<:AbstractFloat}
+    _two_argument_only(synaptic_receptors, synapse, FT) && return synaptic_receptors(synapse, N)
     return (glu = zeros(FT, N), gaba = zeros(FT, N))
 end
 

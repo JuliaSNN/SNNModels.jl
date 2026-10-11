@@ -16,10 +16,11 @@ One integration step of a generalized integrate-and-fire population (`IF`, `AdEx
 function integrate!(
     p::P,
     param::T,
-    dt::AbstractFloat,
+    dt_::AbstractFloat,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractGeneralizedIFParameter}
-    dt isa Float32 || _float64_supported(p) || throw(ArgumentError(
-        "population $(nameof(typeof(p))) is not implemented in $(typeof(dt)) (populations with Float64 state: $(_FLOAT64_POPULATIONS))"))
+    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
+    dt_ isa Float32 || _float64_supported(p) || throw(ArgumentError(
+        "population $(nameof(typeof(p))) is not implemented in $(typeof(dt_)) (populations with Float64 state: $(_FLOAT64_POPULATIONS))"))
     if _chunkable(p, p.synapse)
         # the three stages are per-neuron and independent across neurons: one fork/join per population and step
         synapse, receptors, synvars = p.synapse, p.receptors, p.synvars

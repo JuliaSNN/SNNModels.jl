@@ -83,7 +83,8 @@ function Population(p::InhomogeneousPoissonParam; kwargs...)
     return InhomogeneousPoisson(param = p; kwargs...)
 end
 
-function integrate!(p::InhomogeneousPoisson, param::InhomogeneousPoissonParam, dt::AbstractFloat)
+function integrate!(p::InhomogeneousPoisson, param::InhomogeneousPoissonParam, dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
     @unpack N, randcache_β, fire, spikes, pspike = p
     ## Inhomogeneous Poisson process
     @unpack r0, β, τ, rate_timescale = param

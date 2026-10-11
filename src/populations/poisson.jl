@@ -192,7 +192,8 @@ function _pop_thinned!(pj::F, fire, spikes::SpikeIndex, N::Int, pmax::Float64) w
     return nothing
 end
 
-function integrate!(p::Poisson, param::PoissonHomoParameter , dt::AbstractFloat)
+function integrate!(p::Poisson, param::PoissonHomoParameter , dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
     @unpack N, fire, spikes, randcache = p
     pr = Float64(param.rate * dt)
     if pr >= _POP_DENSE_SPIKE_P
@@ -205,7 +206,8 @@ function integrate!(p::Poisson, param::PoissonHomoParameter , dt::AbstractFloat)
     return nothing
 end
 
-function integrate!(p::Poisson, param::PoissonHetParameter , dt::AbstractFloat)
+function integrate!(p::Poisson, param::PoissonHetParameter , dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
     @unpack N, fire, spikes, randcache = p
     @unpack rate = param
     length(rate) >= N || throw(DimensionMismatch("the rate vector has $(length(rate)) entries for N = $N neurons"))
@@ -328,7 +330,8 @@ VariablePoisson
 end
 
 
-function integrate!(p::VariablePoisson, param::VariablePoissonParameter, dt::AbstractFloat)
+function integrate!(p::VariablePoisson, param::VariablePoissonParameter, dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
     @unpack N, fire, spikes, randcache = p
 
     ## Inhomogeneous Poisson process

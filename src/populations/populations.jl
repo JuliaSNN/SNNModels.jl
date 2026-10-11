@@ -18,8 +18,11 @@ Advance the state of population `p` by one time step `dt` (ms). Every population
 implements a method of `integrate!` for its own parameter type; it is called once per step by
 `sim!` and `train!`, after the stimuli and before the connections. The fallback for an
 `AbstractPopulationParameter` without a specific method does nothing for a `Float32` step and throws an `ArgumentError` for
-another precision (a `Float64` population whose model has no `Float64` method, see `float_type`). `dt` is given in the
-precision of the population (`float_type(p)`), so a model of populations of different precisions runs each in its own.
+another precision (a `Float64` population whose model has no `Float64` method, see `float_type`). `sim!` gives `dt` in the
+precision of the population (`float_type(p)`), so a model of populations of different precisions runs each in its own; every
+model that has a `Float64` method also converts a `dt` of another precision to `float_type(p)` itself (since 1.10), so that a
+direct call `integrate!(p, p.param, 0.1)` on a `Float32` population steps with `0.1f0` (and a `Float64` population given a
+`Float32` step uses `Float64(dt)`, e.g. `0.10000000149011612` for `0.1f0`).
 
 See the documentation of each population type for the equations and the integration scheme.
 """

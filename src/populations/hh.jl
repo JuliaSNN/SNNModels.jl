@@ -146,7 +146,8 @@ SNN.sim!([E]; duration = 50ms, dt = 0.01ms)
 """
 HH
 
-function integrate!(p::HH, param::HHParameter, dt::AbstractFloat)
+function integrate!(p::HH, param::HHParameter, dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
     @unpack N, v, m, n, h, ge, gi, fire, I = p
     @unpack Cm, gl, El, Ek, En, gn, gk, Vt, τe, τi, Ee, Ei = param
     _check_state_lengths(N, v, m, n, h, ge, gi, fire, I)

@@ -64,7 +64,28 @@ function _pp_run!(p, dt, n; drive = nothing)
     end
     return fires
 end
+# main state and spike steps of every neuron over `n` steps
+function _pp_trace!(p, dt, n)
+    main = Vector{Vector{Float64}}()
+    spikes = [Int[] for _ in 1:(hasfield(typeof(p), :fire) ? length(p.fire) : 0)]
+    for k in 1:n
+        integrate!(p, p.param, dt)
+        push!(main, Float64.(_pp_main(p)))
+        for i in eachindex(spikes); p.fire[i] && push!(spikes[i], k); end
+    end
+    return (; main, spikes)
+end
+# drive gain of the long driven comparison (HH and MorrisLecar need a stronger current than the short tests to fire)
+const _PP_DRIVE_GAIN = Dict("HH" => 3, "MorrisLecar" => 2)
+_pp_scale_drive!(p, g) = (hasfield(typeof(p), :Is) ? (p.Is .*= g) : hasfield(typeof(p), :I) && (p.I .*= g); p)
 _pp_state(p) = [copy(getfield(p, f)) for f in fieldnames(typeof(p)) if getfield(p, f) isa AbstractArray && !(f in (:records,))]
+
+# a synapse model written for SNNModels <= 1.9: only the two-argument `synaptic_variables` / `synaptic_receptors`
+struct _PPLegacySyn{FT} <: SNNModels.AbstractSynapseParameter
+    τ::FT
+end
+SNNModels.synaptic_variables(::_PPLegacySyn, N::Int) = SNNModels.SingleExpSynapseVars(N = N)
+SNNModels.synaptic_receptors(::_PPLegacySyn, N::Int) = (exc = zeros(Float32, N),)
 
 const _PP_N = 37
 _pp_rv(FT, n, s) = FT.(s .* (0.5 .+ rand(Xoshiro(7), n)))
@@ -87,6 +108,11 @@ const _PP_MODELS = [
     "WilsonCowan" => ((FT; quiet = false) -> (p = WilsonCowan(N = _PP_N, VFT = Vector{FT}); p.I .= quiet ? 0 : _pp_rv(FT, _PP_N, 1); p), 0.1, nothing),
     "Tripod" => ((FT; quiet = false) -> (p = Tripod(N = _PP_N, VFT = Vector{FT}); p.I .= quiet ? 0 : _pp_rv(FT, _PP_N, 800); p), 0.1, (:glu, :d1)),
     "BallAndStick" => ((FT; quiet = false) -> (p = BallAndStick(N = _PP_N, VFT = Vector{FT}); p.Is .= quiet ? 0 : _pp_rv(FT, _PP_N, 800); p), 0.1, (:glu, :d)),
+    # non-default synapse models of the dendritic populations (conductance-based single exponential on soma and dendrites)
+    "TripodSingleExp" => ((FT; quiet = false) -> (p = Tripod(N = _PP_N, VFT = Vector{FT}, soma_syn = SingleExpSynapse(FT = FT),
+                          dend_syn = SingleExpSynapse(FT = FT)); p.I .= quiet ? 0 : _pp_rv(FT, _PP_N, 800); p), 0.1, (:glu, :d1)),
+    "BallAndStickSingleExp" => ((FT; quiet = false) -> (p = BallAndStick(N = _PP_N, VFT = Vector{FT}, soma_syn = SingleExpSynapse(FT = FT),
+                                dend_syn = SingleExpSynapse(FT = FT)); p.Is .= quiet ? 0 : _pp_rv(FT, _PP_N, 800); p), 0.1, (:glu, :d)),
     "PoissonHomo" => ((FT; quiet = false) -> SNNModels.Poisson(N = _PP_N, VFT = Vector{FT}, param = PoissonParameter(quiet ? 1Hz : 20Hz; FT)), 0.1, nothing),
     "PoissonDense" => ((FT; quiet = false) -> SNNModels.Poisson(N = _PP_N, VFT = Vector{FT}, param = PoissonParameter(500Hz; FT)), 0.1, nothing),
     "PoissonHet" => ((FT; quiet = false) -> SNNModels.Poisson(N = _PP_N, VFT = Vector{FT}, param = PoissonParameter(FT.(range(1, 50, length = _PP_N) .* Hz); FT)), 0.1, nothing),
@@ -115,17 +141,38 @@ const _PP_POISSON = ("PoissonHomo", "PoissonDense", "PoissonHet", "VariablePoiss
         @test a32 == 0 ? a64 == 0 : a64 <= 2 * a32
         @test all(isfinite, _pp_main(p))
 
-        # Float64 against Float32 on a short horizon, from the same state with the same drive
+        # Float64 against Float32 from the same state with the same drive: quiet regime 200 steps (no spike), driven regime 500
+        # steps (1000 for HH at dt = 0.02 ms) with a drive that makes every spiking model fire several times
         if !(name in _PP_POISSON)
-            for quiet in (true, false)
-                Random.seed!(3); p32 = mk(Float32; quiet)
-                Random.seed!(3); p64 = mk(Float64; quiet)
-                _pp_copy!(p64, p32)
-                f32 = _pp_run!(p32, Float32(dt), 20)
-                f64 = _pp_run!(p64, dt, 20)
-                m32, m64 = Float64.(_pp_main(p32)), _pp_main(p64)
-                @test f32 == f64                                     # same spikes (none in the quiet regime of the spiking models)
-                @test maximum(abs.(m64 .- m32)) <= 1e-4 * max(1.0, maximum(abs, m32))
+            Random.seed!(3); p32 = mk(Float32; quiet = true)
+            Random.seed!(3); p64 = mk(Float64; quiet = true)
+            _pp_copy!(p64, p32)
+            f32 = _pp_run!(p32, Float32(dt), 200)
+            f64 = _pp_run!(p64, dt, 200)
+            m32, m64 = Float64.(_pp_main(p32)), _pp_main(p64)
+            @test f32 == f64 && !any(any, f32)
+            @test maximum(abs.(m64 .- m32)) <= 1e-4 * max(1.0, maximum(abs, m32))
+
+            gain, nsteps = get(_PP_DRIVE_GAIN, name, 1), name == "HH" ? 1000 : 500
+            Random.seed!(3); p32 = mk(Float32); _pp_scale_drive!(p32, gain)
+            Random.seed!(3); p64 = mk(Float64); _pp_scale_drive!(p64, gain)
+            _pp_copy!(p64, p32)
+            t32, t64 = _pp_trace!(p32, Float32(dt), nsteps), _pp_trace!(p64, dt, nsteps)
+            if hasfield(typeof(p32), :fire)
+                s32, s64 = t32.spikes, t64.spikes                    # spike steps per neuron
+                n32, n64 = sum(length, s32), sum(length, s64)
+                @test n32 >= 20                                      # every spiking model fires (20 to 200 spikes of 37 neurons)
+                @test abs(n64 - n32) <= max(2, 0.02 * n32)
+                @test all(abs(length(a) - length(b)) <= 1 for (a, b) in zip(s32, s64))
+                @test all(abs(a[1] - b[1]) <= 2 for (a, b) in zip(s32, s64) if !isempty(a) && !isempty(b))
+                # state before the first spike of either run
+                k0 = min(minimum(first, filter(!isempty, s32)), minimum(first, filter(!isempty, s64))) - 1
+                @test k0 >= 5
+                ref = max(1.0, maximum(abs, t32.main[1]))
+                @test maximum(maximum(abs.(t64.main[k] .- t32.main[k])) for k in 1:k0) <= 1e-4 * ref
+            else
+                ref = max(1.0, maximum(abs, t32.main[end]))
+                @test maximum(maximum(abs.(t64.main[k] .- t32.main[k])) for k in 1:nsteps) <= 1e-4 * ref
             end
         else
             # Poisson: the sparse regime draws the same Float64 uniforms in both precisions; the dense regime draws uniforms of the
@@ -201,6 +248,17 @@ const _PP_POISSON = ("PoissonHomo", "PoissonDense", "PoissonHet", "VariablePoiss
             # the two-argument forms keep the precision of the synapse model (Float32 by default)
             @test typeof(synaptic_variables(s, 4)) == typeof(synaptic_variables(s, 4, Float32))
         end
+    end
+
+    @testset "synapse models with only the two-argument forms (written for 1.9)" begin
+        s = _PPLegacySyn(1.0f0)
+        @test synaptic_variables(s, 4, Float32) isa SNNModels.SingleExpSynapseVars{Vector{Float32}}
+        @test keys(synaptic_receptors(s, 4, Float32)) == (:exc,)
+        # another precision needs the three-argument method: the error names it
+        @test_throws ErrorException synaptic_variables(s, 4, Float64)
+        @test_throws ErrorException synaptic_receptors(s, 4, Float64)
+        err = try synaptic_receptors(s, 4, Float64) catch e; sprint(showerror, e) end
+        @test occursin("synaptic_receptors(synapse, N, FT)", err)
     end
 
     @testset "convert_precision round trip" begin
@@ -310,6 +368,17 @@ const _PP_POISSON = ("PoissonHomo", "PoissonDense", "PoissonHet", "VariablePoiss
         @test HHParameter().Cm === 1uF * cm^(-2) * 20000um^2 && AdExParameter().τm === 281f0 / 40f0 && IFParameter().R === 0.06f0
         @test SNNModels.MorrisLecarParameter().ϕ === 25Hz && PoissonHomoParameter().rate === 1Hz
         @test Confavreux2025Synapse().α === 0.23f0 && EyalNMDA.b === 3.36f0 && NMDAVoltageDependency().k === -0.077f0
+    end
+
+    @testset "integrate! takes the step in the precision of the population" begin
+        # a step of another precision is converted to `float_type(p)` (as `sim!` does): same state as the converted step
+        for (name, (mk, dt, _)) in _PP_MODELS, FT in (Float32, Float64)
+            OT = FT === Float32 ? Float64 : Float32
+            # (one population after the other: the Poisson models draw from the global RNG at every step)
+            Random.seed!(8); a = mk(FT); for _ in 1:5; integrate!(a, a.param, FT(OT(dt))); end
+            Random.seed!(8); b = mk(FT); for _ in 1:5; integrate!(b, b.param, OT(dt)); end
+            @test isequal(_pp_state(a), _pp_state(b)) || (@info "dt conversion differs" name FT; false)
+        end
     end
 
     @testset "refusals: one precision per population" begin
