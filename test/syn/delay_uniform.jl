@@ -6,6 +6,7 @@
 #   no buffer). Same arrival step; the increments of one step are added to `g` one by one (rounding only) and `W` is read at arrival.
 using Test, Random, SNNModels
 using SNNModels: SparseArrays
+@load_units
 const _DU = SNNModels
 const _DUD = SNNModels.Distributions
 
@@ -209,4 +210,85 @@ _du_alloc(c, T) = @allocated _DU.forward!(c, c.param, 0.1f0, T)
     _DU.forward!(c, c.param, 0.125f0, T)
     @test _DU._dconst(c.param) == 7 && length(c.param.spike_ring) == 8
     @test (@inferred _DU.forward!(c, c.param, 0.125f0, T)) isa Int
+end
+
+# ---- switching between the spike-list path and the buffer path; dt changes and rewiring with spikes in flight ----
+# one spike of both presynaptic neurons at `fire_at`; returns the steps at which `g` was nonzero. `events[n]` is called before step n.
+function _du_arrivals(c, dts, fire_at; events = Dict{Int,Function}(), steps = length(dts))
+    pre = c.fireJ; T = Time(); arr = Int[]
+    for n in 1:steps
+        haskey(events, n) && (c = events[n](c))
+        pre .= (n in fire_at)
+        update_time!(T, dts[n])
+        _DU.forward!(c, c.param, dts[n], T)
+        any(!iszero, c.g) && (push!(arr, n); c.g .= 0)
+    end
+    return arr, c
+end
+_du_mk(d; kw...) = SpikingSynapse(Identity(N = 2), Identity(N = 3), :g; conn = Float32[1 0; 0 2; 3 0], delay_dist = _DUD.Dirac(d), kw...)
+const _DU_STDP = _DU.STDPGerstner(A_pre = 0.0, A_post = 0.0)   # a rule that leaves W unchanged: only the path changes
+
+@testset "spike-list delay: switching the rule drops the spikes in flight, no phantom arrival" begin
+    sw(rule) = c -> _DU.with_plasticity(c; LTP = rule)
+    dts = fill(0.1f0, 20)                                     # Dirac(0.5): 5 steps
+    # NoLTP -> STDP -> NoLTP with a spike in the ring (step 2) and one in the buffer (step 4)
+    arr, c = _du_arrivals(_du_mk(0.5), dts, (2, 4); events = Dict(3 => sw(_DU_STDP), 5 => sw(_DU.NoLTP())))
+    @test isempty(arr)
+    @test _DU._use_spike_ring(c) && size(c.param.buffer, 1) == 0     # no buffer rows on the spike-list path
+    # STDP -> NoLTP -> STDP with a spike in the buffer (step 2) and one in the ring (step 4)
+    arr, c = _du_arrivals(_du_mk(0.5; LTPParam = _DU_STDP), dts, (2, 4); events = Dict(3 => sw(_DU.NoLTP()), 5 => sw(_DU_STDP)))
+    @test isempty(arr)
+    @test !_DU._use_spike_ring(c) && isempty(c.param.spike_ring) && size(c.param.buffer) == (3, 6)
+    # after the switches the delay is unchanged: a new spike arrives once, 5 steps later
+    arr, _ = _du_arrivals(_du_mk(0.5), dts, (2, 12); events = Dict(3 => sw(_DU_STDP), 5 => sw(_DU.NoLTP())))
+    @test arr == [17]
+    arr, _ = _du_arrivals(_du_mk(0.5; LTPParam = _DU_STDP), dts, (2, 12); events = Dict(3 => sw(_DU.NoLTP()), 5 => sw(_DU_STDP)))
+    @test arr == [17]
+end
+
+@testset "spike-list delay: dt change with spikes in flight, as the general path" begin
+    for (d, dts, fire_at, expected) in (
+            (0.5, [fill(0.1f0, 3); fill(0.11f0, 17)], (2, 10), [7, 15]),   # same delay in steps (5): in-flight spike delivered
+            (0.8, [fill(0.1f0, 3); fill(0.125f0, 17)], (2, 10), [17]))     # 8 -> 7 steps: ring and buffer rebuilt, in-flight spike dropped
+        a, _ = _du_arrivals(_du_mk(d), dts, fire_at)
+        # general path: the delay stored per synapse from the first step
+        b, _ = _du_arrivals(_du_general!(_du_mk(d)), dts, fire_at)
+        @test a == b == expected
+    end
+end
+
+@testset "spike-list delay: rewiring keeps the spikes in flight (delivered through the new connectivity)" begin
+    c = _du_mk(0.5)
+    ev = Dict(4 => (c -> (_DU.update_sparse_matrix!(c, SparseArrays.sparse([2, 3], [1, 2], Float32[5, 7], 3, 2)); c)))
+    pre = c.fireJ; T = Time(); got = Pair{Int,Vector{Float32}}[]
+    for n in 1:12
+        haskey(ev, n) && ev[n](c)
+        pre .= (n == 2)
+        update_time!(T, 0.1f0)
+        _DU.forward!(c, c.param, 0.1f0, T)
+        any(!iszero, c.g) && (push!(got, n => copy(c.g)); c.g .= 0)
+    end
+    @test got == [7 => Float32[0, 5, 7]]
+end
+
+# recurrent network: spike-list path (A) against the general path (B) from the same state; equal up to the rounding of the per-step sums
+@testset "spike-list delay against the general path, recurrent network, $FT" for FT in (Float32, Float64)
+    Random.seed!(17)
+    pre = _DU.Poisson(N = 60, param = PoissonParameter(60Hz))
+    Random.seed!(23); postA, inA, recA = _du_branch(pre, FT, _DUD.Dirac(0.8), _DU.NoLTP(), _DU.NoSTP(), "A")
+    Random.seed!(23); postB, inB, recB = _du_branch(pre, FT, _DUD.Dirac(0.8), _DU.NoLTP(), _DU.NoSTP(), "B")
+    for c in (inB, recB)
+        _du_general!(c)
+    end
+    P = [pre, postA, postB]; C = [inA, recA, inB, recB]; T = Time{FT}()
+    maxdv = 0.0; samefire = true; nsp = 0
+    for n in 1:400
+        _DU.train!(P, C, _DU.AbstractStimulus[], FT(0.1), T)
+        maxdv = max(maxdv, maximum(abs.(Float64.(postA.v) .- Float64.(postB.v))))
+        samefire &= postA.fire == postB.fire
+        nsp += count(postA.fire)
+    end
+    @test _DU._use_spike_ring(inA) && _DU._use_spike_ring(recA) && !_DU._use_spike_ring(inB) && !_DU._use_spike_ring(recB)
+    @test nsp > 0 && samefire
+    @test maxdv <= 1e-3
 end

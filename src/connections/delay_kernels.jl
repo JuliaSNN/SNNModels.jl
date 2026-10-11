@@ -62,7 +62,9 @@ function _forward_spike_ring!(c::SpikingSynapse, param::SpikingSynapseDelayParam
     @unpack colptr, I, W, g = c
     ring = param.spike_ring
     nslots = _dconst(param) + 1
-    if length(ring) != nslots          # first call or new delay in steps: empty ring (pending spikes are dropped, as the buffer)
+    # no buffer rows on this path; pending increments of the buffer path (plasticity switched off) are dropped, never delivered later
+    size(param.buffer, 1) == 0 || (param.buffer = zeros(eltype(param.buffer), 0, size(param.buffer, 2)))
+    if length(ring) != nslots          # first call, new delay in steps or back from the buffer path: empty ring (spikes in flight dropped)
         resize!(ring, nslots)
         for k in eachindex(ring)
             ring[k] = Int32[]
@@ -93,6 +95,14 @@ function _ring_deliver!(g, W, ρ, I, colptr, ptr, arr, Npost)
             _ring_chunk!(g, W, ρ, I, ptr, ch, arr)
         end
     end
+    return nothing
+end
+
+# Buffer path: allocate the `Npost` rows of the buffer (`_delay_steps!` only sets the number of columns) and drop the spike lists of
+# the spike-list path (plasticity switched on with `with_plasticity`): the two paths never hold spikes in flight at the same time.
+@inline function _delay_buffer!(param::SpikingSynapseDelayParameter, Npost::Int)
+    size(param.buffer, 1) == Npost || (param.buffer = zeros(eltype(param.buffer), Npost, size(param.buffer, 2)))
+    isempty(param.spike_ring) || empty!(param.spike_ring)
     return nothing
 end
 

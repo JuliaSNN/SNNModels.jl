@@ -16,7 +16,9 @@ the `SpikingSynapse` constructor when `delay_dist` is given). The delayed increm
 a ring buffer indexed by arrival step: at the first `forward!` (and whenever `dt` or the delays
 change) every delay is rounded up to a whole number of steps, `ceil(delay / dt)`, the first step
 whose time is not before the arrival time (so 0.8 ms at `dt = 0.125` ms arrives 7 steps later).
-A delay stored once (common to all synapses) is delivered through one ring column per step (`delay_kernels.jl`).
+A delay stored once (common to all synapses) is delivered through one ring column per step; without LTP and STP the spike lists
+are delayed instead (`spike_ring`, `W` read at arrival, the buffer has 0 rows); switching path drops the spikes in flight
+(`delay_kernels.jl`).
 
 # Fields
 - `delaytime::Vector{FT}`: delay of each synapse (ms), in the CSC order of `W`; a single value when all synapses have the
@@ -50,7 +52,7 @@ function _delay_steps!(param::SpikingSynapseDelayParameter, dt::AbstractFloat, N
         delaysteps[s] = max(0, ceil(Int32, delaytime[s] / dt - oftype(dt, 1e-4)))
     end
     nslots = Int(isempty(delaysteps) ? 0 : maximum(delaysteps)) + 1
-    size(param.buffer) == (Npost, nslots) || (param.buffer = zeros(eltype(param.buffer), Npost, nslots))
+    size(param.buffer, 2) == nslots || (param.buffer = zeros(eltype(param.buffer), 0, nslots))   # rows: _delay_buffer!
     param.pos[1] = clamp(param.pos[1], 0, nslots - 1)
     param.dt[1] = dt
     return nothing
@@ -489,12 +491,15 @@ Delayed transmission. For each presynaptic spike, add the increment ``W_{ij}\rho
 ring buffer of target ``i`` at the arrival step (`delaysteps[s]` steps after the current one,
 delays rounded up to whole steps, see `SpikingSynapseDelayParameter`); then add to `c.g[i]` the
 increments that arrive in the current step and clear them.
+With a delay of `d` steps stored once the arrival column is computed once per step; without LTP and STP the spike list emitted
+`d` steps ago is scattered into `c.g` instead (`W` read at arrival).
 """
 function forward!(c::SpikingSynapse, param::SpikingSynapseDelayParameter, dt::AbstractFloat, T::Time)
     @unpack colptr, I, W, g = c
     Npost = length(c.fireI)
     _delay_steps!(param, dt, Npost)
     _use_spike_ring(c) && return _forward_spike_ring!(c, param, Npost)   # constant delay, no plasticity (delay_kernels.jl)
+    _delay_buffer!(param, Npost)
     @unpack delaysteps, buffer = param
     nslots = size(buffer, 2)
     pos = param.pos[1]

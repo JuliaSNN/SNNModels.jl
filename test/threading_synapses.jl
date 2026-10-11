@@ -81,6 +81,7 @@ function _syn_rules(name)
     name == "delay_const" && return (SM.NoLTP(), SM.NoSTP(), :const)          # constant delays: one ring column per step
     name == "delay_zero"  && return (SM.NoLTP(), SM.NoSTP(), :zero)
     name == "pair_delay_const" && return (SM.STDPGerstner(A_pre = 5e-3, A_post = -5e-3), SM.NoSTP(), :const)
+    name == "stp_delay_const" && return (SM.NoLTP(), SM.MarkramSTPParameterEvent(), :const)   # column path with STP
     name == "triplet"    && return (SM.STDPTriplet(), SM.NoSTP(), false)
     name == "wdep"       && return (SM.STDPWeightDependent(η = 1e-2), SM.NoSTP(), false)
     name == "mexhat"     && return (SM.STDPMexicanHat(), SM.NoSTP(), false)
@@ -121,7 +122,7 @@ end
     old, oldops = SM.neurons_per_thread(), SM.SYN_MIN_OPS[]
     forked = 0
     try
-        for name in ("fixed", "delay", "delay_const", "delay_zero", "pair", "pair_delay", "pair_delay_const", "triplet", "wdep", "mexhat", "sym", "antisym", "istdp", "vstdp", "stp", "stp_pair_delay"),
+        for name in ("fixed", "delay", "delay_const", "delay_zero", "pair", "pair_delay", "pair_delay_const", "stp_delay_const", "triplet", "wdep", "mexhat", "sym", "antisym", "istdp", "vstdp", "stp", "stp_pair_delay"),
             N in (1, 100, 700, 2100), drive in (1.0, 0.06)
             SM.set_neurons_per_thread!(0)
             ref = _syn_run(name, N; drive)[1:2]

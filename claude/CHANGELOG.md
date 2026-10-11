@@ -158,12 +158,13 @@ populations are built with `Float64` state (see "Precision from the population t
     to the previous commit for T8 (N = 2000, 500 Hz), T4 (delay 0.8), T7 (delay 5 ms) and the Float64 DoubleExp network.
   - Constant delays without plasticity (`NoLTP` and `NoSTP`, a delay of `d` steps stored once) delay the spike list instead of the
     increments (`param.spike_ring`: the lists of the last `d + 1` steps, capacity kept, 0 B per step after warm-up): the list emitted `d`
-    steps ago is scattered straight into `g` (one touch, `@simd ivdep`), with no buffer and no arrival pass over the targets. Adopted by
+    steps ago is scattered straight into `g` (one touch, `@simd ivdep`), with no arrival pass over the targets; the buffer is not
+    allocated on this path (0 rows; its `Npost` rows are created when the buffer path runs, e.g. after `with_plasticity`). Adopted by
     the rule of the plan: after the previous item the arrival pass was still 55 % of `forward!` at 1 Hz (1.36 of 2.49 us per step at
     N = 10000). Replay at N = 10000: 1 Hz `forward!` 2.49 -> 1.07 us per step (what is left is the scan of the 1e4 spike flags, 1.0 us),
     500 Hz transmission 1.365 -> 1.301 ns per event. Whole networks, s per simulated second, base -> constant column -> spike list:
     T8 N = 10000 500 Hz 1.854 -> 1.232 -> 1.084 (0.86x Auryn, 1.266-1.308 the same day), 50 Hz 0.429 -> 0.308 -> 0.276, 1 Hz 0.214 ->
-    0.192 -> 0.158 (Auryn 1.29 / 0.305 / 0.178 in the campaign); N = 2000 500 Hz 0.261 -> 0.187 -> 0.171 (0.84x Auryn); T4 (k100,
+    0.192 -> 0.158 (Auryn 1.29 / 0.305 / 0.178 in the campaign); N = 2000 500 Hz 0.261 -> 0.187 -> 0.171 (0.85x Auryn); T4 (k100,
     N = 10000, delay 0.8 on the four recurrent connections) 0.159 -> 0.156 -> 0.125; T7 delay 1 ms 0.174 -> 0.151 -> 0.126, 10 ms 0.185 ->
     0.169 -> 0.129 (the recurrent connections at a few Hz were dominated by their arrival passes). Not bit-identical: the increments of
     one step reach `g[i]` one by one (`g + w1 + w2` instead of `g + (w1 + w2)`) and `W` is read at arrival (see Behaviour notes).
@@ -333,7 +334,12 @@ Each item gives the migration.
   the user or by metaplasticity (`SynapseNormalization`, `AggregateScaling`) is delivered with its new value; the increments of one
   step are added to `g` one at a time (rounding differences of a few ulp, chaotic trajectories diverge after some hundred steps,
   statistics unchanged). Delays that differ between synapses, and synapses with LTP or STP, keep the buffer (increment at emission).
-  `with_plasticity` on such a connection with spikes in flight drops them (the new rule uses the buffer).
+  Switching between the two paths with spikes in flight (`with_plasticity` installing or removing LTP/STP; the old and the new
+  connection share `param`) drops them: the ring is cleared when the buffer path runs and the buffer when the spike list runs, so a
+  spike is never delivered late. A change of `dt` that keeps the delay in steps keeps the spikes in flight (as the buffer); one that
+  changes it drops them (as the buffer, whose columns are rebuilt). After `update_sparse_matrix!` (rewiring) with the same delay in
+  steps the spikes in flight are delivered through the new connectivity (targets and weights of the presynaptic neuron at arrival),
+  where the buffer delivers the increments computed with the old one.
 - Weights of `STDPGerstner`, `STDPConfavreux2025`, `STDPWeightDependent`, `STDPTriplet` differ from 1.9.1 (lazy decay,
   see below). Bit-identical to 1.9.1 in the seeded audit of the dev tree before the lazy decay became the only path
   (Poisson and `SpikeTimeStimulus` inputs, `Identity` relay and two-layer networks, 4 s to 2 s of `train!`):
