@@ -11,7 +11,7 @@ EyalNMDA = _predefined(NMDAVoltageDependency; mg = 1.0, b = 3.36, k = -0.077)   
 
 
 # Predefined receptors (E_rev in mV, τr/τd in ms, g0 in nS). The names refer to the source of
-# the parameters; the references are cited in SNNUtils/src/models/quaresima2022.jl:
+# the parameters; the references are:
 #   Miles R. et al. (1996), Differences between somatic and dendritic inhibition in the
 #     hippocampus, Neuron 16(4):815-823, doi:10.1016/S0896-6273(00)80101-4 (GABA receptors).
 #   Eyal G. et al. (2018), Human cortical pyramidal neurons: from spines to spikes via models,
@@ -76,8 +76,7 @@ receptors, `glu_receptors = [1, 2]`, `gaba_receptors = [3, 4]`, `NMDA = EyalNMDA
 | GABAb | -90 | 30   | 400.0 | 0.006 | no  |
 
 AMPA/NMDA parameters attributed to Eyal et al. (2018), Front. Cell. Neurosci. 12,
-doi:10.3389/fncel.2018.00181; GABA parameters to Miles et al. (1996), Neuron 16(4):815-823
-(references as cited in SNNUtils/src/models/quaresima2022.jl).
+doi:10.3389/fncel.2018.00181; GABA parameters to Miles et al. (1996), Neuron 16(4):815-823.
 """
 TripodDendSynapse = ReceptorSynapse(
     glu_receptors = [1, 2],

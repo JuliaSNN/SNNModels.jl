@@ -1246,7 +1246,6 @@ end
 
 export spiketimes,
     merge_spiketimes,
-    convolve,
     alpha_function,
     alpha_kernel,
     bin_spiketimes,
