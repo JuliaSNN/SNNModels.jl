@@ -1,8 +1,8 @@
 """
     iSTDPParameter <: STDPParameter
 
-Abstract supertype of the inhibitory STDP rules of Vogels et al. (2011): `iSTDPRate`,
-`iSTDPPotential` and `iSTDPTime`. All of them use `iSTDPVariables` and
+Abstract supertype of the inhibitory STDP rules of Vogels et al. (2011): `iSTDPRate`
+and `iSTDPPotential`. All of them use `iSTDPVariables` and
 Euler-integrated (not exact-decay) traces. See the notes on `iSTDPRate`.
 """
 abstract type iSTDPParameter <: STDPParameter end
@@ -72,23 +72,6 @@ iSTDPRate
 @snn_kw struct iSTDPRate{FT = Float32} <: iSTDPParameter
     η::FT = 0.01pA
     r::FT = 3Hz
-    τy::FT = 50ms
-    Wmax::FT = 243pF
-    Wmin::FT = 0.01pF
-end
-
-@doc """
-    iSTDPTime(; η = 0.01pA, τy = 50ms, Wmax = 243pF, Wmin = 0.01pF)
-
-Parameter container (`η`, `τy`, `Wmax`, `Wmin`) of a time-based variant of the Vogels et al.
-(2011) rule. The current code defines no `plasticity!` method for it, so it cannot be used as
-`LTPParam` (the update was removed in commit e4ce94f, 2025-12-24; before that it contained the
-same post-spike `@turbo` bug described in `iSTDPRate`). Use `iSTDPRate` or `iSTDPPotential`.
-"""
-iSTDPTime
-
-@snn_kw struct iSTDPTime{FT = Float32} <: iSTDPParameter
-    η::FT = 0.01pA
     τy::FT = 50ms
     Wmax::FT = 243pF
     Wmin::FT = 0.01pF
@@ -302,4 +285,4 @@ function plasticity!(
 end
 
 export iSTDPRate,
-    iSTDPTime, iSTDPPotential, iSTDPVariables, plasticityvariables, plasticity!
+    iSTDPPotential, iSTDPVariables, plasticityvariables, plasticity!

@@ -127,7 +127,7 @@ end
     @test _T_ok(EE)
     # rules that read the inputs of a neuron build it at construction, the others do not
     E = IF(N = 50)
-    for rule in (STDPGerstner(), STDPMexicanHat(), STDPWeightDependent(), STDPTriplet(), STDPSymmetric(), iSTDPRate(), iSTDPTime(), iSTDPPotential())
+    for rule in (STDPGerstner(), STDPMexicanHat(), STDPWeightDependent(), STDPTriplet(), STDPSymmetric(), iSTDPRate(), iSTDPPotential())
         @test _T_ok(SpikingSynapse(E, E, :ge; conn = (p = 0.2, μ = 1.0), LTPParam = rule))
     end
     for rule in (vSTDPParameter(), _FP.vSTDPDenseParameter())

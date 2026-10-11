@@ -58,7 +58,7 @@ SNNModels.jl/src/
 │   │   ├── STDP_traces.jl   STDPGerstner, STDPConfavreux2025, STDPMexicanHat, STDPVariables
 │   │   ├── STDP_weight_dependent.jl  STDPWeightDependent (Guetig / Auryn STDPwd)
 │   │   ├── STDP_triplet.jl  STDPTriplet, STDPTripletVariables (Pfister-Gerstner 2006)
-│   │   ├── iSTDP.jl         iSTDPRate, iSTDPTime, iSTDPPotential
+│   │   ├── iSTDP.jl         iSTDPRate, iSTDPPotential
 │   │   ├── vSTDP.jl         vSTDPParameter
 │   │   ├── CaRule.jl        CaPlasticityParameter (legacy; uses c.plasticity)
 │   │   ├── STDP_structured.jl  STDPSymmetric, STDPAntiSymmetric (Festa 2024)
@@ -397,7 +397,6 @@ set_plasticity!(syn, param, state)
 | `vSTDPParameter` | **continuous** u(post), v(post), x(pre) `@turbo` | `Threads.@threads` over pre chunks | yes | `A_LTD, A_LTP, θ_LTD, θ_LTP, τu, τv, τx, Wmax, Wmin` |
 | `iSTDPRate` | **continuous** dt decay `@turbo` | clamp on spike `@turbo` col/row | none | `η, r, τy, Wmax, Wmin` |
 | `iSTDPPotential` | **continuous** tpost tracks v_post | on spike, no `@turbo` | none | `η, v0, τy, Wmax, Wmin` |
-| `iSTDPTime` | **continuous** same as Rate | — | none | `η, τy, Wmax, Wmin` |
 | `CaPlasticityParameter` | **continuous** dt decay `@turbo` | row+col scan on spike | none | `A_pre, A_post, τpre, τpost, Wmax, Wmin` |
 | `STDPSymmetric` | **continuous** to_x/tr_x `@turbo` | row+col on spike | none | `A_x, A_y, τ_x, τ_y, αpre, αpost, Wmax, Wmin` |
 | `STDPAntiSymmetric` | same | same | none | same |
