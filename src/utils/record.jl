@@ -1192,8 +1192,8 @@ function getvariable(obj, key, id = nothing)
             array[:, :, i] = rec[i]
         end
         return array
-    elseif typeof(rec[1]) <: Vector{Vector{typeof(rec[1][1][1])}} # it is a multipod
-        @debug "Multipod recording"
+    elseif typeof(rec[1]) <: Vector{Vector{typeof(rec[1][1][1])}} # nested vectors (one vector per neuron, e.g. multicompartment variables)
+        @debug "Nested vector recording"
         i = length(rec)
         n = length(rec[1])
         d = length(rec[1][1])

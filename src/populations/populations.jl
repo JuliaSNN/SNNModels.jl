@@ -141,8 +141,6 @@ include("generalized_if/if.jl")
 include("generalized_if/adex.jl")
 include("generalized_if/membrane.jl")
 include("generalized_if/if_extended.jl")
-# include("generalized_if/if_CANAHP.jl")
-# include("adex/adex_multitimescale.jl")
 
 ## Heterogeneous recurrent
 include("hetrec.jl")
@@ -164,7 +162,6 @@ include("multicompartment/dendrite.jl")
 include("multicompartment/dendneuron_parameter.jl")
 include("multicompartment/tripod.jl")
 include("multicompartment/ballandstick.jl")
-# include("multicompartment/multipod.jl")
 
 ## Spike lists owned by the integrate-and-fire family
 # Populations that keep only their `fire` flags and own one `SpikeIndex` (field `spikes`, `owned_spike_index`), shared

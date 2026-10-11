@@ -62,7 +62,6 @@ include("synapses/DeltaSynapse.jl")
 include("synapses/DoubleExpSynapse.jl")
 include("synapses/SingleExpSynapse.jl")
 include("synapses/ReceptorSynapse.jl")
-# include("synapses/MultiReceptorSynapse.jl")
 include("synapses/DoubleExpCurrentSynapse.jl")
 include("synapses/Confraveux2025.jl")
 

@@ -3,7 +3,6 @@ DendLength = Union{Float32,Tuple}
 abstract type AbstractDendriticTree end
 struct TripodNeuron <: AbstractDendriticTree end
 struct BallAndStickNeuron <: AbstractDendriticTree end
-struct Multipod <: AbstractDendriticTree end
 
 """
     DendNeuronParameter(; ds = [(200um, 400um), (200um, 400um)], physiology = human_dend,

@@ -142,26 +142,6 @@ SomaSynapse = ReceptorSynapse(
     NMDA = SomaNMDA,
 )
 
-# ## CAN_AHP parameters
-
-# Glu_CANAHP = Glutamatergic(
-#     Receptor(E_rev = 0.0, τr = 1, τd = 2.5ms, g0 = 0.2mS/cm^2),
-#     ReceptorVoltage(E_rev = 0.0, τr = 4.65ms, τd = 75ms, g0 = 0.3mS/cm^2, nmda = 1.0f0),
-# )
-# Gaba_CANAHP = GABAergic(
-#     Receptor(E_rev = -70.0, τr = 1, τd = 10ms, g0 = 0.35mS/cm^2),
-#     Receptor(E_rev = -90.0, τr = 90ms, τd = 160ms, g0 = 5e-4mS/cm^2), # τd = 100.0
-# )
-# Synapse_CANAHP = Receptors(Glu_CANAHP, Gaba_CANAHP)
-# αs_CANAHP = [1.0, 0.275/ms, 1.0, 0.015/ms]
-# NMDA_CANAHP = let
-#     Mg_mM = 1.5mM |> Float32
-#     nmda_b = 3.57f0
-#     nmda_k = -0.063f0
-#     NMDAVoltageDependency(mg = Mg_mM/mM, b = nmda_b, k = nmda_k)
-# end
-
-
 export SomaNMDA,
     SomaSynapse,
     TripodSomaSynapse,
