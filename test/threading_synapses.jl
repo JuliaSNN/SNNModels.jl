@@ -58,8 +58,8 @@ function _mc_run(kind, N)
 end
 
 # the threaded Heun stage keeps the axial currents in registers: the `ic` field is neither grown nor written. Run with
-# neurons_per_thread = 128, i.e. 7 chunks of 1537 neurons (two batches each after the MAX_CHUNKS cap), so that with several threads
-# the chunked path is the one checked.
+# neurons_per_thread = 128 on 1537 neurons: after the MAX_CHUNKS cap the split is 7 chunks, 6 x 256 + 1 (measured), so that with several
+# threads the chunked path is the one checked.
 function _mc_ic_untouched(kind)
     p = kind === :tripod ? Tripod(N = 1537) : BallAndStick(N = 1537)
     n = length(p.ic)

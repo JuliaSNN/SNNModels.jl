@@ -123,14 +123,16 @@ populations are built with `Float64` state (see "Precision from the population t
       (soma `muladd(gl, muladd(ΔT, e, El - vs), I - (((ws + is) + ic1) + ic2)) / C`, `ws = muladd(Δv4, dt, w)`, dendrites
       `(muladd(El - vd, gm, -is) + ic + Id) / Cd`, adaptation `muladd(a, vs - El, -ws) / τw`). They vectorise, and without fast-math LLVM
       keeps that order in the vector body and in the scalar remainder, so a neuron gets the same bits for every chunking and thread count
-      (`threading_synapses.jl`, N up to 4097, 1, 4 and 8 threads). On x86-64 with FMA the result is bit-identical to 1.9.1:
+      (`threading_synapses.jl`, N up to 4097, 1, 4 and 8 threads). On x86-64 with FMA the result is bit-identical to 1.9.1 (verified with
+      Julia 1.12.6; the identity also depends on the LLVM version, which may compile the `@fastmath` reference of 1.9.1 differently):
       `test/pop/multicompartment_update_loop.jl` compares both Heun stages and the whole step with the `@fastmath` reference bit for bit there
       (elsewhere within 4 ulp of the largest term of the derivative); the driven single neurons of `pre110_fixes/scripts/j2_single_neuron.jl`
       (Tripod and BallAndStick, N = 1 and 100, subthreshold, spiking and synaptic kicks, 500 ms) give byte-identical traces and spike steps, and
       the `Tripod` network of `tripod_net.jl` (800 + 200 neurons, 5 s, seed 1) identical spike trains. Bit identity on aarch64 (Apple M-series)
       is not verified: there LLVM may contract the `@fastmath` reference differently. `p.ic` is no longer written (field kept) and the
-      threaded path no longer grows it. ns per neuron and step (pinned, median of 3, N = 1000 / 10000, spiking and quiet): `Tripod` 22.1-23.9
-      -> 10.4-12.1 (2.0-2.15x), `BallAndStick` 15.2-16.0 -> 6.6-7.4 (2.1-2.4x).
+      threaded path no longer grows it. ns per neuron and step of the final `muladd` build (`pre110_fixes/out/j2r_t5.csv`, round r1: the
+      arms before J2, first J2 build and final build run one after the other on one pinned core, median of 3 after the warm-up, N = 1000 / 10000,
+      spiking and quiet): `Tripod` 22.2-23.3 -> 10.5-11.6 (2.0-2.1x), `BallAndStick` 15.0-15.5 -> 6.7-7.3 (2.1-2.3x).
       Note on the first attempt (same loop in source order, IEEE, no `muladd`): it was as fast but not bit-identical (derivatives within 3 ulp
       of the largest term, driven potentials up to 0.23 mV apart before spikes with the same spike steps, network statistics within the
       seed-to-seed spread); the failure analysis is in `pre110_fixes/README.md` ("J2 failure analysis"). With bit identity the per-case
@@ -556,7 +558,7 @@ The precision of a model is chosen once, on the populations, with the type param
 no global flag, no separate precision argument.
 - Selecting it: `Identity(N = 10, VFT = Vector{Float64})`, `IF(N = 10, VFT = Vector{Float64})` (its `param`, `synapse` (`DoubleExpSynapse`), `spike`,
   the synaptic variables and the receptor buffers default to `Float64` from `VFT`; passing a `Float32` object to a `Float64` IF is an `ArgumentError`,
-  the same the other way). `float_type(x)` (exported) is the element type of a population, connection, stimulus, rule, clock or type: the first
+  the same the other way), and since J3 every other population model the same way (see "Float64 for every population model" below). `float_type(x)` (exported) is the element type of a population, connection, stimulus, rule, clock or type: the first
   type parameter that is a float or a vector of floats.
 - A connection takes the type of the variable it writes into (`SpikingSynapse`: `eltype` of the target `g`): `W`, `ρ`, delay times, delay
   ring buffer, the state of the plasticity rule (`plasticityvariables` takes the type of the rule, `float_type(rule)`), the rules `LTPParam`/`STPParam`
@@ -568,7 +570,7 @@ no global flag, no separate precision argument.
   precisions runs, each component in its own precision (the loops pass `dt` converted to the precision of the component) with a `Float64` clock;
   a population that mixes precisions, or a connection onto a target variable whose element type differs from its membrane potential, is an
   `ArgumentError`. Components that have no Float64 model refuse a Float64 target at construction with an `ArgumentError` (`CurrentStimulus`,
-  `BalancedStimulus`, `Turnover`) or when stepped (`integrate!` of a population without a Float64 method, e.g. `AdEx(VFT = Vector{Float64})`)
+  `BalancedStimulus`, `Turnover`) or when stepped (`integrate!` of a population without a Float64 method, since J3 only `HetRec`)
   instead of copying the target variable and silently stopping to write into it.
 - The clock is `Time{FT}` (`Time()` is `Time{Float32}`, `Time{Float64}()`); `compose` creates `Time{FT}` with `FT` the promotion of the
   populations' types (`time = nothing` by default; was `Time()`), `sim!`/`train!` convert `dt` to the clock type; `get_time` returns the type of the clock.
@@ -590,11 +592,10 @@ no global flag, no separate precision argument.
   positional `SpikeTimeStimulusParameter(times, neurons)` or the keyword form of `SpikeTimeParameter` (sorted times).
 - Done / not done. Stage 1 (done): sparse synapses and all their plasticity rules (STDP pair/triplet/weight-dependent/Confavreux/MexicanHat/structured,
   iSTDP, vSTDP both rules, Markram STP event, Het, Timestep), delays, `SpikeTimeStimulus`, `PoissonStimulus`, `PoissonStimulusLayer`, `Identity`,
-  `AggregateScaling`, `SynapseNormalization`, clock, `sim!`/`train!`, records. Stage 2 (done for): `IF` with `DoubleExpSynapse`. Not converted
-  (refuse Float64 at construction or when stepped): the other populations (`AdEx`, `Tripod`, `BallAndStick`, `Poisson`, `HH`, `IZ`, `MorrisLecar`, `Rate`, ...), the
-  other synapse models of `IF` (`SingleExp`, `Delta`, `Current`, `Receptor`, `Confavreux2025`), `Turnover`, the rate/FORCE synapses, `CurrentStimulus`,
-  `BalancedStimulus`. Estimate: about 25 population/synapse-model methods and their `VFT` defaults (`zeros(Float32, N)` defaults in about 20
-  structs, `dt::Float32` in about 75 methods), the same recipe (type-parameter defaults from `VFT`, `dt::AbstractFloat`, `zero(T)`), one population at a time.
+  `AggregateScaling`, `SynapseNormalization`, clock, `sim!`/`train!`, records. Stage 2 (done): `IF` with `DoubleExpSynapse`; then (J3, below) every
+  population model and every population synapse model. Not converted (refuse Float64 at construction or when stepped): `HetRec`, `Turnover`, the
+  rate/FORCE connections (`RateSynapse`, `SpikeRateSynapse`, `FL*`, `PINning*`), `CurrentStimulus`, `BalancedStimulus`, `VariableInputs`;
+  `IF_CANAHP`, `AdExMultiTimescale` and `Multipod` are not included in the module.
 - Tests: `test/syn/precision.jl` (229): the same small network in Float32 and Float64 (STDPGerstner pair, triplet, event vSTDP, dense vSTDP, STP event, Poisson
   stimulus, `SpikeTimeStimulus` onto `Identity`, `PoissonStimulusLayer`, delay synapse, normalization, aggregate scaling) with the eltypes of every state
   array, the clock, `@inferred` on a step of each kind of component, an analytic pair-STDP check in Float64 (1e-12), mixed precision and refusals.
@@ -602,6 +603,42 @@ no global flag, no separate precision argument.
   event-driven and the dense rule agree to 3.6e-14 (200 synapses) and 8.2e-14 (1e4 synapses), and with Brian2 (float64) to 3e-15 (dense) and 3e-14 to 9e-14
   (event), against 2.4e-6 / 2.9e-6 between them in Float32: the Float32 difference is the accumulation error of the dense rule (hypothesis confirmed).
   Float64 costs 13 % on the dense rule at 1e4 synapses (2.09 s against 1.88 s, unpinned) and nothing measurable on the event-driven one.
+- Float64 for every population model (J3). `AdEx` (scalar and per-neuron parameters), `ExtendedIF`, `HH`, `IZ`, `MorrisLecar`, `Rate`,
+  `WilsonCowan`, `Tripod`, `BallAndStick`, `Poisson` (one rate or one per neuron), `VariablePoisson`, `InhomogeneousPoisson`, and on `IF`/`AdEx`
+  every population synapse model (`SingleExpSynapse`, `DeltaSynapse`, `CurrentSynapse`, `DoubleExpCurrentSynapse`, `DoubleExpSynapse`,
+  `ReceptorSynapse`, `MultiReceptorSynapse`, `Confavreux2025Synapse`) run in `Float64` when the population is built with `VFT = Vector{Float64}`
+  and nothing else: the parameter, spike and synapse defaults derive from `eltype(VFT)` (`AdExParameter(FT = eltype(VFT))`, `PostSpike(FT = ...)`,
+  `convert_precision(TripodSomaSynapse, eltype(VFT))`, `create_dendrite(...; FT)`), the synapse models allocate their state and receptor buffers
+  in the population type (`synaptic_variables(s, N, FT)`, `synaptic_receptors(s, N, FT)`; the two-argument forms keep `float_type(s)`), and the
+  kernels take any `dt::AbstractFloat`. `convert_precision` now covers the synapse models (`ReceptorSynapse`/`MultiReceptorSynapse` convert each
+  `Receptor` and the NMDA block), `PostSpike` and the population parameters; `PoissonParameter(rate; FT)` and `VariablePoissonParameter{FT}` are new.
+  One precision per population: a `Float32` parameter, spike or synapse object passed to a `Float64` population (or the reverse) is an
+  `ArgumentError` from a shared check (`_check_precision`); objects without a float field (`DeltaSynapse()`, `RateParameter()`) and the
+  morphology `param` of `Tripod`/`BallAndStick` are precision-agnostic. `snn_kw_finalize` now receives the struct type with its type
+  parameters (e.g. `HH{Vector{Float64},Vector{Bool}}`), so the check reads `eltype(VFT)` and not the unconverted default of `v`. `exp64`/`exp256`
+  are generic in the float type; `_pow4` has a `Float64` method; `HH`/`IZ`/`MorrisLecar` write their literals as `T(0.32)` (`=== 0.32f0`
+  in Float32, checked for every literal). `Tripod.Vspike` stays a `Float32` field, compared after promotion; the dendritic geometry is computed as
+  in Float32 and stored in `FT`. Still Float32 only (refused): `HetRec`, the rate/FORCE connections, `CurrentStimulus`, `BalancedStimulus`,
+  `VariableInputs`, `Turnover`.
+  - Float32 is bit-identical: SHA1 of the whole state trajectory (N = 257, 2000 steps, seeded synaptic drive) of 32 cases (every population
+    model, the two Poisson regimes, heterogeneous AdEx, `Tripod` with `SingleExpSynapse`, `IF` and `AdEx` with each of the eight synapse
+    models) equal before J3 (e265921) and after each of the four J3 commits (`pre110_fixes/out/j3_identity.csv`); all `*_update_loop.jl` and
+    `inline_math_test.jl` tests pass unchanged.
+  - Tests: `test/pop/precision_populations.jl` (417): per model, Float64 construction from `VFT` only with no `Float32` field left (state,
+    parameters, spike, synapse, synaptic variables, receptor buffers, dendrites), `@inferred` step with `dt::Float64`, allocations no larger than
+    in Float32 (0 where Float32 is 0), Float64 against Float32 from the same state over 20 steps (same spikes, main state within 1e-4 relative),
+    two Float64 runs identical, `dt` against `dt/2`, a `SpikingSynapse` onto the population is Float64; the synapse models on `IF`/`AdEx`;
+    `convert_precision` round trips; refusals; a Float64 network of `Poisson`, `Tripod`, `IF` with `sim!`. Coverage of the J3-changed source lines
+    by these and the update-loop tests: 183 / 188 (97 %).
+  - Cost (`pre110_fixes/scripts/jl_neurons_prec.jl`, T5 single population, pinned core, median of 3, warm-up discarded; ratio Float64 / Float32,
+    spikes / no spikes): N = 10000: `IF` 2.29 / 2.41, `AdEx` 1.70 / 1.71, `ExtendedIF` 2.65 / 2.73, `HH` 1.39 / 1.40, `IZ` 1.96 / 1.94,
+    `MorrisLecar` 4.32 / 3.60, `Rate` 6.54 / 1.90, `WilsonCowan` 8.49 / 1.92, `Tripod` 2.99 / 2.96, `BallAndStick` 2.57 / 2.60, `Poisson`
+    (500 Hz / 1 Hz) 1.97 / 0.95; N = 1000: `IF` 2.60 / 2.45, `AdEx` 1.75 / 1.77, `ExtendedIF` 2.72 / 2.73, `HH` 1.36 / 1.42, `IZ` 2.03 / 1.99,
+    `MorrisLecar` 3.66 / 3.58, `Rate` 7.95 / 1.92, `WilsonCowan` 8.37 / 1.89, `Tripod` 2.08 / 2.04, `BallAndStick` 2.08 / 2.11, `Poisson`
+    1.66 / 0.95 (the multicompartment models pay more at N = 10000; hypothesis, not verified: their Float64 state no longer fits the cache). `Rate`/`WilsonCowan` with input and `MorrisLecar` use `Base.tanh`/`cosh` in Float64 (out of line,
+    the loop does not vectorise; the inlined copies exist for Float32 only). The Float32 times after J3 are those before (0.95-1.03; one
+    recheck round for `Rate` and `Poisson`, whose first round was noisy). Table: `pre110_fixes/out/tables_j3.md`, figure
+    `pre110_fixes/figures/pre110_fixes.png` (d).
 
 ### Synapse memory footprint (`SpikingSynapse`, 29 to 9 bytes per synapse)
 Live memory of the synapses of the T4 network of the performance campaign (IF E 8000 / I 2000, `CurrentSynapse`, K = 100,

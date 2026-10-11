@@ -99,6 +99,7 @@ end
     _ts("vstdp",       "syn/vstdp.jl")
     _ts("lazy_weights", "syn/lazy_weights.jl")
     _ts("precision",   "syn/precision.jl")
+    _ts("precision_populations", "pop/precision_populations.jl")
     _ts("istdp_kernel",      "syn/istdp_kernel.jl")
     _ts("stp_mongillo",      "syn/stp_mongillo.jl")
     _ts("metaplasticity",    "syn/metaplasticity.jl")
