@@ -1,8 +1,14 @@
 # The vectorised / branchless `integrate!` of `Tripod` and `BallAndStick` (and the receptor synapse stage they use) against the original
-# loops of SNNModels <= 1.9, kept here as the reference. Synapse and state stages are bit-identical; the Heun stage (`update_neuron!`,
-# vectorised since 1.10 without `@fastmath`) differs from the `@fastmath` reference by a few ulp, so it is compared with a tolerance,
-# both populations restarted from the same state at every step.
-using Random
+# loops of SNNModels <= 1.9, kept here as the reference. Synapse and state stages are bit-identical. The Heun stage (`update_neuron!`,
+# vectorised since 1.10, no `@fastmath`) is written with `muladd` in the order the `@fastmath` reference compiles to on x86-64 with
+# FMA (four or five fused multiply-adds, reassociated soma sum): on such a target (`_BITWISE`) its outputs are required to be
+# bit-identical to the reference, and so is the whole step. On other targets (aarch64, x86-64 without FMA) LLVM may contract or
+# reassociate the `@fastmath` reference differently, so the stage is compared within `_STAGE_ULPS` ulp of the terms and the state
+# within `_STATE_RTOL`. Both populations restart from the same state at every step.
+# Standalone: `julia --project=test test/pop/multicompartment_update_loop.jl`.
+using Test, Random
+using SNNModels
+@load_units
 include(joinpath(@__DIR__, "_loop_equiv.jl"))
 
 # reference: synaptic current of ReceptorSynapse / MultiReceptorSynapse
@@ -224,8 +230,11 @@ const _BAS_EXACT = (:fire, :tabs, :Is, :Id)
 const _TRIPOD_POT = (:v_s, :w_s, :v_d1, :v_d2, :θ)              # state after the step: within `_STATE_RTOL`
 const _BAS_POT = (:v_s, :w_s, :v_d, :θ)
 _mc_synvars(T) = T === Tripod ? (:synvars_s, :synvars_d1, :synvars_d2) : (:synvars_s, :synvars_d)
-const _STAGE_ULPS = 4          # Heun stage: |Δv - Δv_ref| <= 4 ulp of the magnitude of the terms of the derivative
-const _STATE_RTOL = 3f-5       # one whole step from the same state: potentials within 3e-5 relative (measured max 7e-6, near-divergent neurons)
+const _STAGE_ULPS = 4          # other targets: |Δv - Δv_ref| <= 4 ulp of the magnitude of the terms of the derivative
+const _STATE_RTOL = 3f-5       # other targets: potentials within 3e-5 relative after one whole step from the same state
+# x86-64 with hardware FMA: the target on which the `muladd` order of `update_neuron!` is the compiled order of the `@fastmath`
+# reference (checked on Sapphire Rapids, Julia 1.12), so the comparison is bit for bit.
+const _BITWISE = Sys.ARCH === :x86_64 && isdefined(Core.Intrinsics, :have_fma) && Core.Intrinsics.have_fma(Float32)
 
 # Error of a Heun-stage derivative in units of the last place of its terms. The derivative is a sum of terms (leak, exponential,
 # adaptation, synaptic, axial, external) that cancel: an element-wise ulp distance of the result is unbounded near zero, while
@@ -262,7 +271,8 @@ end
 
 # The two Heun stages in isolation, from the state of `q` (inputs already set): SNNModels `update_neuron!` and the reference get
 # identical inputs at both stages (stage 2 starts from the reference stage-1 derivatives). Returns (max ulp stage 1, stage 2), in
-# ulp of the terms (`_term_ulps`), and whether `v_pred` and `is` (computed before the loop) are bit-identical.
+# ulp of the terms (`_term_ulps`), whether `v_pred` and `is` (computed before the loop) are bit-identical, and whether the stage
+# outputs `Δv` are bit-identical at both stages.
 function _stage_ulps(q, T, dt)
     a = deepcopy(q); b = deepcopy(q)
     for x in (a, b)
@@ -276,18 +286,19 @@ function _stage_ulps(q, T, dt)
         end
         fill!(x.Δv, 0f0)
     end
-    us = [0.0, 0.0]; same = true
+    us = [0.0, 0.0]; same = true; bits = true
     for stage in 1:2
         Δvin = copy(b.Δv)
         SNNModels.update_neuron!(a, a.param, a.Δv, dt)
         _ref_update_neuron!(b, b.param, b.Δv, dt)
         same &= loop_same(a.v_pred, b.v_pred) && loop_same(a.is, b.is)
+        bits &= loop_same(a.Δv, b.Δv)
         for k in axes(b.Δv, 2), i in 1:b.N
             us[stage] = max(us[stage], _term_ulps(a.Δv[i, k], b.Δv[i, k], _term_scale(b, Δvin, i, k, dt)))
         end
         copyto!(a.Δv, b.Δv)        # stage 2 from the same stage-1 derivatives
     end
-    return us[1], us[2], same
+    return us[1], us[2], same, bits
 end
 
 _rclose(x, y, rtol) = size(x) == size(y) && all(i -> x[i] == y[i] || abs(x[i] - y[i]) <= rtol * max(abs(x[i]), abs(y[i])), eachindex(x))
@@ -304,9 +315,11 @@ function _mc_sync!(p, q, T)
 end
 
 # Every step: `p` (SNNModels) restarts from the state of `q` (reference), both get the same input, and
-#  - the two Heun stages in isolation (`_stage_ulps`) agree within `_STAGE_ULPS` ulp of the terms, `v_pred` and `is` bit-identical;
+#  - the two Heun stages in isolation (`_stage_ulps`): `v_pred` and `is` bit-identical; `Δv` bit-identical if `_BITWISE`, else within
+#    `_STAGE_ULPS` ulp of the terms;
 #  - the state stage alone is bit-identical: `r` = reference Heun stages, then `_tripod_state!`/`_bas_state!` of SNNModels, equals `q`;
-#  - after the whole step: synaptic variables, `fire`, `tabs` bit-identical, potentials within `_STATE_RTOL`.
+#  - after the whole step: synaptic variables, `fire`, `tabs` bit-identical, potentials bit-identical if `_BITWISE`, else within
+#    `_STATE_RTOL`.
 # Returns (ok, step, what, nspk, nfree, nbp, nrf, max ulp stage 1, max ulp stage 2, max relative difference of the potentials)
 function _mc_pair(T, N; nsteps = 150, seed = 1, dt = 0.1f0, spike = PostSpike(τabs = 2ms, up = 1ms, At = 2mV))
     Random.seed!(seed)
@@ -339,9 +352,10 @@ function _mc_pair(T, N; nsteps = 150, seed = 1, dt = 0.1f0, spike = PostSpike(τ
                 getfield(rp, k) .= x; getfield(rq, k) .= x
             end
         end
-        s1, s2, same = _stage_ulps(q, T, dt)
+        s1, s2, same, bits = _stage_ulps(q, T, dt)
         u1 = max(u1, s1); u2 = max(u2, s2)
         same || return fail(s, :stage_inputs)
+        _BITWISE && !bits && return fail(s, :heun_stage_bits)
         (s1 <= _STAGE_ULPS && s2 <= _STAGE_ULPS) || return fail(s, :heun_stage)
         r = deepcopy(q)
         SNNModels.integrate!(p, p.param, dt)
@@ -352,6 +366,7 @@ function _mc_pair(T, N; nsteps = 150, seed = 1, dt = 0.1f0, spike = PostSpike(τ
         all(sv -> loop_state_equal(getfield(p, sv), getfield(q, sv), (:g, :h)), _mc_synvars(T)) || return fail(s, :synvars)
         loop_state_equal(p, q, exact) || return fail(s, loop_first_diff(p, q, exact))
         for f in pot
+            _BITWISE && !loop_same(getfield(p, f), getfield(q, f)) && return fail(s, f)
             _rclose(getfield(p, f), getfield(q, f), _STATE_RTOL) || return fail(s, f)
             rel = max(rel, _maxrel(getfield(p, f), getfield(q, f)))
         end
@@ -360,7 +375,8 @@ function _mc_pair(T, N; nsteps = 150, seed = 1, dt = 0.1f0, spike = PostSpike(τ
     return (true, nsteps, nothing, nspk, nfree, nbp, nrf, u1, u2, rel)
 end
 
-@testset "Tripod and BallAndStick vectorised loops agree with the reference to a few ulp" begin
+@testset "Tripod and BallAndStick vectorised loops agree with the reference (bit for bit on x86-64 with FMA)" begin
+    @info "Tripod/BallAndStick Heun stage compared with the @fastmath reference" bitwise = _BITWISE arch = Sys.ARCH
     ulps = Dict{Any,Any}()
     for T in (Tripod, BallAndStick), N in (0, 1, 2, 3, 7, 8, 9, 16, 17, 100, 501)
         r = _mc_pair(T, N)
@@ -378,7 +394,7 @@ end
     @test _mc_pair(BallAndStick, 64; spike = PostSpike(τabs = 1ms, up = 0.1ms))[1]
     for T in (Tripod, BallAndStick)
         rs = [v for (k, v) in ulps if k[1] === T]
-        @info "Heun stage vs the @fastmath reference (ulp of the terms of Δv; relative difference of the potentials after one step)" T stage1 = maximum(first, rs) stage2 = maximum(r -> r[2], rs) state_rel = maximum(last, rs)
+        @info "Heun stage vs the @fastmath reference (ulp of the terms of Δv; relative difference of the potentials after one step)" T _BITWISE stage1 = maximum(first, rs) stage2 = maximum(r -> r[2], rs) state_rel = maximum(last, rs)
     end
     # the axial currents live in registers: `ic` is no longer written (field kept for compatibility)
     for T in (Tripod, BallAndStick)

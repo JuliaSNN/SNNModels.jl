@@ -316,22 +316,19 @@ end
         end
     end
 
-    # Axial current in a register and no `@fastmath`, vectorised and lane-independent: see `Tripod`.
+    # Axial current in a register, no `@fastmath`, the order of the compiled `@fastmath` loop of SNNModels <= 1.9 written with
+    # `muladd`: vectorised, lane-independent and bit-identical to the previous releases on x86-64 with FMA; see `Tripod`.
     @inbounds @simd ivdep for i ∈ rng
         vs = v_pred[i, 1]
         vd = v_pred[i, 2]
-        ws = w_s[i] + Δv[i, 3] * dt
+        ws = muladd(Δv[i, 3], dt, w_s[i])
         icd = (vs - vd) * dgax[i] # axial current soma -> d
-        Δv[i, 1] =
-            (
-                gl * (El - vs) +
-                gl * ΔT * exp256((vs - θ[i]) / ΔT) - ws  # adaptation
-                - is[i, 1]   # synapses
-                - icd # axial current
-                + Is[i]  # external current
-            ) / C
-        Δv[i, 2] = ((dEl[i] - vd) * dgm[i] - is[i, 2] + icd + Id[i]) / dC[i]
-        Δv[i, 3] = (a * (vs - El) - ws) / τw
+        # soma: gl * (El - vs + ΔT * exp((vs - θ) / ΔT)) + Is - (axial current + adaptation + synapses)
+        e = exp256((vs - θ[i]) / ΔT)
+        Δv[i, 1] = muladd(gl, muladd(ΔT, e, El - vs), Is[i] - (icd + (ws + is[i, 1]))) / C
+        # dendrite: leak - synapses + axial + external
+        Δv[i, 2] = ((muladd(dEl[i] - vd, dgm[i], -is[i, 2]) + icd) + Id[i]) / dC[i]
+        Δv[i, 3] = muladd(a, vs - El, -ws) / τw
     end
 end
 

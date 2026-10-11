@@ -119,20 +119,22 @@ populations are built with `Float64` state (see "Precision from the population t
       and a division for every receptor, also for the receptors without a magnesium block) are vectorised with the block evaluated only for the NMDA
       receptors, and `update_receptor!` of `MultiReceptorSynapse` has `exp64` of the loop-invariant argument hoisted. The two Heun-stage loops
       (`update_neuron!`) hold the axial currents in registers instead of storing and reloading them through `p.ic` (which kept them scalar) and
-      have no `@fastmath`: they vectorise, and without fast-math LLVM neither reassociates nor contracts, so a neuron gets the same bits in the
-      vector body and in the scalar remainder, for every chunking and thread count (`threading_synapses.jl`, N up to 4097, 1, 4 and 8 threads).
-      Not bit-identical to the `@fastmath` loops of 1.9.1: the derivatives differ by at most 3 ulp of the largest term of the sum (Tripod; 2 for
-      BallAndStick; `test/pop/multicompartment_update_loop.jl`, where the synapse and state stages are still compared bit for bit). `p.ic` is
-      no longer written (field kept) and the threaded path no longer grows it. The same loop with `@fastmath` (the earlier prototype) is as fast
-      within 7 % and moves spike times in driven runs, so it is not used. ns per neuron and step (pinned, median of 3, two series, N = 1000 /
-      10000, spiking and quiet): `Tripod` 22.1-23.9 -> 10.5-12.1 (2.0-2.15x), `BallAndStick` 15.2-16.0 -> 6.6-7.4 (2.1-2.4x). Driven single
-      neurons over 500 ms (`pre110_fixes/scripts/j2_single_neuron.jl`, N = 1 and 100, dt 0.1): subthreshold drive max difference 1.5e-5 mV,
-      spike steps identical in every case (e.g. 389 and 436 spikes at N = 100), but with spikes the potentials drift apart by up to
-      0.16 (Tripod) and 0.13 mV (BallAndStick) at constant drive and 0.23 mV with synaptic kicks, largest in the step before a spike (the
-      exponential upswing amplifies the rounding differences; a single 1-ulp change of the initial `v_s` gives 0.025-0.038 mV with the old code).
-      `Tripod` network (`tripod_net.jl`, 800 + 200 neurons, 5 s, seeds 1-3, same seed old/new): Tripod rates 22.3-22.5 Hz change by +0.01 to
-      +0.19 %, mean CV-ISI by at most 0.0014, interneuron rates by at most 0.08 %; KS distance between old and new 0.006-0.010 on the
-      per-neuron rates and 0.003-0.004 on the pooled ISIs, against 0.025-0.043 and 0.022-0.061 between seeds of the old code.
+      have no `@fastmath`; the arithmetic is written with `muladd` in the order the `@fastmath` loop of 1.9.1 compiled to on x86-64 with FMA
+      (soma `muladd(gl, muladd(ΔT, e, El - vs), I - (((ws + is) + ic1) + ic2)) / C`, `ws = muladd(Δv4, dt, w)`, dendrites
+      `(muladd(El - vd, gm, -is) + ic + Id) / Cd`, adaptation `muladd(a, vs - El, -ws) / τw`). They vectorise, and without fast-math LLVM
+      keeps that order in the vector body and in the scalar remainder, so a neuron gets the same bits for every chunking and thread count
+      (`threading_synapses.jl`, N up to 4097, 1, 4 and 8 threads). On x86-64 with FMA the result is bit-identical to 1.9.1:
+      `test/pop/multicompartment_update_loop.jl` compares both Heun stages and the whole step with the `@fastmath` reference bit for bit there
+      (elsewhere within 4 ulp of the largest term of the derivative); the driven single neurons of `pre110_fixes/scripts/j2_single_neuron.jl`
+      (Tripod and BallAndStick, N = 1 and 100, subthreshold, spiking and synaptic kicks, 500 ms) give byte-identical traces and spike steps, and
+      the `Tripod` network of `tripod_net.jl` (800 + 200 neurons, 5 s, seed 1) identical spike trains. Bit identity on aarch64 (Apple M-series)
+      is not verified: there LLVM may contract the `@fastmath` reference differently. `p.ic` is no longer written (field kept) and the
+      threaded path no longer grows it. ns per neuron and step (pinned, median of 3, N = 1000 / 10000, spiking and quiet): `Tripod` 22.1-23.9
+      -> 10.4-12.1 (2.0-2.15x), `BallAndStick` 15.2-16.0 -> 6.6-7.4 (2.1-2.4x).
+      Note on the first attempt (same loop in source order, IEEE, no `muladd`): it was as fast but not bit-identical (derivatives within 3 ulp
+      of the largest term, driven potentials up to 0.23 mV apart before spikes with the same spike steps, network statistics within the
+      seed-to-seed spread); the failure analysis is in `pre110_fixes/README.md` ("J2 failure analysis"). With bit identity the per-case
+      tolerances and nulls of that comparison (BallAndStick kick case at 2.2e-4 mV, the kick-case nulls) no longer apply.
     - `HetRec` is unchanged (273 ns per neuron and step at N = 1000: a gather over about `N overlap Nd` weights per neuron, 0.27 ns per weight, and
       the dense `rand!` is a small part). `IF_CANAHP`, `AdExMultiTimescale` and `Multipod` are not included in the module (commented out in `populations.jl`)
       and were not touched. The `@fastmath` synapse stages of `SingleExpSynapse` and `DeltaSynapse` are already vectorised by LLVM (checked in the IR).

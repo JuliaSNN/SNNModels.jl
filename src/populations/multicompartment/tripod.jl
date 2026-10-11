@@ -348,27 +348,25 @@ end
     end
 
     # Axial currents in registers (before 1.10 they were stored to and reloaded from `p.ic`, which kept the loop scalar) and no
-    # `@fastmath`: LLVM neither reassociates nor contracts, so the vector body and the scalar remainder give the same bits for a
-    # neuron whatever its lane or chunk. The derivatives differ from the `@fastmath` loop of SNNModels <= 1.9 by a few ulp
-    # (see the changelog and `test/pop/multicompartment_update_loop.jl`). `ivdep`: as in `_tripod_state!` (chunk ranges not starting at 1).
+    # `@fastmath`. The expressions are written in the order the `@fastmath` loop of SNNModels <= 1.9 compiled to on x86-64 with FMA
+    # (fused multiply-adds as `muladd`, reassociated soma sum), so on that target the derivatives are bit-identical to the
+    # previous releases (`test/pop/multicompartment_update_loop.jl`). Without `@fastmath` LLVM keeps this order in the vector body
+    # and in the scalar remainder: the bits of a neuron do not depend on its lane or chunk. `ivdep`: as in `_tripod_state!`
+    # (chunk ranges not starting at 1).
     @inbounds @simd ivdep for i ∈ rng
         vs = v_pred[i, 1]
         vd1 = v_pred[i, 2]
         vd2 = v_pred[i, 3]
-        ws = w_s[i] + Δv[i, 4] * dt
+        ws = muladd(Δv[i, 4], dt, w_s[i])
         ic1 = (vs - vd1) * d1gax[i] # axial current soma -> d1
         ic2 = (vs - vd2) * d2gax[i] # axial current soma -> d2
-        Δv[i, 2] = ((d1El[i] - vd1) * d1gm[i] - is[i, 2] + ic1 + I_d[i]) / d1C[i]
-        Δv[i, 3] = ((d2El[i] - vd2) * d2gm[i] - is[i, 3] + ic2 + I_d[i]) / d2C[i]
-        Δv[i, 1] =
-            (
-                gl * (El - vs) +
-                gl * ΔT * exp256((vs - θ[i]) / ΔT) - ws  # adaptation
-                - is[i, 1]   # synapses
-                - ic1 - ic2 # axial currents
-                + I[i]  # external current
-            ) / C
-        Δv[i, 4] = (a * (vs - El) - ws) / τw
+        # dendrites: leak - synapses + axial + external
+        Δv[i, 2] = ((muladd(d1El[i] - vd1, d1gm[i], -is[i, 2]) + ic1) + I_d[i]) / d1C[i]
+        Δv[i, 3] = ((muladd(d2El[i] - vd2, d2gm[i], -is[i, 3]) + ic2) + I_d[i]) / d2C[i]
+        # soma: gl * (El - vs + ΔT * exp((vs - θ) / ΔT)) + I - (adaptation + synapses + axial currents)
+        e = exp256((vs - θ[i]) / ΔT)
+        Δv[i, 1] = muladd(gl, muladd(ΔT, e, El - vs), I[i] - (((ws + is[i, 1]) + ic1) + ic2)) / C
+        Δv[i, 4] = muladd(a, vs - El, -ws) / τw
     end
 end
 
