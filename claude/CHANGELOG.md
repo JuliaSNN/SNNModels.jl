@@ -1,6 +1,6 @@
 # SNNModels changelog (branch notes)
 
-## 1.10 (unreleased): sparse spike lists, ring-buffer delays, always-lazy trace decay
+## 2.0.0 (was 1.10 during development): sparse spike lists, ring-buffer delays, always-lazy trace decay
 Faster event-driven STDP and delayed transmission: fewer scans of the spike flags, type-stable
 plasticity calls, no per-step passes over the neurons when a `SpikeTimeStimulus` drives the network.
 Weights of the event-driven STDP rules are no longer bit-identical to 1.9.1 (lazy trace decay, differences up
