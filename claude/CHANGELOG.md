@@ -187,6 +187,12 @@ populations are built with `Float64` state (see "Precision from the population t
     1.5e-5 mV (3.3e-7 of max |v - El|; first difference at step 353, no spike differs), max |dg| 1.2e-4 (1e-7 of max |g|); over 2 s
     rates 6.587 vs 6.638 Hz (E, 0.8 %) and 6.506 vs 6.513 Hz (I), CV-ISI 0.951 vs 0.944 and 0.958 vs 0.971. Same spike counts as before in
     the four hash configurations above (rasters differ). Synapses with plasticity keep the bit-identical column path of the previous item.
+  - On top of "Synapse memory footprint" (both items above were measured on the tree before it): its common delay stored once already
+    removes the per-synapse delay load from the general loop, so most of the gain of the constant column now comes from that change.
+    T8 N = 10000 500 Hz, same day, pinned, median of 3: 1.088 s per simulated second with the footprint change alone, 0.947 with the
+    two items above as well (13 % less). With delays stored once the column path stays bit-identical to the general loop (SHA1 of
+    rasters, `v`, `g`, buffers in the four hash configurations, buffer path forced). Script and data: `pre110_fixes/scripts/
+    run_rebase.py`, `out/rb_t8.jsonl`, `out/rb_identity.jsonl`.
   - Trace decay: the factors `exp(-dt/τ)` are cached in the rule variables (`decay` field of `STDPVariables`,
     `STDPTripletVariables`) and recomputed only if `dt` or a `τ` changes. `_rescale!` (was `_decay!`) sets values
     below `floatmin(Float32)` to zero: the trace of a silent neuron used to run through the subnormal range at
