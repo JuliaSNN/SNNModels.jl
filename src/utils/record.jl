@@ -205,52 +205,220 @@ function _grow_dense!(records, meta, key::Symbol)
     return
 end
 
-# ── Dense fire write (manifesto §5) ─────────────────────────────────────────
+# ── Dense fire write: from the list of the neurons that fired ───────────────
+"""
+    _recording_spike_index(obj)
+
+`SpikeIndex` that `obj` owns and feeds itself, read by the `:fire` recorder instead of `obj.fire`
+while its `fed` flag is set; `nothing` (the default) for every other component, whose spikes are
+recorded from a word scan of `fire`.
+
+Contract: a type returns its `SpikeIndex` only if, whenever `fed == true` at the time `record!`
+runs, `idx[1:n]` is the complete, ascending list (no duplicates) of the `true` entries of `fire`.
+Never return a list that can be unsorted or contain repeats (e.g. the `spiking` log of
+`SpikeTimeStimulus`). The types listed here are exactly those with a non-generic `spike_index`
+method (checked by the test suite).
+"""
+_recording_spike_index(::Any) = nothing
+_recording_spike_index(
+    p::Union{Poisson,VariablePoisson,InhomogeneousPoisson,Identity,PoissonStimulusLayer},
+) = getfield(p, :spikes)
+
+_has_fed_list(::Nothing) = false
+_has_fed_list(s::SpikeIndex) = s.fed
+
+"""
+    _fire_step_list(src, fire, meta)
+
+Ascending `Int32` indices of the neurons that fired this step, as a view: the owner's fed list if
+`src` is a `SpikeIndex` with `fed == true`, otherwise a word scan of `fire` (`_flags_to_list!`) into
+the recorder's own scratch list `meta[:fire_scratch]` (never the `SpikeIndex` shared with the
+connections).
+"""
+@inline _fire_step_list(::Nothing, fire::AbstractVector{Bool}, meta) = _scan_fire!(fire, meta)
+
+@inline function _fire_step_list(s::SpikeIndex, fire::AbstractVector{Bool}, meta)
+    s.fed && return @inbounds view(s.idx, 1:s.n)
+    return _scan_fire!(fire, meta)
+end
+
+@inline function _scan_fire!(fire::AbstractVector{Bool}, meta)
+    scratch = _fire_scratch!(meta, length(fire))
+    n = _flags_to_list!(scratch, fire)
+    return @inbounds view(scratch, 1:n)
+end
+
+# Scratch list of the recorder, created on first use (also for copied/loaded models and manual loops).
+function _fire_scratch!(meta, N::Int)
+    s = get(meta, :fire_scratch, nothing)
+    s isa Vector{Int32} && length(s) == N && return s
+    s = Vector{Int32}(undef, N)
+    meta[:fire_scratch] = s
+    return s
+end
+
+"""
+    _fire_mask!(meta, ind, N, owner = nothing)
+
+Membership mask (`Vector{Bool}` of length `N`) of the recorded subset `ind`, and whether `ind` is
+strictly increasing. Cached in `meta` and rebuilt only when `ind` is a different vector
+(`meta[:fire_mask_src] !== ind`) or `N` changed; `_allocate_fire!` drops the cache so every
+`sim!`/`train!` call rebuilds it (in-place changes of the index vector between the steps of a
+manual loop are not supported). Throws `ArgumentError` if an index is outside `1:N`.
+"""
+function _fire_mask!(meta, ind::Vector{Int}, N::Int, owner = nothing)
+    mask = get(meta, :fire_mask, nothing)
+    if mask isa Vector{Bool} && length(mask) == N && get(meta, :fire_mask_src, nothing) === ind
+        return mask, meta[:fire_ind_sorted]::Bool
+    end
+    for i in ind
+        1 <= i <= N || throw(ArgumentError(
+            "monitor!(…, (:fire, indices)) of $(_owner_name(owner)): index $i outside 1:$N"))
+    end
+    m = (mask isa Vector{Bool} && length(mask) == N) ? fill!(mask, false) : zeros(Bool, N)
+    @inbounds for i in ind
+        m[i] = true
+    end
+    sorted = issorted(ind, lt = <=)   # strictly increasing: sorted and no duplicates
+    meta[:fire_mask] = m
+    meta[:fire_mask_src] = ind
+    meta[:fire_ind_sorted] = sorted
+    return m, sorted
+end
+
+_owner_name(::Nothing) = "the component"
+_owner_name(obj) = hasproperty(obj, :name) ? "$(getproperty(obj, :name)) ($(nameof(typeof(obj))))" : string(nameof(typeof(obj)))
+
+"""
+    record_fire_dense!(obj, fire, records, meta, T, indices)
+
+Append the spikes of this step of `obj` (time `Float32(get_time(T))`, neuron id) to the COO buffers
+`records[:fire][:times_buf]`, `[:neurons_buf]`, in ascending neuron order. The ids come from the
+list of the neurons that fired (`_fire_step_list`: the owner's fed `SpikeIndex`, or a word scan of
+`fire`), so the cost follows the number of spikes; the buffer grows at most once per step.
+With `indices[:fire]` only the listed neurons are recorded (membership mask); an unsorted or
+repeated index list, or a short one on a population without a fed list, is visited in its own order.
+"""
 function record_fire_dense!(
-    fire::Vector{Bool},
+    obj,
+    fire::AbstractVector{Bool},
     records,
     meta,
     T::Time,
     indices::Dict{Symbol,Vector{Int}},
 )
-    rec = records[:fire]
-    times_buf = rec[:times_buf]::Vector{Float32}
-    neurons_buf = rec[:neurons_buf]::Vector{Int}
-    t = get_time(T)
-    has_ind = haskey(indices, :fire)
-    ind = has_ind ? indices[:fire] : Int[]
-    rng = has_ind ? eachindex(ind) : eachindex(fire)
-    @inbounds for j in rng
-        i = has_ind ? ind[j] : j
-        fire[i] || continue
-        if meta[:allocated][:fire] == 0
-            _grow_fire!(rec, meta)
-            times_buf = rec[:times_buf]::Vector{Float32}
-            neurons_buf = rec[:neurons_buf]::Vector{Int}
+    rec = records[:fire]::Dict{Symbol,AbstractVector}
+    alloc = meta[:allocated]::Dict{Symbol,Int}
+    t = Float32(get_time(T))
+    src = _recording_spike_index(obj)
+    if haskey(indices, :fire)
+        ind = indices[:fire]
+        isempty(ind) && return nothing
+        mask, sorted = _fire_mask!(meta, ind, length(fire), obj)
+        if !sorted || (!_has_fed_list(src) && 8 * length(ind) < length(fire))
+            return _write_fire_ordered!(rec, meta, alloc, fire, ind, t)
         end
-        wp = length(times_buf) - meta[:allocated][:fire] + 1
-        times_buf[wp] = t
-        neurons_buf[wp] = i
-        meta[:allocated][:fire] -= 1
+        return _write_fire_masked!(rec, meta, alloc, _fire_step_list(src, fire, meta), mask, t)
     end
-    return
+    return _write_fire_list!(rec, meta, alloc, _fire_step_list(src, fire, meta), t)
 end
 
-function _grow_fire!(rec, meta)
-    old_cap = length(rec[:times_buf])
-    new_cap = max(1, 2 * old_cap)
+# every neuron of the (ascending) list
+function _write_fire_list!(rec, meta, alloc::Dict{Symbol,Int}, L::AbstractVector{Int32}, t::Float32)
+    k = length(L)
+    k == 0 && return nothing
+    times_buf, neurons_buf, wp = _fire_slots!(rec, meta, alloc, k)
+    @inbounds for q in 1:k
+        times_buf[wp+q] = t
+        neurons_buf[wp+q] = Int(L[q])
+    end
+    alloc[:fire] -= k
+    return nothing
+end
+
+# the neurons of the (ascending) list that are in the subset
+function _write_fire_masked!(rec, meta, alloc::Dict{Symbol,Int}, L::AbstractVector{Int32}, mask::Vector{Bool}, t::Float32)
+    m = 0
+    @inbounds for q in eachindex(L)
+        m += mask[L[q]]
+    end
+    m == 0 && return nothing
+    times_buf, neurons_buf, wp = _fire_slots!(rec, meta, alloc, m)
+    j = wp
+    @inbounds for q in eachindex(L)
+        i = Int(L[q])
+        if mask[i]
+            j += 1
+            times_buf[j] = t
+            neurons_buf[j] = i
+        end
+    end
+    alloc[:fire] -= m
+    return nothing
+end
+
+# the subset in its own order (unsorted, repeated, or short subsets of a population without a fed list)
+function _write_fire_ordered!(rec, meta, alloc::Dict{Symbol,Int}, fire::AbstractVector{Bool}, ind::Vector{Int}, t::Float32)
+    m = 0
+    for i in ind
+        m += fire[i]
+    end
+    m == 0 && return nothing
+    times_buf, neurons_buf, wp = _fire_slots!(rec, meta, alloc, m)
+    j = wp
+    for i in ind
+        if fire[i]
+            j += 1
+            @inbounds times_buf[j] = t
+            @inbounds neurons_buf[j] = i
+        end
+    end
+    alloc[:fire] -= m
+    return nothing
+end
+
+# Buffers with room for `need` more spikes, and the index of the last written slot.
+@inline function _fire_slots!(rec, meta, alloc::Dict{Symbol,Int}, need::Int)
+    _ensure_fire_capacity!(rec, meta, need)
+    times_buf = rec[:times_buf]::Vector{Float32}
+    neurons_buf = rec[:neurons_buf]::Vector{Int}
+    return times_buf, neurons_buf, length(times_buf) - alloc[:fire]
+end
+
+"""
+    _ensure_fire_capacity!(rec, meta, need)
+
+Make room for `need` more spikes in the `:fire` COO buffers (called once per step, before the
+writes). If the countdown `meta[:allocated][:fire]` is short, the buffers grow to
+`max(2 * capacity, written + need, 1)` slots, keeping the written prefix, with one warning per recording.
+"""
+function _ensure_fire_capacity!(rec, meta, need::Int)
+    alloc = meta[:allocated]::Dict{Symbol,Int}
+    remaining = get(alloc, :fire, 0)
+    remaining >= need && remaining <= length(rec[:times_buf]::Vector{Float32}) && return nothing
+    _grow_fire!(rec, meta, alloc, remaining, need)
+    return nothing
+end
+
+@noinline function _grow_fire!(rec, meta, alloc::Dict{Symbol,Int}, remaining::Int, need::Int)
+    times_buf = rec[:times_buf]::Vector{Float32}
+    neurons_buf = rec[:neurons_buf]::Vector{Int}
+    cap = length(times_buf)
+    written = clamp(cap - remaining, 0, cap)   # a countdown larger than the buffer (copied model): nothing written
+    new_cap = max(2 * cap, written + need, 1)
     new_times = Vector{Float32}(undef, new_cap)
     new_neurons = Vector{Int}(undef, new_cap)
-    copyto!(new_times, 1, rec[:times_buf], 1, old_cap)
-    copyto!(new_neurons, 1, rec[:neurons_buf], 1, old_cap)
+    copyto!(new_times, 1, times_buf, 1, written)
+    copyto!(new_neurons, 1, neurons_buf, 1, written)
     rec[:times_buf] = new_times
     rec[:neurons_buf] = new_neurons
-    meta[:allocated][:fire] = new_cap - old_cap
-    if !get(meta[:grew], :fire, false)
+    alloc[:fire] = new_cap - written
+    grew = meta[:grew]
+    if !get(grew, :fire, false)
         @warn "Fire COO buffer overflowed; doubled to $new_cap spike slots. Pass monitor_rate= to avoid reallocation."
-        meta[:grew][:fire] = true
+        grew[:fire] = true
     end
-    return
+    return nothing
 end
 
 @inline function get_model_field(obj, key::Symbol, var_map::Dict{Symbol,Tuple{Symbol,Symbol}}, T::Time)
@@ -275,38 +443,71 @@ monitored component. Idempotent across chunked `sim!` calls: a key already alloc
 at the same `dt` is skipped; on `dt` mismatch the buffer is reallocated.
 """
 function _allocate_records!(P, C, S, dt::Float32, duration::Float32)
-    for obj in Iterators.flatten((P, C, S))
-        (obj isa AbstractPopulation || obj isa AbstractConnection || obj isa AbstractStimulus) || continue
-        _allocate_component!(obj, dt, duration)
-    end
+    # one holder for (dt, duration): the per-component dynamic call does not box two Float32s
+    ctx = Ref((dt, duration))
+    _allocate_each!(P, ctx)
+    _allocate_each!(C, ctx)
+    _allocate_each!(S, ctx)
+    return nothing
 end
 
-function _allocate_component!(obj, dt::Float32, duration::Float32)
-    haskey(obj.records, :data) || return
-    haskey(obj.records, :meta) || return
-    meta = obj.records[:meta]
+function _allocate_each!(objs, ctx::Base.RefValue{Tuple{Float32,Float32}})
+    for obj in objs
+        (obj isa AbstractPopulation || obj isa AbstractConnection || obj isa AbstractStimulus) || continue
+        isempty(getfield(obj, :records)) && continue   # unmonitored: nothing to allocate
+        _allocate_component!(obj, ctx)
+    end
+    return nothing
+end
+
+_allocate_component!(obj, dt::Real, duration::Real) =
+    _allocate_component!(obj, Ref((Float32(dt), Float32(duration))))
+
+function _allocate_component!(obj, ctx::Base.RefValue{Tuple{Float32,Float32}})
+    records = obj.records
+    haskey(records, :data) || return
+    haskey(records, :meta) || return
+    meta = records[:meta]
     haskey(meta, :mode) || return
+    # function barrier on the usual dictionary types: static calls, `obj` and the Float32s are not boxed
+    if records isa Dict{Any,Any} && meta isa Dict{Symbol,Any}
+        return _allocate_keys!(obj, records, meta, ctx)
+    end
+    return _allocate_keys!(obj, records, meta, ctx)
+end
+
+_buffer_matches(buf::AbstractArray{<:Any,N}, snap_size::Tuple) where {N} = N == length(snap_size) + 1
+_buffer_matches(buf, snap_size) = false
+
+function _allocate_keys!(obj, records, meta, ctx::Base.RefValue{Tuple{Float32,Float32}})
+    dt, duration = ctx[]
+    mode = meta[:mode]::Dict{Symbol,Symbol}
+    alloc = meta[:allocated]::Dict{Symbol,Int}
+    monitor_time = meta[:monitor_time]::Dict{Symbol,Float32}
+    periods = meta[:period]::Dict{Symbol,Int}
+    dts = meta[:dt]::Dict{Symbol,Float32}
+    srs = records[:sr]::Dict{Symbol,Float32}
     N = hasfield(typeof(obj), :N) ? Int(getfield(obj, :N)) : 0
-    for key in obj.records[:data]
-        get(meta[:mode], key, :legacy) === :dense || continue
+    for key in records[:data]::Vector{Symbol}
+        get(mode, key, :legacy) === :dense || continue
         if key === :fire
             _allocate_fire!(obj, meta, N, duration)
             continue
         end
         # Reconcile period against the real dt now that it is known.
-        sr = obj.records[:sr][key]
-        period = max(1, round(Int, 1.0f0 / Float32(sr) / dt))
-        meta[:period][key] = period
+        sr = srs[key]
+        period = max(1, round(Int, 1.0f0 / sr / dt))
+        periods[key] = period
 
-        snap_size = meta[:snapshot_size][key]
-        buf = obj.records[key]
-        allocated_buffer = buf isa AbstractArray && ndims(buf) == length(snap_size) + 1
-        dt_changed = allocated_buffer && get(meta[:dt], key, dt) != dt
+        snap_size = meta[:snapshot_size][key]::Tuple
+        buf = records[key]
+        allocated_buffer = _buffer_matches(buf, snap_size)
+        dt_changed = allocated_buffer && get(dts, key, dt) != dt
 
         # Samples a chunk of `duration` produces. The +1 (record_zero! sample at
         # T.tt = 0) only applies to the very first chunk on a fresh buffer.
-        hint_ms = if haskey(meta[:monitor_time], key)
-            meta[:monitor_time][key]
+        hint_ms = if haskey(monitor_time, key)
+            monitor_time[key]
         elseif duration >= 1000f0
             duration
         else
@@ -318,15 +519,15 @@ function _allocate_component!(obj, dt::Float32, duration::Float32)
         if !allocated_buffer || dt_changed
             # First allocation (or dt mismatch → fresh buffer).
             dt_changed && @warn "dt changed for record $key in $(obj.name); reallocating buffer."
-            obj.records[key] = Array{Float32}(undef, snap_size..., chunk_capacity)
-            meta[:allocated][key] = chunk_capacity
-            meta[:dt][key] = dt
+            records[key] = Array{Float32}(undef, snap_size..., chunk_capacity)
+            alloc[key] = chunk_capacity
+            dts[key] = dt
         else
             # Existing buffer persists across chunks. Ensure room for this chunk;
             # extend in place if the remaining countdown is insufficient.
-            remaining = get(meta[:allocated], key, 0)
+            remaining = get(alloc, key, 0)
             if remaining < chunk_capacity
-                _extend_dense!(obj.records, meta, key, chunk_capacity - remaining)
+                _extend_dense!(records, meta, key, chunk_capacity - remaining)
             end
         end
     end
@@ -353,19 +554,22 @@ function _extend_dense!(records, meta, key::Symbol, extra::Int)
 end
 
 function _allocate_fire!(obj, meta, N::Int, duration::Float32)
-    fire = obj.records[:fire]
-    rate = get(meta[:monitor_rate], :fire, 20f0)  # Hz; conservative default
+    fire = obj.records[:fire]::Dict{Symbol,AbstractVector}
+    alloc = meta[:allocated]::Dict{Symbol,Int}
+    rate = get(meta[:monitor_rate]::Dict{Symbol,Float32}, :fire, 20f0)  # Hz; conservative default
     dur_s = duration / 1000f0
     chunk_cap = max(1, ceil(Int, rate * max(N, 1) * dur_s))
+    # the subset mask is rebuilt at the first step of every sim!/train! (covers in-place edits of the indices)
+    delete!(meta, :fire_mask_src)
     allocated_buffer = haskey(fire, :times_buf) && !isempty(fire[:times_buf])
     if !allocated_buffer
         # First allocation.
         fire[:times_buf] = Vector{Float32}(undef, chunk_cap)
         fire[:neurons_buf] = Vector{Int}(undef, chunk_cap)
-        meta[:allocated][:fire] = chunk_cap
+        alloc[:fire] = chunk_cap
     else
         # Extend across chunks if remaining room is insufficient for this chunk.
-        remaining = get(meta[:allocated], :fire, 0)
+        remaining = get(alloc, :fire, 0)
         if remaining < chunk_cap
             _extend_fire!(fire, meta, chunk_cap - remaining)
         end
@@ -406,28 +610,44 @@ the dense or legacy path per `meta[:mode][key]`. Called every dt inside the sim 
 end
 
 function _record!(obj, T::Time)
-    @unpack records = obj
+    records = getfield(obj, :records)
     !haskey(records, :data) && return
     meta = records[:meta]
+    # function barrier: typed records/meta for the usual dictionaries (hot path, every dt)
+    if records isa Dict{Any,Any} && meta isa Dict{Symbol,Any}
+        return _record_keys!(obj, records, meta, T)
+    end
+    return _record_keys!(obj, records, meta, T)
+end
+
+function _record_keys!(obj, records, meta, T::Time)
     time = get_time(T)
-    mode = meta[:mode]
-    for key::Symbol in records[:data]
+    mode = meta[:mode]::Dict{Symbol,Symbol}
+    start_time = records[:start_time]
+    end_time = records[:end_time]
+    for key in records[:data]::Vector{Symbol}
         # start/end time = times of the first and last sample actually taken (every step for
         # :fire, every `period` steps of the global step counter otherwise)
         sampled = if key === :fire
             true
         elseif get(mode, key, :legacy) === :dense
-            (get_step(T) % meta[:period][key]) == 0
+            (get_step(T) % (meta[:period]::Dict{Symbol,Int})[key]) == 0
         else
             record_step(T, records[:sr][key])
         end
         if sampled
-            isnan(get(records[:start_time], key, NaN32)) && (records[:start_time][key] = time)
-            records[:end_time][key] = time
+            # same code twice: the `isa` branch is the typed one (no boxed `time`), the other covers old files
+            if start_time isa Dict{Symbol,Float32} && end_time isa Dict{Symbol,Float32}
+                isnan(get(start_time, key, NaN32)) && (start_time[key] = time)
+                end_time[key] = time
+            else
+                isnan(get(start_time, key, NaN32)) && (start_time[key] = time)
+                end_time[key] = time
+            end
         end
         if key === :fire
             if get(mode, :fire, :legacy) === :dense
-                record_fire_dense!(obj.fire, records, meta, T, records[:indices])
+                record_fire_dense!(obj, obj.fire, records, meta, T, records[:indices]::Dict{Symbol,Vector{Int}})
             else
                 record_fire!(obj.fire, records[:fire], T, records[:indices])
             end
@@ -550,7 +770,8 @@ Already-monitored keys and missing fields are skipped silently (with a warning i
 
 With `(:fire, indices)` only the spikes of the listed neurons are recorded (with their
 original neuron indices, so `spiketimes` still returns one entry per neuron of the
-population). (Up to SNNModels 1.8.4 the indices were ignored.)
+population). (Up to SNNModels 1.8.4 the indices were ignored.) An index outside `1:N` throws an
+`ArgumentError` at the first step of the next `sim!`/`train!`.
 
 # Example
 ```julia
