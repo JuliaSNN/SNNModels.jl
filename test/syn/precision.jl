@@ -185,9 +185,10 @@ const _PRECISION_RULES = (
         @test_throws ArgumentError CurrentStimulus(P64, :I; param = CurrentNoise(3))
         @test_throws ArgumentError BalancedStimulus(P64, :ge, :gi; param = 5.0)
         @test_throws ArgumentError MetaPlasticity(RandomTurnover(rate = 1e-3), SpikingSynapse(a, P64, :ge; conn = (p = 1.0, μ = 1.0)))
-        # populations without a Float64 model refuse a Float64 step
-        A64 = AdEx(N = 3, VFT = Vector{Float64})
-        @test_throws ArgumentError SNNModels.integrate!(A64, A64.param, 0.1)
+        # populations without a Float64 model refuse a Float64 step (since 1.10 every population model but HetRec has one, see
+        # test/pop/precision_populations.jl)
+        H = SNNModels.Population(SNNModels.HetRecParameter(); N = 3)
+        @test_throws ArgumentError SNNModels.integrate!(H, H.param, 0.1)
     end
 
     @testset "Float32 default unchanged" begin

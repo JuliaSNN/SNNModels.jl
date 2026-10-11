@@ -71,6 +71,7 @@ end
     y2 = y * y
     return Float32(y2 * y2)
 end
+@inline _pow4(x::Float64) = (x2 = x * x; x2 * x2)
 
 @doc raw"""
     HH(; N = 100, param = HHParameter(), name = "HH", kwargs...)

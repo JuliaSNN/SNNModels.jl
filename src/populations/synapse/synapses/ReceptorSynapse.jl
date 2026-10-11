@@ -74,8 +74,25 @@ end
 ReceptorSynapse(syn::ReceptorArray, NMDA::NMDAVoltageDependency{Float32}; kwargs...) =
     ReceptorSynapse(; kwargs..., syn = syn, NMDA = NMDA)
 
-function synaptic_receptors(synapse::ReceptorSynapse, N::Int)
-    return (glu = zeros(Float32, N), gaba = zeros(Float32, N))
+function synaptic_receptors(synapse::ReceptorSynapse, N::Int, ::Type{FT}) where {FT<:AbstractFloat}
+    return (glu = zeros(FT, N), gaba = zeros(FT, N))
+end
+
+# Copy in the precision `T`: every receptor converted to `Receptor{T}`, the NMDA block to `NMDAVoltageDependency{T}` (the object
+# itself when it is already `T`, so the Float32 defaults `TripodSomaSynapse`, `TripodDendSynapse` are used as they are).
+_convert_receptors(syn::AbstractVector{<:Receptor}, ::Type{T}) where {T} = Receptor{T}[convert_precision(r, T) for r in syn]
+function convert_precision(r::Receptor{S}, ::Type{T}) where {S,T<:AbstractFloat}
+    S === T && return r
+    return Receptor{T}(map(f -> _convert_value(getfield(r, f), T), fieldnames(typeof(r)))...)
+end
+function convert_precision(n::NMDAVoltageDependency{S}, ::Type{T}) where {S,T<:AbstractFloat}
+    S === T && return n
+    return NMDAVoltageDependency{T}(T(n.b), T(n.k), T(n.mg))
+end
+function convert_precision(x::ReceptorSynapse, ::Type{T}) where {T<:AbstractFloat}
+    _float_type(typeof(x)) === T && return x
+    syn, NMDA = _convert_receptors(x.syn, T), convert_precision(x.NMDA, T)
+    return ReceptorSynapse{typeof(x.glu_receptors),typeof(syn),typeof(NMDA)}(syn, NMDA, x.glu_receptors, x.gaba_receptors)
 end
 
 
@@ -150,11 +167,17 @@ end
 # positional form, equivalent to the keyword form `MultiReceptorSynapse(; syn)`
 MultiReceptorSynapse(syn::ReceptorArray; kwargs...) = MultiReceptorSynapse(; syn = syn, kwargs...)
 
-function synaptic_receptors(synapse::MultiReceptorSynapse, N::Int)
+function convert_precision(x::MultiReceptorSynapse, ::Type{T}) where {T<:AbstractFloat}
+    _float_type(typeof(x)) === T && return x
+    syn, NMDA = _convert_receptors(x.syn, T), convert_precision(x.NMDA, T)
+    return MultiReceptorSynapse{typeof(syn),typeof(NMDA),typeof(x.receptors)}(syn, NMDA, x.receptors)
+end
 
-    receptors = Dict{Symbol,Vector{Float32}}()
+function synaptic_receptors(synapse::MultiReceptorSynapse, N::Int, ::Type{FT}) where {FT<:AbstractFloat}
+
+    receptors = Dict{Symbol,Vector{FT}}()
     for rec in keys(synapse.receptors)
-        receptors[rec] = zeros(Float32, N)
+        receptors[rec] = zeros(FT, N)
     end
     return (; receptors...)
 end
@@ -173,17 +196,18 @@ State variables of `ReceptorSynapse` and `MultiReceptorSynapse`, created by
 ReceptorSynapseVars
 @snn_kw struct ReceptorSynapseVars{MFT = Matrix{Float32}} <: AbstractReceptorVariable
     N::Int = 100
-    g::MFT = zeros(Float32, N, 4)
-    h::MFT = zeros(Float32, N, 4)
+    g::MFT = zeros(eltype(MFT), N, 4)
+    h::MFT = zeros(eltype(MFT), N, 4)
 end
 
 
-function synaptic_variables(synapse::T, N::Int) where {T<:AbstractReceptorParameter}
+function synaptic_variables(synapse::T, N::Int, ::Type{FT}) where {T<:AbstractReceptorParameter,FT<:AbstractFloat}
     num_receptors = length(synapse.syn)
     return ReceptorSynapseVars(;
         N = N,
-        g = zeros(Float32, N, num_receptors),
-        h = zeros(Float32, N, num_receptors),
+        MFT = Matrix{FT},
+        g = zeros(FT, N, num_receptors),
+        h = zeros(FT, N, num_receptors),
     )
 end
 
@@ -192,11 +216,11 @@ end
     synapse::ReceptorSynapse,
     receptors::RECT,
     synvars::ReceptorSynapseVars,
-    dt::Float32,
+    dt::AbstractFloat,
 ) where {P<:AbstractPopulation,RECT<:NamedTuple}
     update_synapses!(p, synapse, receptors, synvars, dt, 1:Int(synvars.N))
-    fill!(receptors.glu, 0.0f0)     # the whole buffers (the chunk method clears its neurons only)
-    fill!(receptors.gaba, 0.0f0)
+    fill!(receptors.glu, zero(eltype(receptors.glu)))     # the whole buffers (the chunk method clears its neurons only)
+    fill!(receptors.gaba, zero(eltype(receptors.gaba)))
 end
 
 # Chunk method: the neurons `rng` only, and the input buffers `glu`, `gaba` are cleared on `rng` only.
@@ -205,7 +229,7 @@ end
     synapse::ReceptorSynapse,
     receptors::RECT,
     synvars::ReceptorSynapseVars,
-    dt::Float32,
+    dt::AbstractFloat,
     rng::UnitRange{Int},
 ) where {P<:AbstractPopulation,RECT<:NamedTuple}
     @unpack glu_receptors, gaba_receptors = synapse
@@ -227,9 +251,10 @@ end
             h[i, n] = exp64(-dt * τr⁻) * (h[i, n])
         end
     end
+    z = zero(eltype(glu))
     @inbounds for i in rng
-        glu[i] = 0.0f0
-        gaba[i] = 0.0f0
+        glu[i] = z
+        gaba[i] = z
     end
 end
 
@@ -238,11 +263,11 @@ end
     synapse::MultiReceptorSynapse,
     receptors::RECT,
     synvars::ReceptorSynapseVars,
-    dt::Float32,
+    dt::AbstractFloat,
 ) where {P<:AbstractPopulation,RECT<:NamedTuple}
     update_synapses!(p, synapse, receptors, synvars, dt, 1:Int(synvars.N))
     for name in keys(receptors)
-        fill!(getfield(receptors, name), 0.0f0)
+        fill!(getfield(receptors, name), zero(eltype(getfield(receptors, name))))
     end
 end
 
@@ -252,7 +277,7 @@ end
     synapse::MultiReceptorSynapse,
     receptors::RECT,
     synvars::ReceptorSynapseVars,
-    dt::Float32,
+    dt::AbstractFloat,
     rng::UnitRange{Int},
 ) where {P<:AbstractPopulation,RECT<:NamedTuple}
     for name in keys(synapse.receptors)
@@ -263,19 +288,19 @@ end
     for name in keys(receptors)
         buf = getfield(receptors, name)
         @inbounds for i in rng
-            buf[i] = 0.0f0
+            buf[i] = zero(eltype(buf))
         end
     end
 end
 
 @inline function update_receptor!(
     synvars::T,
-    receptor::Receptor{Float32},
-    target::Vector{Float32},
+    receptor::Receptor{FT},
+    target::Vector{FT},
     n::Int,
-    dt::Float32,
+    dt::FT,
     rng::UnitRange{Int} = 1:Int(synvars.N),
-) where {T<:AbstractReceptorVariable}
+) where {T<:AbstractReceptorVariable,FT<:AbstractFloat}
     @unpack N, g, h = synvars
     @unpack τr⁻, τd⁻, α = receptor
     (size(g, 1) >= N && size(h, 1) >= N && n <= size(g, 2) && n <= size(h, 2) && length(target) >= N) ||
@@ -310,7 +335,7 @@ _chunk_synapse(::AbstractReceptorParameter) = true
     @unpack mg, b, k = NMDA
     (length(v) >= N && length(syncurr) >= N && size(g, 1) >= N && size(g, 2) >= length(syn)) ||
         throw(DimensionMismatch("membrane potential, current or conductance matrix too small for N = $N and $(length(syn)) receptors"))
-    fill!(syncurr, 0.0f0)
+    fill!(syncurr, zero(eltype(syncurr)))
     _synaptic_current_rng!(synapse, synvars, v, syncurr, 1:Int(N))
 end
 
@@ -330,7 +355,7 @@ end
     VT2<:AbstractVector,
 }
     @inbounds for i in rng
-        syncurr[i] = 0.0f0
+        syncurr[i] = zero(eltype(syncurr))
     end
     _synaptic_current_rng!(synapse, synvars, v, syncurr, rng)
 end
@@ -344,7 +369,7 @@ end
     # The voltage-dependent factor is only evaluated for the NMDA receptors (the multiplication by 1 of the others is exact).
     for n in eachindex(syn)
         @unpack gsyn, E_rev, nmda = syn[n]
-        if nmda == 0.0f0
+        if nmda == zero(nmda)
             @inbounds @simd for neuron ∈ rng
                 syncurr[neuron] += gsyn * g[neuron, n] * (v[neuron] - E_rev)
             end
@@ -354,7 +379,7 @@ end
                     gsyn *
                     g[neuron, n] *
                     (v[neuron] - E_rev) *
-                    (1 / (1.0f0 + mgb * exp256(k * v[neuron])))
+                    (1 / (one(mgb) + mgb * exp256(k * v[neuron])))
             end
         end
     end

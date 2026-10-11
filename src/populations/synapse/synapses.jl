@@ -9,7 +9,7 @@ A synapse model is a parameter struct that is stored in the population (field `s
 connections are turned into a synaptic current. Each population owns three objects created
 from it:
 
-- `receptors::NamedTuple` (built by `synaptic_receptors`): one `Vector{Float32}` of length `N`
+- `receptors::NamedTuple` (built by `synaptic_receptors`): one vector (`Float32` by default) of length `N`
   per receptor group, by default `(glu = ..., gaba = ...)`. Connections (`SpikingSynapse`)
   add the weight of every presynaptic spike to the entry of the postsynaptic neuron in
   `forward!`.
@@ -25,8 +25,8 @@ current from the state and the membrane potential). The neuron equations use the
 convention ``C\,dV/dt = \ldots - I_{syn}``, so a positive `syn_curr` hyperpolarises.
 
 # Interface to implement for a new synapse model
-- `synaptic_variables(synapse, N)` returning an `AbstractSynapseVariable`;
-- `synaptic_receptors(synapse, N)` (optional, default `(glu = zeros(Float32, N), gaba = zeros(Float32, N))`);
+- `synaptic_variables(synapse, N, FT)` returning an `AbstractSynapseVariable` with state of element type `FT`;
+- `synaptic_receptors(synapse, N, FT)` (optional, default `(glu = zeros(FT, N), gaba = zeros(FT, N))`);
 - `update_synapses!(p, synapse, receptors, synvars, dt)`;
 - `synaptic_current!(p, synapse, synvars, v, syn_curr)`.
 
@@ -52,7 +52,8 @@ per compartment, created by `synaptic_variables(synapse, N)`).
   `AbstractReceptorVariable`): matrices `g`, `h` of size `N x n_receptors`
 - `Confavreux2025SynapseVars` (for `Confavreux2025Synapse`): `gAMPA`, `gNMDA`, `gGABA`
 
-All state variables are `Float32`.
+The state variables have the precision of the population (`Float32` by default, `Float64` for a population built with
+`VFT = Vector{Float64}`).
 """
 abstract type AbstractSynapseVariable <: AbstractComponent end
 
@@ -85,27 +86,41 @@ function get_synapse_symbol(synapse::T, sym::Symbol) where {T<:AbstractSynapsePa
 end
 
 """
-    synaptic_variables(synapse::AbstractSynapseParameter, N::Int) -> AbstractSynapseVariable
+    synaptic_variables(synapse::AbstractSynapseParameter, N::Int[, FT]) -> AbstractSynapseVariable
 
-Allocate the state variables (all zero, `Float32`) of the synapse model `synapse` for `N`
-neurons or compartments. Every synapse model implements a method; the fallback throws an error.
+Allocate the state variables (all zero, element type `FT`) of the synapse model `synapse` for `N`
+neurons or compartments. Without `FT` the precision of the synapse model, `float_type(synapse)` (`Float32` by default); the
+populations pass the precision of their state (`eltype(VFT)`). Every synapse model implements the three-argument method;
+the fallback throws an error.
 """
-function synaptic_variables(synapse::AbstractSynapseParameter, N::Int)
+synaptic_variables(synapse::AbstractSynapseParameter, N::Int) = synaptic_variables(synapse, N, float_type(synapse))
+function synaptic_variables(synapse::AbstractSynapseParameter, N::Int, ::Type{FT}) where {FT<:AbstractFloat}
     error("synaptic_variables not implemented for synapse type $(typeof(synapse))")
 end
 
 """
-    synaptic_receptors(synapse::AbstractSynapseParameter, N::Int) -> NamedTuple
+    synaptic_receptors(synapse::AbstractSynapseParameter, N::Int[, FT]) -> NamedTuple
 
-Allocate the spike-input buffers of a population: a `NamedTuple` of `Vector{Float32}` of length
-`N`, one per receptor group. The default is `(glu = zeros(Float32, N), gaba = zeros(Float32, N))`;
+Allocate the spike-input buffers of a population: a `NamedTuple` of `Vector{FT}` of length
+`N`, one per receptor group. The default is `(glu = zeros(FT, N), gaba = zeros(FT, N))`;
 `MultiReceptorSynapse` creates one buffer per distinct receptor `target`. Connections add their
-weights into these buffers and `update_synapses!` empties them at every step.
+weights into these buffers and `update_synapses!` empties them at every step. Without `FT` the precision of the synapse
+model, `float_type(synapse)`.
 """
-function synaptic_receptors(synapse::AbstractSynapseParameter, N::Int)
-    FT = float_type(synapse)
+synaptic_receptors(synapse::AbstractSynapseParameter, N::Int) = synaptic_receptors(synapse, N, float_type(synapse))
+function synaptic_receptors(synapse::AbstractSynapseParameter, N::Int, ::Type{FT}) where {FT<:AbstractFloat}
     return (glu = zeros(FT, N), gaba = zeros(FT, N))
-    # error("synaptic_receptors not implemented for synapse type $(typeof(synapse))")
+end
+
+# Copy of a synapse model in the precision `T` (the floating-point fields and type parameters converted, see `convert_precision`);
+# the object itself when it already has type `T` or has no floating-point field (`DeltaSynapse`). Used by the populations to bring
+# their default synapse models to the precision of their state.
+function convert_precision(x::S, ::Type{T}) where {S<:AbstractSynapseParameter,T<:AbstractFloat}
+    ps = S.parameters
+    (isempty(ps) || !any(_is_float_param, ps) || _float_type(S) === T) && return x
+    newps = map(p -> _convert_param(p, T), ps)
+    vals = map(f -> _convert_value(getfield(x, f), T), fieldnames(S))
+    return Base.typename(S).wrapper{newps...}(vals...)
 end
 
 """

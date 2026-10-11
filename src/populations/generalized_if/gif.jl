@@ -13,16 +13,13 @@ One integration step of a generalized integrate-and-fire population (`IF`, `AdEx
 3. `update_neuron!(p, param, dt)`: integrates the membrane (and adaptation) equations, detects
    spikes and applies reset and refractoriness.
 """
-# populations whose model is implemented in Float64 (a Float32 step is always accepted)
-_float64_supported(::AbstractGeneralizedIF) = false
-
 function integrate!(
     p::P,
     param::T,
     dt::AbstractFloat,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractGeneralizedIFParameter}
     dt isa Float32 || _float64_supported(p) || throw(ArgumentError(
-        "population $(nameof(typeof(p))) is not implemented in $(typeof(dt)) (Float64 state: Identity, IF with DoubleExpSynapse)"))
+        "population $(nameof(typeof(p))) is not implemented in $(typeof(dt)) (populations with Float64 state: $(_FLOAT64_POPULATIONS))"))
     if _chunkable(p, p.synapse)
         # the three stages are per-neuron and independent across neurons: one fork/join per population and step
         synapse, receptors, synvars = p.synapse, p.receptors, p.synvars
@@ -40,6 +37,8 @@ end
 
 # Populations and synapse models whose three stages have chunk methods (`..., rng::UnitRange{Int}`), see `foreach_chunk`.
 _chunk_population(::AbstractGeneralizedIF) = false
+# generalized IF populations whose model is implemented in other precisions than Float32 (all but `HetRec`)
+_float64_supported(::AbstractGeneralizedIF) = true
 _chunk_synapse(::AbstractSynapseParameter) = false
 @inline _chunkable(p, synapse) = _chunk_population(p) && _chunk_synapse(synapse)
 

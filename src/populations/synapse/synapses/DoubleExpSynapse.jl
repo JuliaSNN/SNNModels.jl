@@ -79,7 +79,7 @@ DoubleExpSynapseVars
     hi::VFT = zeros(eltype(VFT), N)
 end
 
-function synaptic_variables(synapse::DoubleExpSynapse{FT}, N::Int) where {FT}
+function synaptic_variables(synapse::DoubleExpSynapse, N::Int, ::Type{FT}) where {FT<:AbstractFloat}
     return DoubleExpSynapseVars(; N = N, VFT = Vector{FT})
 end
 

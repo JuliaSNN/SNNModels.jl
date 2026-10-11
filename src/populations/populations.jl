@@ -26,7 +26,25 @@ See the documentation of each population type for the equations and the integrat
 integrate!(p::AbstractPopulation, param::AbstractPopulationParameter, dt::AbstractFloat) =
     dt isa Float32 ? nothing : throw(ArgumentError(
         "population $(nameof(typeof(p))) has no integrate! method for steps of type $(typeof(dt)) (its model is not implemented in $(typeof(dt)); " *
-        "populations with Float64 state: Identity, IF)"))
+        "populations with Float64 state: $(_FLOAT64_POPULATIONS))"))
+
+# populations that have a Float64 model (`VFT = Vector{Float64}`); the error messages list them
+const _FLOAT64_POPULATIONS = "Identity, IF, AdEx, ExtendedIF, HH, IZ, MorrisLecar, Rate, WilsonCowan, Tripod, BallAndStick, " *
+                             "Poisson, VariablePoisson, InhomogeneousPoisson"
+
+# One precision per population (used by the `snn_kw_finalize` of every population that has a Float64 model): each parameter
+# object of the population (`what => obj` pairs) must have the floating-point type `FT` of its state arrays (`float_type`).
+# Objects without a floating-point type parameter (`DeltaSynapse()`, `RateParameter()`) are precision-agnostic and pass.
+function _check_precision(name, FT, objs::Pair...)
+    for (what, obj) in objs
+        T = _float_type(typeof(obj))
+        (T === nothing || T === FT) || throw(ArgumentError(
+            "$name mixes precisions: the state is $FT but `$what` is a $(typeof(obj)) ($T). " *
+            "Build all with the same floating-point type (`FT = $FT`, or `convert_precision(x, $FT)`); the defaults follow `VFT`, " *
+            "so `$name(N = ..., VFT = Vector{$FT})` alone gives a $FT population (see `float_type`)."))
+    end
+    return nothing
+end
 plasticity!(
     p::AbstractPopulation,
     param::AbstractPopulationParameter,

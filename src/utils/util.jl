@@ -34,13 +34,13 @@ Inputs below `-10` are clamped to `-10`.
 end
 
 """
-    exp64(x::R) where {R<:Real}
+    exp64(x::AbstractFloat)
 
 Fast approximation of `exp(x)` as ``(1 + x/64)^{64}``, computed with six squarings.
 Inputs below `-10` are replaced by `-64`, so that the result is exactly `0`.
 
 # Returns
-- `Float32` approximation of `exp(x)`; accurate only for small `|x|`.
+- approximation of `exp(x)` in the type of `x` (`Float32` for an integer argument); accurate only for small `|x|`.
 
 # Example
 ```julia
@@ -48,9 +48,9 @@ using SpikingNeuralNetworks
 SNNModels.exp64(-1.0f0)   # 0.3650, exp(-1) = 0.3679
 ```
 """
-@inline function exp64(x::R) where {R<:Real}
-    x = ifelse(x < -10.0f0, -64.0f0, x)
-    x = 1.0f0 + x / 64.0f0
+@inline function exp64(x::T) where {T<:AbstractFloat}
+    x = ifelse(x < T(-10), T(-64), x)
+    x = one(T) + x / T(64)
     x *= x
     x *= x
     x *= x
@@ -59,19 +59,21 @@ SNNModels.exp64(-1.0f0)   # 0.3650, exp(-1) = 0.3679
     x *= x
     return x
 end
+# other real arguments (integers, rationals): in Float32, as `Float32` arithmetic did before 1.10
+@inline exp64(x::Real) = exp64(Float32(x))
 
 """
-    exp256(x::Float32)
+    exp256(x::AbstractFloat)
 
 Fast approximation of `exp(x)` as ``(1 + x/256)^{256}``, computed with eight squarings.
 Inputs below `-10` are replaced by `-256`, so that the result is exactly `0`.
 
 # Returns
-- `Float32` approximation of `exp(x)`.
+- approximation of `exp(x)` in the type of `x` (`Float32` or `Float64`).
 """
-@inline function exp256(x::Float32)
-    x = ifelse(x < -10.0f0, -256.0f0, x)
-    x = 1.0f0 + x / 256.0f0
+@inline function exp256(x::T) where {T<:AbstractFloat}
+    x = ifelse(x < T(-10), T(-256), x)
+    x = one(T) + x / T(256)
     x *= x
     x *= x
     x *= x

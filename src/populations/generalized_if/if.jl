@@ -154,8 +154,8 @@ IF
 
     # Two receptors synaptic conductance
     syn_curr::VFT = zeros(eltype(VFT), N)
-    synvars::SYNV = synaptic_variables(synapse, N) # Synaptic variables for receptor model
-    receptors::RECT = synaptic_receptors(synapse, N)
+    synvars::SYNV = synaptic_variables(synapse, N, eltype(VFT)) # Synaptic variables for receptor model
+    receptors::RECT = synaptic_receptors(synapse, N, eltype(VFT))
     # Synaptic targets
 
 
@@ -259,17 +259,10 @@ end
 end
 
 _chunk_population(::IF) = true
-_float64_supported(p::IF) = p.synapse isa DoubleExpSynapse
 
 # one precision per population: the parameter objects must have the type of the state arrays (`float_type`)
 function snn_kw_finalize(::Type{<:IF}, f::NamedTuple)
-    FT = eltype(f.v)
-    for (what, obj) in (("param", f.param), ("synapse", f.synapse), ("spike", f.spike))
-        float_type(obj) === FT || throw(ArgumentError(
-            "IF mixes precisions: the state is $FT but `$what` is a $(typeof(obj)) ($(float_type(obj))). " *
-            "Build all with the same floating-point type, e.g. IF(VFT = Vector{Float64}, param = IFParameter(FT = Float64), " *
-            "synapse = DoubleExpSynapse(FT = Float64), spike = PostSpike(FT = Float64)); the defaults follow `VFT`."))
-    end
+    _check_precision("IF", eltype(f.v), "param" => f.param, "synapse" => f.synapse, "spike" => f.spike)
     return f
 end
 

@@ -199,6 +199,8 @@ function synaptic_target(
     return g, v
 end
 
+_float64_supported(::HetRec) = false   # Float32 only (see `float_type`)
+
 function integrate!(p::HetRec, param::HetRecParameter, dt::Float32)
     @unpack N, v_s, v_d, τd, synapse, receptors, synvars, is, tabs, trace, fire, r, randcache = p
     @unpack Nd, overlap, steepness, τm, τabs, τrate = param

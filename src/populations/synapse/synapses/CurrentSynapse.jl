@@ -59,12 +59,12 @@ State variables of `CurrentSynapse`, created by `synaptic_variables(::CurrentSyn
 CurrentSynapseVars
 @snn_kw struct CurrentSynapseVars{VFT = Vector{Float32}} <: AbstractSynapseVariable
     N::Int = 100
-    ge::VFT = zeros(Float32, N)
-    gi::VFT = zeros(Float32, N)
+    ge::VFT = zeros(eltype(VFT), N)
+    gi::VFT = zeros(eltype(VFT), N)
 end
 
-function synaptic_variables(synapse::CurrentSynapse, N::Int)
-    return CurrentSynapseVars(; N = N, ge = zeros(Float32, N), gi = zeros(Float32, N))
+function synaptic_variables(synapse::CurrentSynapse, N::Int, ::Type{FT}) where {FT<:AbstractFloat}
+    return CurrentSynapseVars(; N = N, VFT = Vector{FT})
 end
 
 @inline function update_synapses!(
@@ -72,7 +72,7 @@ end
     param::T,
     receptors::RECT,
     synvars::CurrentSynapseVars,
-    dt::Float32,
+    dt::AbstractFloat,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractCurrentParameter,RECT<:NamedTuple}
     update_synapses!(p, param, receptors, synvars, dt, 1:Int(input_N(p)))
 end
@@ -84,7 +84,7 @@ end
     param::T,
     receptors::RECT,
     synvars::CurrentSynapseVars,
-    dt::Float32,
+    dt::AbstractFloat,
     rng::UnitRange{Int},
 ) where {P<:AbstractGeneralizedIF,T<:AbstractCurrentParameter,RECT<:NamedTuple}
     @unpack glu, gaba = receptors
@@ -98,9 +98,10 @@ end
     end
     # the buffers are cleared in a loop of their own: stores to them inside the `@fastmath` loop above change the code LLVM generates for
     # its arithmetic (last-bit differences from the loop of SNNModels <= 1.9)
+    z = zero(eltype(glu))
     @inbounds @simd for i ∈ rng
-        glu[i] = 0.0f0
-        gaba[i] = 0.0f0
+        glu[i] = z
+        gaba[i] = z
     end
 end
 

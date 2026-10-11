@@ -63,12 +63,12 @@ SingleExpSynapseVars
 
 @snn_kw struct SingleExpSynapseVars{VFT = Vector{Float32}} <: AbstractSynapseVariable
     N::Int = 100
-    ge::VFT = zeros(Float32, N)
-    gi::VFT = zeros(Float32, N)
+    ge::VFT = zeros(eltype(VFT), N)
+    gi::VFT = zeros(eltype(VFT), N)
 end
 
-function synaptic_variables(synapse::SingleExpSynapse, N::Int)
-    return SingleExpSynapseVars(; N = N, ge = zeros(Float32, N), gi = zeros(Float32, N))
+function synaptic_variables(synapse::SingleExpSynapse, N::Int, ::Type{FT}) where {FT<:AbstractFloat}
+    return SingleExpSynapseVars(; N = N, VFT = Vector{FT})
 end
 
 function update_synapses!(
@@ -76,7 +76,7 @@ function update_synapses!(
     synapse::T,
     receptors::RECT,
     synvars::SingleExpSynapseVars,
-    dt::Float32,
+    dt::AbstractFloat,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractSinExpParameter,RECT<:NamedTuple}
     update_synapses!(p, synapse, receptors, synvars, dt, 1:Int(synvars.N))
 end
@@ -88,7 +88,7 @@ end
     synapse::T,
     receptors::RECT,
     synvars::SingleExpSynapseVars,
-    dt::Float32,
+    dt::AbstractFloat,
     rng::UnitRange{Int},
 ) where {P<:AbstractGeneralizedIF,T<:AbstractSinExpParameter,RECT<:NamedTuple}
     @unpack ge, gi = synvars
@@ -100,9 +100,10 @@ end
         ge[i] += dt * (-ge[i] / τe)
         gi[i] += dt * (-gi[i] / τi)
     end
+    z = zero(eltype(glu))
     @inbounds for i ∈ rng
-        glu[i] = 0.0f0
-        gaba[i] = 0.0f0
+        glu[i] = z
+        gaba[i] = z
     end
 end
 

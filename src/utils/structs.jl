@@ -139,7 +139,8 @@ end
 # `VFT = Vector{Float32}` would otherwise copy the target variable and silently stop writing into it).
 _require_float32(what, arrays...) = all(a -> eltype(a) === Float32, arrays) ? nothing : throw(ArgumentError(
     "$what is only implemented for Float32 (the variable it acts on has element type $(eltype(first(arrays)))). " *
-    "Float64 is implemented for: populations Identity, IF; connections SpikingSynapse (all plasticity rules), " *
+    "Float64 is implemented for: populations Identity, IF, AdEx, ExtendedIF, HH, IZ, MorrisLecar, Rate, WilsonCowan, Tripod, " *
+    "BallAndStick, Poisson, VariablePoisson, InhomogeneousPoisson (with every population synapse model); connections SpikingSynapse (all plasticity rules), " *
     "AggregateScaling, SynapseNormalization; stimuli SpikeTimeStimulus, PoissonStimulus, PoissonStimulusLayer. See `float_type`."))
 
 export Spiketimes, Time, NetworkModel, float_type, convert_precision
