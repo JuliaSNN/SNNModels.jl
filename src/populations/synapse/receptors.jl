@@ -30,7 +30,9 @@ so that a unit weight produces a conductance with peak ``g_0`` (see `ReceptorSyn
 - `target::Symbol = :none`: input group of the receptor, used by `MultiReceptorSynapse`
   (e.g. `:glu`, `:gaba`, `:AMPA`); ignored by `ReceptorSynapse`.
 
-`T` defaults to `Float32`.
+`T` defaults to `Float32`; `Receptor(T = Float64, ...)` computes the derived fields in Float64. `convert_precision(r, Float64)`
+of a predefined receptor (those of `SomaSynapse`, `TripodSomaSynapse`, `TripodDendSynapse`) rebuilds it from its decimal
+definition (`τr = 0.26`, derived fields in Float64); any other receptor is converted value by value.
 
 # Example
 ```julia
@@ -48,15 +50,33 @@ abstract type AbstractReceptor end
 @snn_kw struct Receptor{T = Float32} <: AbstractReceptor
     name::String = "Receptor"
     E_rev::T = 0.0
-    τr::T = -1.0f0
-    τd::T = -1.0f0
-    g0::T = 0.0f0
-    gsyn::T = g0 > 0 ? g0 * norm_synapse(τr, τd) : 0.0f0
+    τr::T = -1.0
+    τd::T = -1.0
+    g0::T = 0.0
+    gsyn::T = g0 > 0 ? g0 * norm_synapse(τr, τd) : 0.0
     α::T = α_synapse(τr, τd)
-    τr⁻::T = 1 / τr > 0 ? 1 / τr : 0.0f0
-    τd⁻::T = 1 / τd > 0 ? 1 / τd : 0.0f0
-    nmda::T = 0.0f0
+    τr⁻::T = 1 / τr > 0 ? 1 / τr : 0.0
+    τd⁻::T = 1 / τd > 0 ? 1 / τd : 0.0
+    nmda::T = 0.0
     target::Symbol = :none
+end
+
+# Predefined receptors and NMDA blocks (`receptor_types.jl`) are built by `_predefined` from decimal keyword values. The
+# Float32 object is the one used by default (the same object as before 1.10); `convert_precision` to another precision
+# rebuilds a predefined object from its keywords (`_from_definition`), so that a Float64 copy carries the decimal values
+# (`τr = 0.26`, not `0.25999999046325684`) and its derived fields (`gsyn`, `α`, `τr⁻`, `τd⁻`) are computed in Float64. A receptor
+# that is not predefined (equal, `===`, to none of them) is converted value by value and keeps its Float32 rounding.
+const _PREDEFINED = Pair{Any,NamedTuple}[]
+function _predefined(::Type{O}; kw...) where {O}
+    obj = O(; kw...)
+    push!(_PREDEFINED, obj => (; kw...))
+    return obj
+end
+function _from_definition(x, ::Type{T}) where {T<:AbstractFloat}
+    for (obj, kw) in _PREDEFINED
+        obj === x && return Base.typename(typeof(x)).wrapper(; T = T, kw...)
+    end
+    return nothing
 end
 
 """
@@ -292,7 +312,8 @@ code comments for Eyal et al. (2018).
 - `k::T = -0.077`: voltage sensitivity (1/mV).
 - `mg::T = 1.0`: extracellular magnesium concentration (mM).
 
-`T` defaults to `Float32`. Predefined instances: `SomaNMDA` (defaults) and `EyalNMDA`
+`T` defaults to `Float32`; the defaults are the decimal values in every precision (`NMDAVoltageDependency(T = Float64).b === 3.36`).
+Predefined instances: `SomaNMDA` (defaults) and `EyalNMDA`
 (identical values).
 
 # References
@@ -308,10 +329,11 @@ SNN.nmda_gating(-70.0f0, SNN.NMDAVoltageDependency())
 """
 NMDAVoltageDependency
 
+# defaults: the decimal values of `nmda_b`, `nmda_k`, `Mg_mM` (identical in Float32, exact in Float64)
 @snn_kw struct NMDAVoltageDependency{T = Float32}
-    b::T = nmda_b
-    k::T = nmda_k
-    mg::T = Mg_mM
+    b::T = 3.36
+    k::T = -0.077
+    mg::T = 1.0
 end
 
 @doc raw"""

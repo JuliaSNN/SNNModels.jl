@@ -116,6 +116,12 @@ plasticity rules, the delay buffers, the caches and the clock follow. For a type
 is a floating-point type or a vector of one (`Identity{Vector{Float64},Int32}` gives `Float64`), `Float32` if there is none.
 For a network (a `NamedTuple` as returned by `compose`) it is the promotion of the types of the populations.
 """
+# Default of a parameter field whose value is written with the Float32 unit constants and is not the decimal value in Float32:
+# the Float32 default keeps the value `x32` it has always had (bit-identical), another precision gets the decimal value `x`.
+# Example: `HHParameter`'s `Cm = 1uF * cm^(-2) * 20000um^2` is 199.99998f0 in Float32 and 200.0 in Float64.
+_unit_default(::Type{Float32}, x32, x) = x32
+_unit_default(::Type{FT}, x32, x) where {FT} = x
+
 # generated: the answer is a constant of the type, so a call with a known type costs nothing in the step loop
 @generated float_type(::Type{T}) where {T} = (R = something(_float_type(T), Float32); :($R))
 float_type(x) = float_type(typeof(x))

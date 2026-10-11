@@ -6,12 +6,8 @@
 NMDA magnesium block with `mg = 1` mM, `b = 3.36` mM, `k = -0.077` 1/mV (values attributed in
 the code to Eyal et al. 2018). Numerically identical to `SomaNMDA`.
 """
-EyalNMDA = let
-    Mg_mM = Float32(1.0mM)
-    nmda_b = 3.36f0   # voltage dependence of nmda channels
-    nmda_k = -0.077f0     # Eyal 2018
-    NMDAVoltageDependency(mg = Mg_mM/mM, b = nmda_b, k = nmda_k)
-end
+# (Before 1.10: `mg = Float32(1.0mM)/mM`, `b = 3.36f0`, `k = -0.077f0`, the same Float32 values.)
+EyalNMDA = _predefined(NMDAVoltageDependency; mg = 1.0, b = 3.36, k = -0.077)   # b: voltage dependence of NMDA channels; k: Eyal 2018
 
 
 # Predefined receptors (E_rev in mV, τr/τd in ms, g0 in nS). The names refer to the source of
@@ -22,13 +18,13 @@ end
 #     Front. Cell. Neurosci. 12, doi:10.3389/fncel.2018.00181 (dendritic AMPA/NMDA).
 #   Duarte: somatic AMPA; reference not given in the code.
 ## Tripod
-MilesGabaSoma = Receptor(E_rev = -70.0, τr = 0.1, τd = 15.0, g0 = 0.38, target = :gaba)
+MilesGabaSoma = _predefined(Receptor; E_rev = -70.0, τr = 0.1, τd = 15.0, g0 = 0.38, target = :gaba)
 
-DuarteGluSoma = Receptor(E_rev = 0.0, τr = 0.26, τd = 2.0, g0 = 0.73, target = :glu)
+DuarteGluSoma = _predefined(Receptor; E_rev = 0.0, τr = 0.26, τd = 2.0, g0 = 0.73, target = :glu)
 
 EyalGluDend = Glutamatergic(
-    AMPA = Receptor(E_rev = 0.0, τr = 0.26, τd = 2.0, g0 = 0.73, target = :glu),
-    NMDA = ReceptorVoltage(
+    AMPA = _predefined(Receptor; E_rev = 0.0, τr = 0.26, τd = 2.0, g0 = 0.73, target = :glu),
+    NMDA = _predefined(Receptor;   # ReceptorVoltage (nmda = 1)
         E_rev = 0.0,
         τr = 8,
         τd = 35.0,
@@ -38,8 +34,8 @@ EyalGluDend = Glutamatergic(
     ),
 )
 MilesGabaDend = GABAergic(
-    Receptor(E_rev = -70.0, τr = 4.8, τd = 29.0, g0 = 0.27, target = :gaba),
-    Receptor(E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.006, target = :gaba), # τd = 100.0
+    _predefined(Receptor; E_rev = -70.0, τr = 4.8, τd = 29.0, g0 = 0.27, target = :gaba),
+    _predefined(Receptor; E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.006, target = :gaba), # τd = 100.0
 )
 
 TripodSomaReceptors = Receptors(DuarteGluSoma, MilesGabaSoma)
@@ -93,8 +89,8 @@ TripodDendSynapse = ReceptorSynapse(
 ## Soma parameters
 
 SomaGlu = Glutamatergic(
-    Receptor(E_rev = 0.0, τr = 1ms, τd = 6.0ms, g0 = 0.7, target = :glu),
-    ReceptorVoltage(
+    _predefined(Receptor; E_rev = 0.0, τr = 1ms, τd = 6.0ms, g0 = 0.7, target = :glu),
+    _predefined(Receptor;   # ReceptorVoltage (nmda = 1)
         # name = "NMDA",
         E_rev = 0.0,
         τr = 1ms,
@@ -105,8 +101,8 @@ SomaGlu = Glutamatergic(
     ),
 )
 SomaGABA = GABAergic(
-    Receptor(E_rev = -70.0, τr = 0.5, τd = 10.0, g0 = 2.0, target = :gaba),
-    Receptor(E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.006, target = :gaba),
+    _predefined(Receptor; E_rev = -70.0, τr = 0.5, τd = 10.0, g0 = 2.0, target = :gaba),
+    _predefined(Receptor; E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.006, target = :gaba),
 )
 
 # Somatic NMDA Mg block: the NMDAVoltageDependency defaults (b = 3.36, k = -0.077).
@@ -118,7 +114,7 @@ SomaGABA = GABAergic(
 Somatic NMDA magnesium block, equal to the `NMDAVoltageDependency` defaults
 (`b = 3.36` mM, `k = -0.077` 1/mV, `mg = 1` mM).
 """
-SomaNMDA = NMDAVoltageDependency()
+SomaNMDA = _predefined(NMDAVoltageDependency)
 """
     SomaReceptors :: ReceptorArray
 

@@ -18,7 +18,7 @@ Same firing rate `rate` (Hz units) for all neurons of a `Poisson` population.
 PoissonHomoParameter
 
 @snn_kw struct PoissonHomoParameter{FT = Float32} <: PoissonParameter
-    rate::FT = 1Hz
+    rate::FT = 0.001   # 1Hz; the decimal literal is the same Float32 value and exact in Float64
 end
 
 """

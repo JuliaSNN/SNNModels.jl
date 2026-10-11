@@ -79,14 +79,20 @@ function synaptic_receptors(synapse::ReceptorSynapse, N::Int, ::Type{FT}) where 
 end
 
 # Copy in the precision `T`: every receptor converted to `Receptor{T}`, the NMDA block to `NMDAVoltageDependency{T}` (the object
-# itself when it is already `T`, so the Float32 defaults `TripodSomaSynapse`, `TripodDendSynapse` are used as they are).
+# itself when it is already `T`, so the Float32 defaults `TripodSomaSynapse`, `TripodDendSynapse` are used as they are). A
+# predefined receptor or NMDA block (`_predefined`, receptor_types.jl) is rebuilt from its decimal definition in `T`; any
+# other one is converted value by value.
 _convert_receptors(syn::AbstractVector{<:Receptor}, ::Type{T}) where {T} = Receptor{T}[convert_precision(r, T) for r in syn]
 function convert_precision(r::Receptor{S}, ::Type{T}) where {S,T<:AbstractFloat}
     S === T && return r
+    d = _from_definition(r, T)
+    d === nothing || return d::Receptor{T}
     return Receptor{T}(map(f -> _convert_value(getfield(r, f), T), fieldnames(typeof(r)))...)
 end
 function convert_precision(n::NMDAVoltageDependency{S}, ::Type{T}) where {S,T<:AbstractFloat}
     S === T && return n
+    d = _from_definition(n, T)
+    d === nothing || return d::NMDAVoltageDependency{T}
     return NMDAVoltageDependency{T}(T(n.b), T(n.k), T(n.mg))
 end
 function convert_precision(x::ReceptorSynapse, ::Type{T}) where {T<:AbstractFloat}

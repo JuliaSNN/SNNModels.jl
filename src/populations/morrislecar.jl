@@ -39,7 +39,7 @@ MorrisLecarParameter
     V2::FT = 15mV
     V3::FT = 0mV
     V4::FT = 30mV
-    ϕ::FT = 25Hz
+    ϕ::FT = 0.025   # 25Hz; the decimal literal is the same Float32 value and exact in Float64
     Ee::FT = 0mV
     Ei::FT = -75mV
 end

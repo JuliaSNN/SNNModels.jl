@@ -88,7 +88,12 @@ between spikes.
 - `v_s`, `v_d1`, `v_d2::VFT`: compartment potentials (mV), initialised uniformly in `[Vr, Vt]`.
   `VFT = Vector{Float32}` by default; `VFT = Vector{Float64}` gives a `Float64` population: `adex`, `spike`, the synapse models
   (`convert_precision` of the defaults), the dendrites, the synaptic variables, receptor buffers and work arrays follow (see
-  `float_type`); `param` (morphology) and `Vspike` stay `Float32`.
+  `float_type`); `param` (morphology) and `Vspike` stay `Float32`. Parameter values of a `Float64` population: the defaults
+  are the decimal values (receptors `τr = 0.26`, `g0 = 0.73`, NMDA `b = 3.36`, `adex.τm = 281/40`), the derived receptor
+  fields are computed in `Float64`, and the dendritic geometry is computed in `Float64` from the decimal lengths, diameter
+  and cable constants (`param.ds` read as decimals, `200um` as `0.02`; see `create_dendrite`). Not decimal: the threshold
+  `Vspike` (a `Float32` field, `-10mV` is exact) and a user-given `Float32` object converted with `convert_precision` (its
+  values keep their `Float32` rounding, unless it is one of the predefined receptors).
 - `w_s::VFT`: somatic adaptation current (pA), zeros.
 - `I::VFT`: external current into the soma (pA); `I_d::VFT`: external current injected in
   each of the two dendrites (pA).

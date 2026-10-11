@@ -61,7 +61,7 @@ Confavreux2025Synapse
     τGABA::FT = 10ms # Decay time of the GABA conductance
     E_i::FT = -80mV # Reversal potential inhibitory synapses
     E_e::FT = 0mV #Reversal potential excitatory synapses
-    α::FT = 0.23f0 # AMPA fraction of the excitatory conductance
+    α::FT = 0.23 # AMPA fraction of the excitatory conductance
 end
 
 """

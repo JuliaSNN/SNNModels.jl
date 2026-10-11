@@ -54,8 +54,8 @@ DoubleExpSynapse
     τdi::FT = 2ms # Decay time for inhibitory synapses
     E_i::FT = -75mV # Reversal potential excitatory synapses
     E_e::FT = 0mV #Reversal potential excitatory synapses
-    gsyn_e::FT = 1.0f0 #norm_synapse(τre, τde) # Synaptic conductance for excitatory synapses
-    gsyn_i::FT = 1.0f0 #norm_synapse(τri, τdi) # Synaptic conductance for inhibitory synapses
+    gsyn_e::FT = 1.0 #norm_synapse(τre, τde) # Synaptic conductance for excitatory synapses
+    gsyn_i::FT = 1.0 #norm_synapse(τri, τdi) # Synaptic conductance for inhibitory synapses
 end
 
 """

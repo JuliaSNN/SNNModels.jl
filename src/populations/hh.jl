@@ -16,19 +16,25 @@ specified as densities times a membrane area of 20000 μm²:
 - `τe::FT = 5ms`, `τi::FT = 10ms`: decay time constants of `ge`, `gi` (ms).
 - `Ee::FT = 0mV`, `Ei::FT = -80mV`: synaptic reversal potentials (mV).
 
+The four area-scaled defaults are computed with the `Float32` unit constants (`um` is not exact in
+`Float32`), so in `Float32` they are 199.99998 pF, 9.999999 nS, 19999.998 nS and 5999.9995 nS (unchanged
+since 1.8); with `FT = Float64` they are the decimal values 200, 10, 20000 and 6000.
+
 `HHParameter <: AbstractPopulationParameter`, so `HH` runs under `sim!` and `train!` (no-op
 `update_traces!`/`plasticity!` fallbacks). Up to SNNModels 1.8.4 `train!` raised a `MethodError`.
 """
 HHParameter
 
 @snn_kw struct HHParameter{FT = Float32} <: AbstractPopulationParameter
-    Cm::FT = 1uF * cm^(-2) * 20000um^2
-    gl::FT = 5e-5siemens * cm^(-2) * 20000um^2
+    # area-scaled values: in Float32 as computed with the Float32 unit constants (199.99998, 9.999999, ...), as before
+    # 1.10; in Float64 the decimal values (200 pF, 10 nS, 20000 nS, 6000 nS), see `_unit_default`
+    Cm::FT = _unit_default(FT, 1uF * cm^(-2) * 20000um^2, 200.0)
+    gl::FT = _unit_default(FT, 5e-5siemens * cm^(-2) * 20000um^2, 10.0)
     El::FT = -65mV
     Ek::FT = -90mV
     En::FT = 50mV
-    gn::FT = 100msiemens * cm^(-2) * 20000um^2
-    gk::FT = 30msiemens * cm^(-2) * 20000um^2
+    gn::FT = _unit_default(FT, 100msiemens * cm^(-2) * 20000um^2, 20000.0)
+    gk::FT = _unit_default(FT, 30msiemens * cm^(-2) * 20000um^2, 6000.0)
     Vt::FT = -63mV
     τe::FT = 5ms
     τi::FT = 10ms

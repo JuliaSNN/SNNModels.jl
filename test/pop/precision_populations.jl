@@ -218,6 +218,100 @@ const _PP_POISSON = ("PoissonHomo", "PoissonDense", "PoissonHet", "VariablePoiss
         @test convert_precision(DeltaSynapse(), Float64) === DeltaSynapse()  # no float field: precision-agnostic
     end
 
+    @testset "Float64 defaults carry the decimal values" begin
+        # receptors of the predefined synapses: the decimal values of their definition, derived fields computed in Float64
+        r_exact(r, E, τr, τd, g0) = r.E_rev === E && r.τr === τr && r.τd === τd && r.g0 === g0 &&
+                                    r.gsyn === g0 * norm_synapse(τr, τd) && r.α === SNNModels.α_synapse(τr, τd) &&
+                                    r.τr⁻ === 1 / τr && r.τd⁻ === 1 / τd
+        soma = convert_precision(TripodSomaSynapse, Float64)
+        @test r_exact(soma.syn[1], 0.0, 0.26, 2.0, 0.73) && r_exact(soma.syn[2], -70.0, 0.1, 15.0, 0.38)
+        dend = convert_precision(TripodDendSynapse, Float64)
+        @test r_exact(dend.syn[1], 0.0, 0.26, 2.0, 0.73) && r_exact(dend.syn[2], 0.0, 8.0, 35.0, 1.31) && dend.syn[2].nmda === 1.0
+        @test r_exact(dend.syn[3], -70.0, 4.8, 29.0, 0.27) && r_exact(dend.syn[4], -90.0, 30.0, 400.0, 0.006)
+        for n in (soma.NMDA, dend.NMDA, convert_precision(EyalNMDA, Float64), NMDAVoltageDependency(T = Float64))
+            @test n.b === 3.36 && n.k === -0.077 && n.mg === 1.0
+        end
+        rs = convert_precision(ReceptorSynapse(), Float64)
+        @test r_exact(rs.syn[1], 0.0, 1.0, 6.0, 0.7) && r_exact(rs.syn[2], 0.0, 1.0, 100.0, 0.15)
+        @test r_exact(rs.syn[3], -70.0, 0.5, 10.0, 2.0) && r_exact(rs.syn[4], -90.0, 30.0, 400.0, 0.006)
+        @test convert_precision(MultiReceptorSynapse(), Float64).syn == rs.syn
+        # a receptor that is not predefined is converted value by value (its Float32 rounding is kept)
+        @test convert_precision(Receptor(τr = 0.3, τd = 3.0, g0 = 0.9), Float64).τr === Float64(0.3f0)
+        for P in (Tripod, BallAndStick)
+            p = P(N = 3, VFT = Vector{Float64})
+            @test p.soma_syn.syn == soma.syn && p.dend_syn.syn == dend.syn && p.soma_syn.NMDA === soma.NMDA
+            @test p.adex.τm === 281.0 / 40.0 && p.adex.R === 1 / 40.0 && p.adex.C === 281.0 && p.adex.gl === 40.0
+        end
+        # synapse models and neuron parameters
+        @test Confavreux2025Synapse(FT = Float64).α === 0.23
+        @test SingleExpSynapse(FT = Float64).gsyn_e === 1.0 && DoubleExpSynapse(FT = Float64).gsyn_i === 1.0
+        a = AdExParameter(FT = Float64)
+        @test a.τm === 7.025 && a.R === 0.025
+        i = IFParameter(FT = Float64)
+        @test i.τm === 15.0 && i.R === 0.06 && i.gl === 1 / 0.06 && i.C === 15.0 * (1 / 0.06)
+        h = HHParameter(FT = Float64)
+        @test h.Cm === 200.0 && h.gl === 10.0 && h.gn === 20000.0 && h.gk === 6000.0
+        @test SNNModels.MorrisLecarParameter(FT = Float64).ϕ === 0.025
+        @test PoissonHomoParameter(FT = Float64).rate === 0.001
+        # dendritic geometry: lengths on the 1 um grid and the 4 um diameter as decimals, cable constants of `human_dend` as
+        # decimals (Ri = 200 Ω cm, Rd = 38907 Ω cm², Cd = 0.5 μF/cm²), conductances and capacitance computed in Float64
+        dec(x) = x === parse(Float64, string(round(Int, x * 1e6)) * "e-6")
+        for (P, ds) in ((Tripod, (:d1, :d2)), (BallAndStick, (:d,)))
+            Random.seed!(9); p = P(N = 20, VFT = Vector{Float64})
+            for f in ds
+                d = getfield(p, f)
+                @test all(dec, d.l) && all(==(4e-4), d.d)
+                @test d.gm == [SNNModels.G_mem(Rd = 3.8907e-5, d = 4e-4, l = l) for l in d.l]
+                @test d.gax == [SNNModels.G_axial(Ri = 2e-7, d = 4e-4, l = l) for l in d.l]
+                @test d.C == [SNNModels.C_mem(Cd = 5e5, d = 4e-4, l = l) for l in d.l]
+            end
+            # same lengths (in whole micrometres) as the Float32 population built from the same seed: one draw per dendrite
+            # in both, of the same grid index (the Float32 grid points are not the Float32 roundings of the decimals: 0.038799997f0)
+            Random.seed!(9); q = P(N = 20)
+            for f in ds
+                @test round.(Int, getfield(p, f).l .* 1e4) == round.(Int, getfield(q, f).l .* 1e4)
+            end
+        end
+        # no default of a Float64 population is a Float32-rounded value (a Float32-representable Float64 with a long decimal form)
+        f32_rounded(x) = isfinite(x) && Float64(Float32(x)) == x && length(string(x)) > 10
+        function rounded!(out, x, path, seen)
+            if x isa Float64
+                f32_rounded(x) && push!(out, path => x)
+            elseif x isa AbstractArray{Float64}
+                for v in x; f32_rounded(v) && (push!(out, path => v); break); end
+            elseif x isa AbstractArray && !(eltype(x) <: Number)
+                for (k, v) in enumerate(x); rounded!(out, v, "$path[$k]", seen); end
+            elseif x isa NamedTuple
+                for (k, v) in pairs(x); rounded!(out, v, "$path.$k", seen); end
+            elseif isstructtype(typeof(x)) && parentmodule(typeof(x)) === SNNModels && !(x in seen)
+                push!(seen, x)
+                for f in fieldnames(typeof(x)); isdefined(x, f) && rounded!(out, getfield(x, f), "$path.$f", seen); end
+            end
+            return out
+        end
+        for (name, (mk, _, _)) in _PP_MODELS
+            name in ("AdExHet", "PoissonHet", "PoissonHomo", "PoissonDense", "InhomogeneousPoisson") && continue  # user-given rates/parameters
+            Random.seed!(1); p = mk(Float64; quiet = true)
+            r = rounded!(Pair{String,Float64}[], p, name, Base.IdSet{Any}())
+            @test isempty(r) || (@info "Float32-rounded defaults in $name" r; false)
+        end
+        @test isempty(rounded!(Pair{String,Float64}[], SNNModels.Poisson(N = 3, VFT = Vector{Float64}), "Poisson", Base.IdSet{Any}()))
+        for s in (SingleExpSynapse(FT = Float64), CurrentSynapse(FT = Float64), DoubleExpCurrentSynapse(FT = Float64),
+                  DoubleExpSynapse(FT = Float64), convert_precision(ReceptorSynapse(), Float64), Confavreux2025Synapse(FT = Float64),
+                  convert_precision(MultiReceptorSynapse(), Float64), PostSpike(FT = Float64), ExtendedIFParameter(FT = Float64),
+                  IZParameter(FT = Float64), VariablePoissonParameter(FT = Float64), InhomogeneousPoissonParam(FT = Float64))
+            r = rounded!(Pair{String,Float64}[], s, string(nameof(typeof(s))), Base.IdSet{Any}())
+            @test isempty(r) || (@info "Float32-rounded defaults" r; false)
+        end
+
+        # Float32 defaults unchanged
+        @test TripodSomaSynapse.syn[1].τr === 0.26f0 && TripodSomaSynapse.syn[1].gsyn === Float32(0.73 * norm_synapse(0.26, 2.0))
+        @test Tripod(N = 2).soma_syn === TripodSomaSynapse && BallAndStick(N = 2).dend_syn === TripodDendSynapse
+        @test HHParameter().Cm === 1uF * cm^(-2) * 20000um^2 && AdExParameter().τm === 281f0 / 40f0 && IFParameter().R === 0.06f0
+        @test SNNModels.MorrisLecarParameter().ϕ === 25Hz && PoissonHomoParameter().rate === 1Hz
+        @test Confavreux2025Synapse().α === 0.23f0 && EyalNMDA.b === 3.36f0 && NMDAVoltageDependency().k === -0.077f0
+    end
+
     @testset "refusals: one precision per population" begin
         @test_throws ArgumentError AdEx(N = 3, VFT = Vector{Float64}, param = AdExParameter())
         @test_throws ArgumentError AdEx(N = 3, VFT = Vector{Float64}, synapse = SingleExpSynapse())
