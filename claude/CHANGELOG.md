@@ -229,6 +229,7 @@ populations are built with `Float64` state (see "Precision from the population t
 
 ### Breaking changes
 Each item gives the migration.
+- `iSTDPTime` removed (struct, docstring, export). It had no `plasticity!` kernel, so a synapse built with it errored under `train!` and it could not run. Migration: use `iSTDPRate` or `iSTDPPotential`.
 - `SpikingSynapse` field types. `LTPParam`, `STPParam`, `LTPVars`, `STPVars` are type parameters (`LTPP`, `STPP`,
   `LTPV`, `STPV`), so a rule of another type can no longer be assigned in place. `update_plasticity!` and
   `change_plasticity!` accept only a rule of the same type as the current one (new parameters, fresh state) and
@@ -334,6 +335,7 @@ Each item gives the migration.
 
 ### New API
 - `with_plasticity(c::SpikingSynapse; LTP, STP)`: synapse that shares all arrays with `c` and has the new rule
+- `change_plasticity(model, syn_name; LTP, STP)` (exported): a new model with one named synapse replaced by `with_plasticity(model.syn[syn_name]; LTP, STP)`; everything else is shared with `model`. The old and the new synapse share `W`, `colptr` and `I` and must be treated as desynchronised from the start. An unknown name raises an `ArgumentError` that lists the synapses. `compose(; model..., EE = new)` collides on the duplicate key (the error now names the key and says to use `change_plasticity`).
   with fresh state (exported).
 - Lazy trace decay (no option): a trace is stored as `x` and one `Float64` scale per trace type
   (`STDPVariables.scale`, `STDPTripletVariables.scale`), its value is `x * scale`; a step multiplies the scale by the
