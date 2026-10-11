@@ -153,6 +153,7 @@ _convert_value(v, ::Type{T}) where {T} = v
 
 include("sparse_plasticity.jl")
 include("spiking_synapse.jl")
+include("delay_kernels.jl")
 
 """
     MetaPlasticityParameter <: AbstractConnectionParameter

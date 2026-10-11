@@ -78,6 +78,9 @@ function _syn_rules(name)
     name == "delay"      && return (SM.NoLTP(), SM.NoSTP(), true)
     name == "pair"       && return (SM.STDPGerstner(A_pre = 5e-3, A_post = -5e-3), SM.NoSTP(), false)
     name == "pair_delay" && return (SM.STDPGerstner(A_pre = 5e-3, A_post = -5e-3), SM.NoSTP(), true)
+    name == "delay_const" && return (SM.NoLTP(), SM.NoSTP(), :const)          # constant delays: one ring column per step
+    name == "delay_zero"  && return (SM.NoLTP(), SM.NoSTP(), :zero)
+    name == "pair_delay_const" && return (SM.STDPGerstner(A_pre = 5e-3, A_post = -5e-3), SM.NoSTP(), :const)
     name == "triplet"    && return (SM.STDPTriplet(), SM.NoSTP(), false)
     name == "wdep"       && return (SM.STDPWeightDependent(η = 1e-2), SM.NoSTP(), false)
     name == "mexhat"     && return (SM.STDPMexicanHat(), SM.NoSTP(), false)
@@ -89,13 +92,15 @@ function _syn_rules(name)
     name == "stp_pair_delay" && return (SM.STDPGerstner(A_pre = 5e-3, A_post = -5e-3), SM.MarkramSTPParameterEvent(), true)
     error(name)
 end
+_delay_kw(delay) = delay === :const ? (; delay_dist = SM.Dirac(0.8ms)) : delay === :zero ? (; delay_dist = SM.Dirac(0.0)) :
+                   delay ? (; delay_dist = SM.Uniform(0.2ms, 3.0ms)) : (;)
 function _syn_run(name, Npost; steps = 250, drive = 1.0)
     Random.seed!(3)
     ltp, stp, delay = _syn_rules(name)
     Npre = max(10, Npost ÷ 2 + 7)
     pre = SM.Poisson(N = Npre, param = PoissonParameter(40Hz))
     post = IF(N = Npost, param = IFParameter(τm = 20ms, R = 0.06, El = -60mV, Vt = -50mV, Vr = -60mV))
-    kw = delay ? (; delay_dist = SM.Uniform(0.2ms, 3.0ms)) : (;)
+    kw = _delay_kw(delay)
     if name == "istdp"
         s1 = SpikingSynapse(pre, post, :ge; conn = (p = 0.15, μ = 6.0 * drive), kw...)
         s2 = SpikingSynapse(post, post, :gi; conn = (p = 0.1, μ = 3.0 * drive), LTPParam = ltp, kw...)
@@ -116,7 +121,7 @@ end
     old, oldops = SM.neurons_per_thread(), SM.SYN_MIN_OPS[]
     forked = 0
     try
-        for name in ("fixed", "delay", "pair", "pair_delay", "triplet", "wdep", "mexhat", "sym", "antisym", "istdp", "vstdp", "stp", "stp_pair_delay"),
+        for name in ("fixed", "delay", "delay_const", "delay_zero", "pair", "pair_delay", "pair_delay_const", "triplet", "wdep", "mexhat", "sym", "antisym", "istdp", "vstdp", "stp", "stp_pair_delay"),
             N in (1, 100, 700, 2100), drive in (1.0, 0.06)
             SM.set_neurons_per_thread!(0)
             ref = _syn_run(name, N; drive)[1:2]
@@ -165,7 +170,7 @@ function _direct_run(density, delay, ltp, setting, minops)
     SM.set_neurons_per_thread!(setting); SM.SYN_MIN_OPS[] = minops
     Random.seed!(21)
     pre = IF(N = 700); post = IF(N = 1100)
-    kw = delay ? (; delay_dist = SM.Uniform(0.2ms, 3.0ms)) : (;)
+    kw = _delay_kw(delay)
     c = SpikingSynapse(pre, post, :ge; conn = (p = 0.1, μ = 2.0), LTPParam = ltp, STPParam = SM.NoSTP(), kw...)
     rng = MersenneTwister(8)
     h = UInt8[]
@@ -183,7 +188,7 @@ end
 @testset "direct forward!/plasticity! with sparse and dense spike patterns" begin
     old, oldops = SM.neurons_per_thread(), SM.SYN_MIN_OPS[]
     try
-        for density in (0.0, 0.01, 0.5, 1.0), delay in (false, true), ltp in (SM.NoLTP(), SM.STDPGerstner(A_pre = 5e-3, A_post = -5e-3), SM.STDPTriplet())
+        for density in (0.0, 0.01, 0.5, 1.0), delay in (false, true, :const, :zero), ltp in (SM.NoLTP(), SM.STDPGerstner(A_pre = 5e-3, A_post = -5e-3), SM.STDPTriplet())
             ref = _direct_run(density, delay, ltp, 0, 8000)
             for s in (128, 512), mo in (0, 8000)
                 @test _direct_run(density, delay, ltp, s, mo) == ref

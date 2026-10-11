@@ -137,6 +137,25 @@ populations are built with `Float64` state (see "Precision from the population t
       `VariablePoisson` are 3-4x and 2.7-3x faster than 1.9.1 at the rates measured above (50 Hz); their dense regime now skips the list as well (not timed separately).
   - Delay ring buffer: see Breaking changes. Per spike the queue insertion (`findlast` with an allocating
     broadcast, `insert!`, `popfirst!`) is replaced by one add into a matrix.
+  - Constant delays deliver through one ring-buffer column per step (`delay_kernels.jl`).
+    Measured first (`validation/profilation_v1.10/perf/pre110_fixes`, `j1_fwd_micro.jl`: the T8 network, Poisson input at 500 Hz,
+    2000 recorded steps replayed on the two delayed input connections, pinned core, median of 3; no hardware counters on the
+    machine, `perf_event_paranoid = 4`, so the cost is decomposed by variants). Hypothesis "two touches of the target array"
+    (buffer write, then arrival pass): REJECTED. At N = 10000, ns per synaptic event: whole `forward!` 2.770, of which the flag
+    scan 0.267 and transmission 2.503; the same events scattered without delay into `g` 1.535, so the delay costs 0.968, of which
+    the arrival pass explains 0.027 (1.0 % of `forward!`, 1.37 us per step for the 1e4 targets) and the extra read-modify-write of the
+    buffer 0.032 (6 % together); the dominant term is the per-synapse `delaysteps` load, slot wrap and 2-D index, 0.827 (85 %;
+    N = 2000: 0.541 of 0.700, 77 %). Change: when the delay is stored once for all synapses (`Dirac` delays or equal draws, see "Synapse memory
+    footprint", step 4: `forward!` then passes it as an integer and `_forward_delay!` dispatches on it; per-synapse delays that only
+    round to the same number of steps keep the general path), the arrival column is computed once per step and the scatter `buffer[col * Npost + I[s]] += W[s] * ρ[s]` runs with
+    `@simd ivdep` (the rows of one CSC column are distinct; 16 % faster than without `ivdep` in the replay), serial and per chunk of
+    the threaded path. Transmission 2.503 -> 1.365 ns per event at N = 10000 (`forward!` 138.4 -> 82.0 us per step), 1.628 -> 0.937
+    at N = 2000. T8 (whole network, s per simulated second, 500 Hz) N = 10000 1.854 -> 1.232, N = 2000 0.261 -> 0.187; Auryn measured
+    the same day 1.266 and 0.202, so 1.46x and 1.29x slower before, 0.97x and 0.93x after. 50 Hz N = 10000 0.429 -> 0.308; at 1 Hz
+    the arrival pass is 55 % of `forward!` and this change gives nothing (see the next item). Bit-identical: test
+    `test/syn/delay_uniform.jl` (every step against the general path, Float32 and Float64, delays 0, dt, 0.8 at dt 0.1 and 0.125,
+    STDP and STP, a change of dt) and `threading_synapses.jl` (1, 4, 8 threads); spike rasters and final `v`, `g`, buffers SHA1-identical
+    to the previous commit for T8 (N = 2000, 500 Hz), T4 (delay 0.8), T7 (delay 5 ms) and the Float64 DoubleExp network.
   - Trace decay: the factors `exp(-dt/τ)` are cached in the rule variables (`decay` field of `STDPVariables`,
     `STDPTripletVariables`) and recomputed only if `dt` or a `τ` changes. `_rescale!` (was `_decay!`) sets values
     below `floatmin(Float32)` to zero: the trace of a silent neuron used to run through the subnormal range at

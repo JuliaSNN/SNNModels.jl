@@ -92,6 +92,7 @@ end
     _ts("float32",           "syn/float32.jl")
     _ts("stdp_event",        "syn/stdp_event.jl")
     _ts("spike_index",       "syn/spike_index.jl")
+    _ts("delay_uniform",     "syn/delay_uniform.jl")
     _ts("spike_handoff",     "syn/spike_handoff.jl")
     _ts("lazy_traces",       "syn/lazy_traces.jl")
     _ts("lazy_traces_euler", "syn/lazy_traces_euler.jl")

@@ -16,6 +16,7 @@ the `SpikingSynapse` constructor when `delay_dist` is given). The delayed increm
 a ring buffer indexed by arrival step: at the first `forward!` (and whenever `dt` or the delays
 change) every delay is rounded up to a whole number of steps, `ceil(delay / dt)`, the first step
 whose time is not before the arrival time (so 0.8 ms at `dt = 0.125` ms arrives 7 steps later).
+A delay stored once (common to all synapses) is delivered through one ring column per step (`delay_kernels.jl`).
 
 # Fields
 - `delaytime::Vector{FT}`: delay of each synapse (ms), in the CSC order of `W`; a single value when all synapses have the
@@ -496,7 +497,7 @@ function forward!(c::SpikingSynapse, param::SpikingSynapseDelayParameter, dt::Ab
     spikes = presynaptic_spikes(c)
     # the arrival pass over the Npost targets counts as Npost / 4 operations
     ptr = _syn_chunk_ptr(c.chunkptr, Npost, colptr, I, spikes, Npost >> 2)
-    # function barrier on the efficacy (vector or `nothing`) and on the delays (one per synapse, or one for all)
+    # function barrier on the efficacy (vector or `nothing`) and on the delays (one per synapse, or one for all: delay_kernels.jl)
     d = length(delaysteps) == 1 ? delaysteps[1] : delaysteps
     _forward_delay!(g, W, _efficacy_or_nothing(c), I, colptr, ptr, spikes, Npost, d, buffer, pos, nslots)
     param.pos[1] = pos + 1 == nslots ? 0 : pos + 1
