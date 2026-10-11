@@ -194,7 +194,8 @@ Returns the `NamedTuple` `(pop = ..., syn = ..., stim = ..., name = name, time =
   not reused: pass `time = model.time` to keep one.
 
 Components are classified by type (`AbstractPopulation`, `AbstractConnection`,
-`AbstractStimulus` or `AbstractStimulusGroup`); duplicated keys raise an `AssertionError`.
+`AbstractStimulus` or `AbstractStimulusGroup`); duplicated keys raise an `AssertionError` that names the key and the container that collided
+(to replace a synapse of an existing model use [`change_plasticity`](@ref), not `compose(; model..., EE = new)`).
 `pop` and `syn` are sorted by key, `stim` by the stimuli `name`.
 
 # Example
@@ -355,6 +356,16 @@ function print_model(model, get_keys = false)
     @info "================"
 end
 
+# Message of the duplicate-key assertion of `extract_items`: `key` is the colliding key and `root` the argument of
+# `compose` (keyword name, empty for a positional argument) whose container delivered the second component.
+function _dup_msg(kind, key, root)
+    where = isempty(String(root)) ? "a positional argument of `compose`" : "the container `$(root)` given to `compose`"
+    hint = kind == "synapse" ?
+        " To replace a synapse of a model (e.g. with another plasticity rule), do not pass `compose(; model..., $(key) = new)` " *
+        "(`model` already holds `$(key)`); use `change_plasticity(model, :$(key); LTP, STP)`." : ""
+    return "Duplicate $(kind) key `$(key)`: a $(kind) with this name was already collected before $(where).$(hint)"
+end
+
 """
     extract_items(root::Symbol, container; pop::Dict{Symbol,Any}, syn::Dict{Symbol,Any}, stim::Dict{Symbol,Any}, time::Time)
 
@@ -392,13 +403,13 @@ function extract_items(
 
     v = container
     if typeof(v) <: AbstractPopulation
-        @assert !haskey(pop, root) "Population $(root) already exists"
+        @assert !haskey(pop, root) _dup_msg("population", root, root)
         push!(pop, root => v)
     elseif typeof(v) <: AbstractConnection
-        @assert !haskey(syn, root) "Receptors $(root) already exists"
+        @assert !haskey(syn, root) _dup_msg("synapse", root, root)
         push!(syn, root => v)
     elseif typeof(v) <: AbstractStimulus || typeof(v) <: AbstractStimulusGroup
-        @assert !haskey(stim, root) "Stimulus $(root) already exists"
+        @assert !haskey(stim, root) _dup_msg("stimulus", root, root)
         push!(stim, root => v)
     elseif typeof(v) <: Time
         # update_time!(time, v)
@@ -415,13 +426,13 @@ function extract_items(
                 new_key = Symbol(string(root) * "_" * string(k))
             end
             if typeof(v) <: AbstractPopulation
-                @assert !haskey(pop, new_key) "Population $(new_key) already exists"
+                @assert !haskey(pop, new_key) _dup_msg("population", new_key, root)
                 push!(pop, new_key => v)
             elseif typeof(v) <: AbstractConnection
-                @assert !haskey(syn, new_key) "Receptors $(new_key) already exists"
+                @assert !haskey(syn, new_key) _dup_msg("synapse", new_key, root)
                 push!(syn, new_key => v)
             elseif typeof(v) <: AbstractStimulus || typeof(v) <: AbstractStimulusGroup
-                @assert !haskey(stim, new_key) "Stimulus $(new_key) already exists"
+                @assert !haskey(stim, new_key) _dup_msg("stimulus", new_key, root)
                 push!(stim, new_key => v)
             else
                 extract_items(new_key, v; pop, syn, stim, time)
@@ -474,6 +485,61 @@ function remove_element(model, key::Vector)
 end
 
 """
+    change_plasticity(model, syn_name::Symbol; LTP = nothing, STP = nothing)
+
+A new model in which the synapse `syn_name` is replaced by `with_plasticity(model.syn[syn_name]; LTP, STP)` (see
+[`with_plasticity`](@ref)). A rule left to `nothing` is kept, `NoLTP()` / `NoSTP()` switch that part off, and
+`LTP = NoLTP(), STP = NoSTP()` is `without_plasticity`. The populations, the other synapses, the stimuli, the `name` and
+the clock `time` of the result are the same objects as in `model`, in the same order; the new synapse refers to the same
+pre- and postsynaptic populations as the old one. `model` is not modified, and is still a valid model.
+
+The synapse type depends on its rules (they are type parameters of `SpikingSynapse`, fields are concretely typed), so the
+synapse cannot be changed in place and there is no model-level `change_plasticity!` (the in-place `change_plasticity!(syn; ...)`
+of a synapse only replaces a rule by one of the same type).
+
+`compose(; model..., EE = new)` cannot do this replacement: `model` already holds `EE` and `compose` raises a duplicate-key
+error. `change_plasticity` replaces the entry instead.
+
+# Shared structure
+The new synapse shares `W`, the connectivity (`colptr`, `rowptr`, `I`), the delay queue, the records and, for a kept
+rule, its state with the old one. The old and the new synapse must be treated as desynchronised from the start: simulate
+only the new model, and do not use `model` again (or `deepcopy(model)` first). A `SynapseNormalization` or
+`AggregateScaling` in the model keeps acting on the old synapse. See [`with_plasticity`](@ref) for what is shared and for the
+records.
+
+# Throws
+`ArgumentError` if `syn_name` is not a synapse of the model; the message lists the available names.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 100); E.I .= 300.0
+EE = SNN.SpikingSynapse(E, E, :ge; conn = (p = 0.2, μ = 0.5))
+model = SNN.compose(; E, EE, silent = true)
+model_p = SNN.change_plasticity(model, :EE; LTP = SNN.STDPGerstner())
+SNN.train!(; model = model_p, duration = 100ms)
+model_f = SNN.change_plasticity(model_p, :EE; LTP = SNN.NoLTP(), STP = SNN.NoSTP())   # weights frozen
+```
+"""
+function change_plasticity(model, syn_name::Symbol; LTP = nothing, STP = nothing)
+    if !haskey(model.syn, syn_name)
+        throw(ArgumentError("model has no synapse `:$(syn_name)`; available synapses: " *
+                            join(map(k -> ":" * String(k), keys(model.syn)), ", ")))
+    end
+    old = model.syn[syn_name]
+    old isa SpikingSynapse || throw(ArgumentError("`$(syn_name)` is a $(nameof(typeof(old))), not a SpikingSynapse; " *
+                                                  "only SpikingSynapse has switchable plasticity"))
+    new = if LTP isa NoLTP && STP isa NoSTP
+        without_plasticity(old)
+    else
+        with_plasticity(old; LTP, STP)
+    end
+    syn = merge(model.syn, NamedTuple{(syn_name,)}((new,)))
+    return merge(model, (; syn))
+end
+
+"""
     merge_models(args...; kwargs...)
 
 Deprecated alias of `compose` (emits a warning).
@@ -484,6 +550,7 @@ function merge_models(args...; kwargs...)
 end
 
 export compose,
+    change_plasticity,
     merge_models, # compose
     remove_element,
     print_model,
