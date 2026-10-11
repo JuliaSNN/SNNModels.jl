@@ -573,6 +573,61 @@ short-term rule, 8 B/syn for `J`/`index` with a rule that needs them, 8 B/syn fo
   with pair STDP/STP, weight records and vSTDP, threaded vs serial when run with more than one thread, JLD2 round trip). Minimal
   edits of `syn/spike_index.jl`, `sim/sweep_fixes.jl`, `syn/lazy_weights.jl`, `syn/vstdp.jl`, `stim/poisson_pop_sparse.jl`.
 
+### Spike recording from the spike lists
+`record_fire_dense!` used to visit every neuron at every step and, for each spike, read `meta[:allocated][:fire]` through a
+`Dict{Symbol,Any}` (35 % of the step of the T4 network with `:fire` recorded, `perf/out/profiles.txt`). It now writes the list
+of the neurons that fired in the step (`src/utils/record.jl` only; population, stimulus and connection files untouched):
+- Source of the list (`_recording_spike_index`, `_fire_step_list`): the owner's `SpikeIndex` when it is fed (`fed == true`)
+  for `Poisson`, `VariablePoisson`, `InhomogeneousPoisson`, `Identity`, `PoissonStimulusLayer` (O(spikes)); otherwise a
+  word scan of `fire` into a recorder scratch (`_flags_to_list!`, N/8 `UInt64` loads plus O(spikes)). The IF family (`IF`,
+  `AdEx`, `Tripod`, `HH`, `IZ`, ...) keeps no spike list at record time (`record!` runs after `integrate!` and before the
+  connections), so it takes the scan. `SpikeTimeStimulus` also takes the scan (its `TouchList` is in spike-time order and can
+  hold duplicates). A test checks that every type with its own `spike_index` method has a `_recording_spike_index` method.
+- Capacity growth checked once per step (`_ensure_fire_capacity!`, with `_grow_fire!` as its out-of-line slow path; same single "Fire COO buffer
+  overflowed" warning). Subsets (`indices[:fire]`) through a prebuilt membership mask (`_fire_mask!`, rebuilt at every
+  `sim!`/`train!` entry); unsorted or duplicated subsets keep the previous order-preserving loop. Typed, hoisted meta reads
+  in `_record!`. The legacy jagged `record_fire!` and variable recording are unchanged in behaviour.
+- `_allocate_records!`: function barrier per component group with one `(dt, duration)` holder instead of
+  `Iterators.flatten` over a heterogeneous tuple; allocation per call from 0.9-5 kB (grew with the number of components) to
+  16 B.
+- Recorded spikes (times, ids, order) bit-identical to 48c60eb: `test/utils/record_spikeindex_test.jl` (every population and
+  stimulus type, subsets, chunks, manual loops, threading, Float64, 0 B per step added by `:fire` recording) and the
+  benchmark hashes below.
+
+Benchmark (T4 balanced E/I LIF, K = 100, Float32, 10 s, one thread pinned with `taskset`, 2 processes x 3 repetitions per
+cell alternated before/after, compilation excluded; host ld25-1001 (seroquel), load average 3.5-7.1). ns per neuron-step and
+recording overhead rec1/rec0 (`:fire` of E and I / nothing recorded); Auryn, Brian2 and 1.9.1 ratios from the T4 campaign
+(`perf/out/t4.csv`), Auryn at N = 5000 run with this benchmark:
+
+| N | rec0 before | rec0 after | rec1 before | rec1 after | overhead before | overhead after | Auryn | Brian2 | 1.9.1 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1000 | 1.542 | 1.567 | 2.991 | 1.940 | 1.94 | 1.24 | 1.06 | 1.00 | 1.10 |
+| 2000 | 1.391 | 1.393 | 2.540 | 1.625 | 1.83 | 1.17 | 1.09 | 1.01 | 1.10 |
+| 4000 | 1.420 | 1.431 | 2.541 | 1.569 | 1.79 | 1.10 | 1.09 | 1.00 | 1.07 |
+| 5000 | 1.472 | 1.458 | 2.647 | 1.664 | 1.80 | 1.14 | 1.08 | - | - |
+| 10000 | 1.488 | 1.495 | 2.617 | 1.608 | 1.76 | 1.08 | 1.08 | 0.99 | 1.08 |
+| 20000 | 1.645 | 1.644 | 2.734 | 1.778 | 1.66 | 1.08 | 1.08 | 0.99 | 1.06 |
+
+- What recording still costs (0.37 us per step at N = 1000 to 2.7 us at N = 20000, against 1.4-22 us before) is a fixed
+  `_record!` cost of about 0.2 us per population per step (dominant at N <= 2000) plus the flag scan of about 0.1 ns per
+  neuron (dominant at N >= 10000). Targets of the manifest: overhead <= 1.10 met at N = 4000, 10000, 20000; missed at
+  N = 2000 (1.17) and 5000 (1.14); <= 1.20 at N = 1000 missed (1.24); stretch <= 1.05 at N >= 10000 not met (1.08).
+- No recording: after/before 0.98-1.02 (no regression).
+- Voltage recording (`:v` of E and I at 1 kHz): `:fire` + `:v` over rec0 went from 1.78-2.36 to 1.17-1.45; the cost `:v`
+  adds on top of `:fire` is 0.08-0.21 of rec0 after against 0.11-0.42 before; `:v` alone is unchanged at N >= 10000
+  (1.15-1.16 against 1.13-1.16) and faster at small N (1.28 against 1.48 at N = 1000).
+- Spike counts, spike hashes and `:v` hashes identical before/after at every N (mode=check).
+- Scripts, CSVs, README and figure: `papers/JuliaSNN_publication/validation/profilation_v1.10/perf/record_fix/`
+  (`scripts/rf_balanced.jl`, `run_rf.py`, `rf_tables.py`, `plot_rf.jl`; `out/summary.csv`, `out/overhead.csv`,
+  `out/check.csv`, `out/time.csv`; `fig/F_record_fix.png`/`.pdf`). N = 5000 data generated with the generator and seeds of
+  `perf/scripts/make_data.py` (`scripts/rf_make_data.py`).
+- Behaviour notes: an out-of-range entry of `indices[:fire]` now raises `ArgumentError` (naming the population) when the mask
+  is built, at the first `sim!`/`train!` (previously undefined behaviour under `@inbounds`). For the populations that own a
+  fed list (`Poisson` family, `Identity`, `PoissonStimulusLayer`), `fire` flags set by hand (not by the population's own
+  update) are no longer recorded while `fed` is set; the connections reading those populations already ignored them.
+- Not fixed here (pre-existing on 48c60eb): `test/Project.toml` lacks `SHA`, which `test/threading_synapses.jl` uses, so that
+  file fails in a fresh test environment.
+
 ### Known limitations
 - `iSTDPPotential` and the dense vSTDP are not converted (the event-driven vSTDP keeps the postsynaptic filters per step, O(Npost)): their postsynaptic filters follow the membrane potential at every step
   (class C, see "Lazy classification of the plasticity rules"); `SpikeRateSynapse` keeps its dense scans. The clock-driven
@@ -596,6 +651,10 @@ short-term rule, 8 B/syn for `J`/`index` with a rule that needs them, 8 B/syn fo
 - JLD2 upgrade (typemap `Upgrade`) so that models saved with 1.9.1 load.
 - Parallel plasticity (partition by postsynaptic neuron for the post pass, by presynaptic neuron for the pre pass).
 - Integer clock (`wip-clock`).
+- A spike list owned by the integrate-and-fire family (`IF`, `AdEx`, `Tripod`, `HH`, `IZ`, ...), built in the threshold loop and
+  shared with the connections through `spike_index(p)`: recording would become O(spikes) for every type (today these types
+  pay an N/8-word flag scan per step, about 0.1 ns per neuron) and the connections' own scans of `fire` would go too.
+  Touches the population files, to be coordinated with `dev-popfix`.
 - Documentation pages of SpikingNeuralNetworks that still describe `change_plasticity!`/`update_plasticity!` as
   replacing a rule of any type (`docs/src/plasticity.md`, `docs/src/catalogue/connections.md`) and the delay queue entry
   of `claude/performance.md` ("Remaining known performance issues"); release notes entry (with the breaking-changes
