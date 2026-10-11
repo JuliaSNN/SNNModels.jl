@@ -44,8 +44,9 @@ random numbers differs from SNNModels 1.9 (global RNG, `Random.seed!`).
 
 # Fields
 - `id`, `param`, `name = "InhomogeneousPoisson"`, `N::Int32 = 100`, `fire::Vector{Bool}`.
-- `r::Vector{Float32}`: rate offsets ``\rho_i``; `noise::Vector{Float32}`: ``\eta_i``.
-- `pspike::Vector{Float32}`: spike probability ``1 - e^{-\nu_i dt}`` of each neuron in the last step.
+- `r::VFT`: rate offsets ``\rho_i``; `noise::VFT`: ``\eta_i``. `VFT = Vector{Float32}` by default; `VFT = Vector{Float64}` with
+  `param = InhomogeneousPoissonParam(FT = Float64)` gives a `Float64` population (see `float_type`).
+- `pspike::VFT`: spike probability ``1 - e^{-\nu_i dt}`` of each neuron in the last step.
 - `spikes::SpikeIndex`: the ascending list of the neurons that fired in the last step (fed by `integrate!`).
 - `randcache_β`; `records::Dict`; `targets::Dict` (unused).
 
@@ -69,9 +70,9 @@ InhomogeneousPoisson
     ##
     N::IT=100
     fire::VBT = falses(N)
-    r::VFT= ones(Float32, N) * param.r0
-    noise::VFT = zeros(Float32, N)
-    pspike::VFT = zeros(Float32, N)  # spike probability of each neuron in the last step
+    r::VFT= ones(eltype(VFT), N) * param.r0
+    noise::VFT = zeros(eltype(VFT), N)
+    pspike::VFT = zeros(eltype(VFT), N)  # spike probability of each neuron in the last step
     spikes::SpikeIndex = fed_spike_index(N)  # ascending list of the neurons with fire[j], fed by `integrate!`
     randcache_β::VFT = rand(N) # random cache
     records::Dict = Dict()
@@ -82,7 +83,7 @@ function Population(p::InhomogeneousPoissonParam; kwargs...)
     return InhomogeneousPoisson(param = p; kwargs...)
 end
 
-function integrate!(p::InhomogeneousPoisson, param::InhomogeneousPoissonParam, dt::Float32)
+function integrate!(p::InhomogeneousPoisson, param::InhomogeneousPoissonParam, dt::AbstractFloat)
     @unpack N, randcache_β, fire, spikes, pspike = p
     ## Inhomogeneous Poisson process
     @unpack r0, β, τ, rate_timescale = param
@@ -90,18 +91,19 @@ function integrate!(p::InhomogeneousPoisson, param::InhomogeneousPoissonParam, d
     _check_state_lengths(N, randcache_β, fire, pspike, noise, r)
 
     rand!(randcache_β)
-    cc = 1.0f0 - dt / τ
-    pmax = 0.0f0
+    FT = eltype(pspike)
+    cc = one(FT) - dt / τ
+    pmax = zero(FT)
     # rate of every neuron, vectorised: noise and rate offset as in SNNModels 1.9, and the spike probability of the step
     @inbounds @simd for i = 1:N
-        re = randcache_β[i] - 0.5f0
+        re = randcache_β[i] - FT(0.5)
         ni = (noise[i] - re) * cc + re
         noise[i] = ni
         x = ni * β
-        E = r0 / 2 * ifelse(x > 0.0f0, x, 1.0f0) + r[i]
-        Erate = ifelse(E > 0.0f0, E, 0.0f0)
+        E = r0 / 2 * ifelse(x > zero(FT), x, one(FT)) + r[i]
+        Erate = ifelse(E > zero(FT), E, zero(FT))
         r[i] += (r0 - Erate) / rate_timescale * dt
-        pi_ = 1.0f0 - @inline(exp(-Erate * dt))
+        pi_ = one(FT) - @inline(exp(-Erate * dt))
         pspike[i] = pi_
         pmax = max(pmax, pi_)
     end
@@ -116,5 +118,11 @@ function integrate!(p::InhomogeneousPoisson, param::InhomogeneousPoissonParam, d
 end
 
 spike_index(p::InhomogeneousPoisson) = p.spikes
+
+# one precision per population (see `IF`)
+function snn_kw_finalize(::Type{T}, f::NamedTuple) where {T<:InhomogeneousPoisson}
+    _check_precision("InhomogeneousPoisson", _state_float(T, :r), "param" => f.param)
+    return f
+end
 
 export InhomogeneousPoisson, InhomogeneousPoissonParam, integrate!
