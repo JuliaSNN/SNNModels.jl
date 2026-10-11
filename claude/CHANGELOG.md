@@ -643,10 +643,16 @@ no global flag, no separate precision argument.
     parse(Float32, s)` checked for every literal); `AdExParameter`/`IFParameter` resolve the membrane pair in their precision
     (`τm = 281/40 = 7.025`, `R = 1/40`; IF `R = 0.06`, `gl = 1/0.06`, `C = 15 gl`); `HHParameter` `Cm, gl, gn, gk` are
     `200, 10, 20000, 6000` in Float64 and keep their Float32 values `199.99998, 9.999999, 19999.998, 5999.9995` (computed with the
-    inexact `um`; `_unit_default`); the dendrites of a Float64 `Tripod`/`BallAndStick` (`create_dendrite(...; FT = Float64)`) take the
-    lengths and diameter as the decimals the `Float32` unit values denote (`200um` as `0.02`, same random draw of the length as in
-    Float32), the decimal cable constants of `human_dend`/`mouse_dend`, and compute `gm`, `gax`, `C` in Float64 (Float32 geometry
-    unchanged). Test: every default reachable from a Float64 population of every model, and from every Float64 synapse model and
+    inexact `um`; `_unit_default`); the dendrites of a Float64 `Tripod`/`BallAndStick` (`create_dendrite(...; FT = Float64)`) draw the
+    length exactly as Float32 does (`rand` of the same Float32 range `lmin:1um:lmax`: same index, same RNG state afterwards) and read
+    the drawn length, fixed lengths and the diameter as the decimal multiple of `um` they denote (`200um` as `0.02`, `5um =
+    0.00049999997f0` as `0.0005`), take the cable constants of any `Physiology` as the decimals in their units (`human_dend`
+    `(2e-7, 3.8907e-5, 5e5)`, `mouse_dend` `(2e-7, 1.7e-6, 1e6)`), and compute `gm`, `gax`, `C` in Float64 (Float32 geometry
+    unchanged). Review round 2: the first version sampled the decimal range `lo:1e-4:hi` built from the shortest decimals of the
+    bounds, which differs in length from the Float32 range when a bound is not the correctly rounded Float32 of its decimal (1105
+    integer-um ranges on a 5 um grid, e.g. `(0, 5um)`, `(10um, 500um)`, `(35um, 85um)`), and had `mouse_dend.Rd = 1.7e-5` instead
+    of `1.7e-6`; test: every integer-um range on a 5 um grid in 0-500 um, two seeds, Float64 lengths are the decimals of the
+    Float32 lengths and the RNG states are equal. Test: every default reachable from a Float64 population of every model, and from every Float64 synapse model and
     parameter type, is checked not to be a Float32-rounded value. Still `Float32`-rounded in a Float64 model: values the user writes
     with the inexact unit constants (`10Hz`, `150um` outside the dendrite lengths) and any non-predefined `Float32` object converted with
     `convert_precision` (converted value by value), the `Float32` field `Tripod.Vspike`. Not changed (found while checking): `Tripod` and

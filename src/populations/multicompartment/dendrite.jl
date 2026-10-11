@@ -137,12 +137,15 @@ returns a disconnected compartment `(gm = 1, gax = 0, C = 1, l = -1, d)`.
 The `N` form returns a `Dendrite{Vector{FT}}` with these values per neuron and leak reversal `El`.
 
 Precision: with `FT = Float32` the geometry is computed with the `Float32` unit constants, as before 1.10 (bit-identical). With
-another `FT` (`Float64`) it is computed in `Float64` from the decimal values that the arguments denote: a length or diameter
-given in the `Float32` unit system (`200um` is `0.0199999996f0`, `4um` is `0.000399999990f0`) is read as the shortest decimal
-that rounds to it (`0.02`, `0.0004`), a range `(lmin, lmax)` is sampled on the decimal 1 μm grid (the same draw as in
-`Float32`, so a `Float64` population built from the same seed has the same lengths), and the predefined `human_dend` and
-`mouse_dend` are taken with their decimal cable constants (`Ri = 2e-7`, `Rd = 3.8907e-5` or `1.7e-5`, `Cd = 5e5` or `1e6`
-in the library units); any other `Physiology` is read field by field as the shortest decimal.
+another `FT` (`Float64`) it is computed in `Float64` from the decimal values that the arguments denote. A range `(lmin, lmax)`
+is sampled exactly as in `Float32` (`rand` of the same `Float32` range `lmin:1um:lmax`: same index, same RNG consumption) and
+the drawn length is read in micrometres, so a `Float64` population built from the same seed has the same lengths and leaves the
+RNG in the same state. A length or diameter given in the `Float32` unit system is read as the decimal multiple of `um` it
+denotes (`5um` is `0.00049999997f0`, read as `0.0005`; `4um` as `0.0004`), within the `Float32` rounding of the product and with
+at most 6 decimal digits of micrometres; another value is read as the shortest decimal that rounds to it. The cable constants
+are read in the same way in their units (`Ri` in Ω cm, `Rd` in Ω cm², `Cd` in μF/cm²): `human_dend` is
+`(2e-7, 3.8907e-5, 5e5)` and `mouse_dend` `(2e-7, 1.7e-6, 1e6)` in the library units, and any `Physiology` written with the unit
+constants (`210Ω * cm`, `0.75f0 * μF / cm^2`) gives its decimal values.
 
 # Example
 ```julia
@@ -189,28 +192,41 @@ function create_dendrite(l; d::Real = 4um, physiology = human_dend)
     end
 end
 
-# The decimal value that a Float32 quantity of the unit system denotes: the shortest decimal that rounds to it
-# (`_decimal(200um) === 0.02`); other reals are converted.
+# The decimal value that a Float32 quantity of the unit system denotes. `_decimal(x, u)`: `x` read in the unit `u` (a power of
+# ten in the library units, e.g. `um`, `Ω * cm`): the multiple `n = x / u` closest to a decimal with at most 6 fractional
+# digits, within the Float32 rounding of the products that built `x` (`5um` is `0.00049999997f0`, read as `5 * 1e-4 = 0.0005`;
+# `0.75f0 * μF / cm^2` as `7.5e5`), computed as an exact integer times or divided by an exact power of ten (so the result is the
+# Float64 nearest to the decimal, `parse(Float64, "5e-4")`). Otherwise, and for `_decimal(x)`, the shortest decimal that
+# rounds to `x` (`string(x)`), which is the intended decimal only when `x` is the correctly rounded Float32 of it.
 _decimal(x::Float32) = parse(Float64, string(x))
 _decimal(x::Real) = Float64(x)
-# cable constants in Float64: the decimal values of the predefined physiologies (the Float32 `human_dend`, `mouse_dend` are
-# computed with the Float32 unit constants: `200 * Ω * cm` is not 2e-7 in Float32), any other one field by field
-function _decimal_physiology(p::Physiology)
-    p === human_dend && return Physiology(2e-7, 3.8907e-5, 5e5)     # 200 Ω cm, 38907 Ω cm², 0.5 μF/cm²
-    p === mouse_dend && return Physiology(2e-7, 1.7e-5, 1e6)        # 200 Ω cm, 1700 Ω cm², 1 μF/cm²
-    return Physiology(_decimal(p.Ri), _decimal(p.Rd), _decimal(p.Cd))
-end
-
-# `create_dendrite(l; d, physiology)` in Float64 (the `N` form with `FT !== Float32`, see its docstring): decimal lengths and
-# diameter, the same random draw of the length as the Float32 method (an index of a range of the same length).
-function _create_dendrite_decimal(l; d::Real = 4um, physiology = human_dend)
-    if isa(l, Tuple)
-        l = rand(_decimal(l[1]):1e-4:_decimal(l[2]))
-    else
-        l = _decimal(l)
+function _decimal(x::Float32, u::Float32)
+    ud = _decimal(u)
+    p = round(Int, log10(ud))
+    (ud === _exp10(1.0, p) && isfinite(x)) || return _decimal(x)
+    n = Float64(x) / Float64(u)
+    for m = 0:6
+        k = round(n * 10.0^m)
+        abs(n * 10.0^m - k) <= 4 * eps(Float32) * abs(n * 10.0^m) && return _exp10(k, p - m)
     end
-    l > 500um && error("Dendrite length must be less than 500um")
-    d = _decimal(d)
+    return _decimal(x)
+end
+_decimal(x::Real, u::Float32) = Float64(x)
+_exp10(k::Float64, e::Int) = e >= 0 ? k * 10.0^e : k / 10.0^(-e)    # exact powers of ten up to 1e22: one rounding
+# cable constants in Float64: each field read in its unit (`Ri` in Ω cm, `Rd` in Ω cm², `Cd` in μF/cm²), so the predefined
+# `human_dend` is (2e-7, 3.8907e-5, 5e5) and `mouse_dend` (2e-7, 1.7e-6, 1e6) in the library units
+_decimal_physiology(p::Physiology) =
+    Physiology(_decimal(p.Ri, Float32(Ω * cm)), _decimal(p.Rd, Float32(Ω * cm^2)), _decimal(p.Cd, Float32(μF / cm^2)))
+
+# `create_dendrite(l; d, physiology)` in Float64 (the `N` form with `FT !== Float32`, see its docstring). A range `(lmin, lmax)`
+# is sampled exactly as the Float32 method does (`rand` of the same Float32 range `lmin:1um:lmax`: the same index, the same RNG
+# consumption) and the drawn Float32 length is read in micrometres (`_decimal(l, um)`), so the Float64 length is the decimal of
+# the Float32 one. Fixed lengths and the diameter are read in micrometres as well.
+function _create_dendrite_decimal(l; d::Real = 4um, physiology = human_dend)
+    l = isa(l, Tuple) ? rand(l[1]:1um:l[2]) : l
+    l > 500um && error("Dendrite length must be less than 500um")    # checked on the given value, as in Float32
+    l = _decimal(l, um)
+    d = _decimal(d, um)
     @unpack Ri, Rd, Cd = _decimal_physiology(physiology)
     if l <= 0
         return (gm = 1.0, gax = 0.0, C = 1.0, l = -1, d = d)

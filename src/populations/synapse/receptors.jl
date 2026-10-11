@@ -66,6 +66,7 @@ end
 # rebuilds a predefined object from its keywords (`_from_definition`), so that a Float64 copy carries the decimal values
 # (`τr = 0.26`, not `0.25999999046325684`) and its derived fields (`gsyn`, `α`, `τr⁻`, `τd⁻`) are computed in Float64. A receptor
 # that is not predefined (equal, `===`, to none of them) is converted value by value and keeps its Float32 rounding.
+# Internal registry (not API): filled at load time by `_predefined` only.
 const _PREDEFINED = Pair{Any,NamedTuple}[]
 function _predefined(::Type{O}; kw...) where {O}
     obj = O(; kw...)

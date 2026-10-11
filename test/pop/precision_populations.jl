@@ -370,6 +370,55 @@ const _PP_POISSON = ("PoissonHomo", "PoissonDense", "PoissonHet", "VariablePoiss
         @test Confavreux2025Synapse().α === 0.23f0 && EyalNMDA.b === 3.36f0 && NMDAVoltageDependency().k === -0.077f0
     end
 
+    @testset "Float64 dendrite lengths: same draw and grid as Float32 on any 1 um range" begin
+        # Every integer-um range (lo, hi) on a 5 um grid in 0-500 um (including 0-5, 10-500, 35-85, whose Float32 bounds are not
+        # the Float32 roundings of the decimals), several seeds: the Float64 lengths are the decimal whole micrometres of the
+        # Float32 lengths (k / 1e4), the Float32 lengths are on the integer-um grid, and the global RNG is left in the same state.
+        um64 = 1e-4
+        nbad_len = nbad_rng = nbad_dec = 0
+        for lo in 0:5:495, hi in lo+5:5:500, seed in (1, 7)
+            Random.seed!(seed); d32 = create_dendrite(3, (lo * um, hi * um)); s32 = copy(Random.default_rng())
+            Random.seed!(seed); d64 = create_dendrite(3, (lo * um, hi * um); FT = Float64); s64 = copy(Random.default_rng())
+            s32 == s64 || (nbad_rng += 1)
+            for (a, b) in zip(d32.l, d64.l)
+                a <= 0 && (b == -1 || (nbad_len += 1); continue)
+                k32 = Float64(a) / Float64(um)
+                k = round(Int, k32)
+                abs(k32 - k) <= 1e-6 * k || (nbad_len += 1)
+                abs(b / um64 - k) <= 1e-9 * k || (nbad_len += 1)
+                b === parse(Float64, "$(k)e-4") || (nbad_dec += 1)
+            end
+        end
+        @test nbad_len == 0
+        @test nbad_rng == 0
+        @test nbad_dec == 0
+        # the examples of review round 2: same lengths as Float32 where the decimal range has another length
+        for (lo, hi) in ((0, 5), (10, 500), (35, 85), (40, 65))
+            Random.seed!(3); a = create_dendrite(50, (lo * um, hi * um)).l
+            Random.seed!(3); b = create_dendrite(50, (lo * um, hi * um); FT = Float64).l
+            @test round.(Int, a ./ um) == round.(Int, b ./ um64)
+        end
+        # fixed lengths and diameters given with the Float32 unit constants: the decimal whole micrometres
+        for x in (5, 10, 35, 40, 65, 85, 200, 500)
+            d = SNNModels._create_dendrite_decimal(x * um; d = x * um)
+            @test d.l === parse(Float64, "$(x)e-4") && d.d === d.l
+        end
+        # Float32 path unchanged: the drawn value is an element of the Float32 range lo:1um:hi
+        Random.seed!(4); a = create_dendrite(20, (35um, 85um)).l
+        @test all(in(35um:1um:85um), a) && eltype(a) === Float32
+        # physiologies that are not predefined: values given with the Float32 unit constants are read as their decimals
+        # (a `Physiology` equal to a predefined one is that one: isbits, `===` compares the values)
+        p = Physiology(210 * Ω * cm, 1700Ω * cm^2, 2μF / cm^2 |> Float32)
+        @test SNNModels._decimal_physiology(p) == Physiology(2.1e-7, 1.7e-6, 2e6)
+        q = Physiology(150 * Ω * cm, 38907 * Ω * cm^2, 0.5μF / cm^2 |> Float32)
+        @test SNNModels._decimal_physiology(q) == Physiology(1.5e-7, 3.8907e-5, 5e5)
+        r = Physiology(123.4f0 * Ω * cm, 2500.5f0 * Ω * cm^2, 0.75f0 * μF / cm^2)
+        @test SNNModels._decimal_physiology(r) == Physiology(1.234e-7, 2.5005e-6, 7.5e5)
+        # predefined: 200 Ω cm, 38907 Ω cm², 0.5 μF/cm² (human); 200 Ω cm, 1700 Ω cm², 1 μF/cm² (mouse); Ω = 1e-9, μF = 1e6, cm = 1
+        @test SNNModels._decimal_physiology(human_dend) == Physiology(2e-7, 3.8907e-5, 5e5)
+        @test SNNModels._decimal_physiology(mouse_dend) == Physiology(2e-7, 1.7e-6, 1e6)
+    end
+
     @testset "integrate! takes the step in the precision of the population" begin
         # a step of another precision is converted to `float_type(p)` (as `sim!` does): same state as the converted step
         for (name, (mk, dt, _)) in _PP_MODELS, FT in (Float32, Float64)
