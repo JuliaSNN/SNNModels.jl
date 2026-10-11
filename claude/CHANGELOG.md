@@ -171,7 +171,10 @@ populations are built with `Float64` state (see "Precision from the population t
     the arrival pass is 55 % of `forward!` and this change gives nothing (see the next item). Bit-identical: test
     `test/syn/delay_uniform.jl` (every step against the general path, Float32 and Float64, delays 0, dt, 0.8 at dt 0.1 and 0.125,
     STDP and STP, a change of dt) and `threading_synapses.jl` (1, 4, 8 threads); spike rasters and final `v`, `g`, buffers SHA1-identical
-    to the previous commit for T8 (N = 2000, 500 Hz), T4 (delay 0.8), T7 (delay 5 ms) and the Float64 DoubleExp network.
+    to the previous commit for T8 (N = 2000, 500 Hz), T4 (delay 0.8), T7 (delay 5 ms) and the Float64 DoubleExp network. This SHA1
+    identity is that of the column path (the delays of these networks have no plasticity, so the next item now sends them through the
+    spike list, which is not bit-identical). The numbers of this item and of the next were measured before "Synapse memory footprint";
+    on top of it T8 N = 10000 500 Hz is 0.947 s per simulated second (last item of this group).
   - Constant delays without plasticity (`NoLTP` and `NoSTP`, a delay of `d` steps stored once) delay the spike list instead of the
     increments, so on this path the weight `W` is read at arrival, not at emission (`param.spike_ring`: the lists of the last `d + 1`
     steps, capacity kept, 0 B per step after warm-up): the list emitted `d`
@@ -617,16 +620,54 @@ no global flag, no separate precision argument.
   morphology `param` of `Tripod`/`BallAndStick` are precision-agnostic. `snn_kw_finalize` now receives the struct type with its type
   parameters (e.g. `HH{Vector{Float64},Vector{Bool}}`), so the check reads `eltype(VFT)` and not the unconverted default of `v`. `exp64`/`exp256`
   are generic in the float type; `_pow4` has a `Float64` method; `HH`/`IZ`/`MorrisLecar` write their literals as `T(0.32)` (`=== 0.32f0`
-  in Float32, checked for every literal). `Tripod.Vspike` stays a `Float32` field, compared after promotion; the dendritic geometry is computed as
-  in Float32 and stored in `FT`. Still Float32 only (refused): `HetRec`, the rate/FORCE connections, `CurrentStimulus`, `BalancedStimulus`,
+  in Float32, checked for every literal). `Tripod.Vspike` stays a `Float32` field, compared after promotion; the dendritic geometry of a
+  Float64 population is computed in Float64 from decimal values (see "Float64 parameter values" below). Still Float32 only (refused): `HetRec`, the rate/FORCE connections, `CurrentStimulus`, `BalancedStimulus`,
   `VariableInputs`, `Turnover`.
   - Float32 is bit-identical: SHA1 of the whole state trajectory (N = 257, 2000 steps, seeded synaptic drive) of 32 cases (every population
     model, the two Poisson regimes, heterogeneous AdEx, `Tripod` with `SingleExpSynapse`, `IF` and `AdEx` with each of the eight synapse
     models) equal before J3 (e265921) and after each of the four J3 commits (`pre110_fixes/out/j3_identity.csv`); all `*_update_loop.jl` and
-    `inline_math_test.jl` tests pass unchanged.
-  - Tests: `test/pop/precision_populations.jl` (417): per model, Float64 construction from `VFT` only with no `Float32` field left (state,
+    `inline_math_test.jl` tests pass unchanged. Review round 1 (`scripts/j3_f32_identity_r1.jl`, `out/j3r1_identity.csv`): 36 cases (the 32
+    above, `BallAndStick` with `SingleExpSynapse`, `MorrisLecar` driven to spike, `Rate` and `WilsonCowan` with different drives so that
+    their hashes differ), spike flags and the records (`monitor!` of `fire` and the main variable, read back with `spiketimes` and
+    `getvariable`) in the hash, at `-t 1` and at `-t 8` with `neurons_per_thread = 128` (chunked and threaded paths, N = 257 in 3 chunks):
+    j3pre (e265921) against the review commit d2a11f0, 72 / 72 pairs equal (36 cases x 2 configurations, state and records SHA1; the
+    threaded hashes also equal the serial ones). Full suite `-t 1` 75918 / 75918; threading tests and `precision_populations.jl` at
+    `-t 4` 8733 / 8733.
+  - Float64 parameter values (review round 1). The library unit constants are `Float32` and some are not exact (`um`, `Ω`, `Hz`), so a
+    default computed with them and converted to `Float64` carried the `Float32` rounding (`τr = 0.25999999046`). The `Float64` path now
+    uses the decimal values, the `Float32` defaults are unchanged (each `Float32` object compared field by field with the one before):
+    the predefined receptors and NMDA blocks of `SomaSynapse`, `TripodSomaSynapse`, `TripodDendSynapse` are built from their decimal
+    keywords and `convert_precision` rebuilds them from those keywords in the target type (`τr = 0.26`, `g0 = 0.73`, `b = 3.36`, derived
+    `gsyn`, `α`, `τr⁻`, `τd⁻` computed in Float64); the defaults `NMDAVoltageDependency` `b, k, mg`, `Confavreux2025Synapse.α = 0.23`,
+    `MorrisLecarParameter.ϕ = 0.025`, `PoissonHomoParameter.rate = 0.001` are decimal literals (`Float32(parse(Float64, s)) ===
+    parse(Float32, s)` checked for every literal); `AdExParameter`/`IFParameter` resolve the membrane pair in their precision
+    (`τm = 281/40 = 7.025`, `R = 1/40`; IF `R = 0.06`, `gl = 1/0.06`, `C = 15 gl`); `HHParameter` `Cm, gl, gn, gk` are
+    `200, 10, 20000, 6000` in Float64 and keep their Float32 values `199.99998, 9.999999, 19999.998, 5999.9995` (computed with the
+    inexact `um`; `_unit_default`); the dendrites of a Float64 `Tripod`/`BallAndStick` (`create_dendrite(...; FT = Float64)`) take the
+    lengths and diameter as the decimals the `Float32` unit values denote (`200um` as `0.02`, same random draw of the length as in
+    Float32), the decimal cable constants of `human_dend`/`mouse_dend`, and compute `gm`, `gax`, `C` in Float64 (Float32 geometry
+    unchanged). Test: every default reachable from a Float64 population of every model, and from every Float64 synapse model and
+    parameter type, is checked not to be a Float32-rounded value. Still `Float32`-rounded in a Float64 model: values the user writes
+    with the inexact unit constants (`10Hz`, `150um` outside the dendrite lengths) and any non-predefined `Float32` object converted with
+    `convert_precision` (converted value by value), the `Float32` field `Tripod.Vspike`. Not changed (found while checking): `Tripod` and
+    `BallAndStick` build their dendrites with the default `physiology = human_dend` and ignore `param.physiology`, as before 1.10.
+  - Steps of another precision (review round 1). Every population model with a Float64 method converts a `dt` of another type to
+    `float_type(p)` at the top of `integrate!` (as `IF`/`AdEx` through the generalized-IF `integrate!`, `Tripod`, `BallAndStick`, the point
+    models and the Poisson family alike): `integrate!(p, p.param, 0.1)` on a Float32 population steps with `0.1f0`, a Float64 population
+    given `0.1f0` steps with `Float64(0.1f0)`. `sim!`/`train!` already pass `dt` in the population type, so nothing changes under them
+    (Float32 bits unchanged). `HetRec` (Float32 only) still refuses a Float64 step.
+  - Synapse models written for 1.9 (third-party types). The populations now call the three-argument `synaptic_variables(s, N, FT)` and
+    `synaptic_receptors(s, N, FT)`. A model that defines only the two-argument forms keeps working in Float32 populations: the generic
+    three-argument methods call its own two-argument method when `FT` is the precision of the model (`float_type(s)`, Float32 for such a
+    model); a Float64 population needs the three-argument methods, and the error says so. (Before this fallback a model with only a
+    two-argument `synaptic_receptors` silently got the default `glu`/`gaba` buffers.)
+  - Tests: `test/pop/precision_populations.jl` (596 after review round 1, 417 before): per model (also `Tripod` and `BallAndStick` with
+    `SingleExpSynapse` on soma and dendrites), Float64 construction from `VFT` only with no `Float32` field left (state,
     parameters, spike, synapse, synaptic variables, receptor buffers, dendrites), `@inferred` step with `dt::Float64`, allocations no larger than
-    in Float32 (0 where Float32 is 0), Float64 against Float32 from the same state over 20 steps (same spikes, main state within 1e-4 relative),
+    in Float32 (0 where Float32 is 0), Float64 against Float32 from the same state: 200 quiet steps (no spike, main state within 1e-4
+    relative) and 500 driven steps (1000 for HH; HH and MorrisLecar with 3x and 2x the current so that they fire): 20 to 200 spikes, total
+    count within 2 %, per neuron count within 1 and first spike within 2 steps (observed: equal), state before the first spike within
+    1e-4 relative (observed <= 3e-5); decimal defaults; `dt` of the other precision; two-argument synapse models;
     two Float64 runs identical, `dt` against `dt/2`, a `SpikingSynapse` onto the population is Float64; the synapse models on `IF`/`AdEx`;
     `convert_precision` round trips; refusals; a Float64 network of `Poisson`, `Tripod`, `IF` with `sim!`. Coverage of the J3-changed source lines
     by these and the update-loop tests: 183 / 188 (97 %).
@@ -636,8 +677,11 @@ no global flag, no separate precision argument.
     (500 Hz / 1 Hz) 1.97 / 0.95; N = 1000: `IF` 2.60 / 2.45, `AdEx` 1.75 / 1.77, `ExtendedIF` 2.72 / 2.73, `HH` 1.36 / 1.42, `IZ` 2.03 / 1.99,
     `MorrisLecar` 3.66 / 3.58, `Rate` 7.95 / 1.92, `WilsonCowan` 8.37 / 1.89, `Tripod` 2.08 / 2.04, `BallAndStick` 2.08 / 2.11, `Poisson`
     1.66 / 0.95 (the multicompartment models pay more at N = 10000; hypothesis, not verified: their Float64 state no longer fits the cache). `Rate`/`WilsonCowan` with input and `MorrisLecar` use `Base.tanh`/`cosh` in Float64 (out of line,
-    the loop does not vectorise; the inlined copies exist for Float32 only). The Float32 times after J3 are those before (0.95-1.03; one
-    recheck round for `Rate` and `Poisson`, whose first round was noisy). Table: `pre110_fixes/out/tables_j3.md`, figure
+    the loop does not vectorise; the inlined copies exist for Float32 only). Float32 after J3 against before (same round): 0.946-1.019 for
+    every model and regime except `Poisson` without spikes, 1.047 (N = 1000) and 1.092 (N = 10000) at 0.006-0.05 ns per neuron-step, the
+    noise level of this measurement. The regression pairs the Float32 arms before and after J3 of one round (r2 for `Rate` and `Poisson`,
+    re-measured because their r1 arms were noisy); the Float64/Float32 ratios pair the arms of round r1. Table (each column with its
+    round): `pre110_fixes/out/tables_j3.md`, figure
     `pre110_fixes/figures/pre110_fixes.png` (d).
 
 ### Synapse memory footprint (`SpikingSynapse`, 29 to 9 bytes per synapse)
@@ -677,9 +721,14 @@ short-term rule, 8 B/syn for `J`/`index` with a rule that needs them, 8 B/syn fo
 - Step 4. If all drawn delays are equal (after the draw and the conversion, so the random stream is unchanged) one value is kept;
   the delayed kernels take the delay in steps as a scalar or per synapse through the same function barrier. `update_sparse_matrix!`
   expands a common delay before remapping (a new synapse gets the same mean delay as with per-synapse storage) and stores it once
-  again if all delays are equal.
+  again if all delays are equal. Since the delayed-transmission change (Performance, constant delays, and Behaviour notes) a delay
+  stored once without plasticity (`NoLTP`, `NoSTP`) is delivered through the spike list, which is not bit-identical to the buffer
+  path: a network built with a `Dirac` delay (stored once) and the same network whose `delaytime` is assigned per synapse (stored per
+  synapse, buffer path) now give different bits. The bit-identity of common and per-synapse delays stated here and in the tests
+  below holds for the buffer and column paths (with plasticity, or with the buffer path forced).
 - Tests: `test/syn/synapse_footprint.jl` (memory bounds, lazy arrays empty/built exactly when expected for every rule type,
-  `ρ` empty and its readers, in-process bit-identity of empty vs stored `ρ`, common vs per-synapse delays, eager vs lazy transpose
+  `ρ` empty and its readers, in-process bit-identity of empty vs stored `ρ`, common vs per-synapse delays (buffer and column paths; see
+  step 4 for the spike-list path), eager vs lazy transpose
   with pair STDP/STP, weight records and vSTDP, threaded vs serial when run with more than one thread, JLD2 round trip). Minimal
   edits of `syn/spike_index.jl`, `sim/sweep_fixes.jl`, `syn/lazy_weights.jl`, `syn/vstdp.jl`, `stim/poisson_pop_sparse.jl`.
 - Test suites: SNNModels `-t 1` 74714 passed (0 failed, 0 errored); also passed with `--check-bounds=yes` and with `-t 4`.
