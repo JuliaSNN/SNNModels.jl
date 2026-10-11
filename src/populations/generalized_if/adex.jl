@@ -105,13 +105,14 @@ After a spike the neuron is therefore clamped for `round(Int, τabs / dt) - 1` s
 - `param::AdExParameter = AdExParameter()`, `synapse = DoubleExpSynapse()`,
   `spike::PostSpike = PostSpike()`.
 - `N::Int32 = 100`: number of neurons.
-- `v::Vector{Float32}`: membrane potential (mV), uniform in `[Vr, Vt]`.
-- `w::Vector{Float32}`: adaptation current (pA), zeros.
+- `v::VFT`: membrane potential (mV), uniform in `[Vr, Vt]`. `VFT = Vector{Float32}` by default; `VFT = Vector{Float64}` gives a
+  `Float64` population (`param`, `synapse`, `spike`, the synaptic variables and receptor buffers follow; see `float_type`).
+- `w::VFT`: adaptation current (pA), zeros.
 - `fire::Vector{Bool}`: spike flags.
-- `θ::Vector{Float32}`: adaptive threshold of the exponential term (mV), initialised to `Vt`.
+- `θ::VFT`: adaptive threshold of the exponential term (mV), initialised to `Vt`.
 - `tabs::Vector{Int}`: refractory counters (steps), ones.
-- `I::Vector{Float32}`: external current (pA).
-- `syn_curr::Vector{Float32}`: synaptic current (pA).
+- `I::VFT`: external current (pA).
+- `syn_curr::VFT`: synaptic current (pA).
 - `synvars`: synaptic state; `receptors::NamedTuple`: spike input buffers (see `IF`).
 - `records::Dict`.
 
@@ -144,23 +145,23 @@ AdEx
     name::String = "AdEx"
     id::String = randstring(12)
 
-    param::AdExt = AdExParameter()
-    synapse::SYNT = DoubleExpSynapse()
-    spike::PST = PostSpike()
+    param::AdExt = AdExParameter(FT = eltype(VFT))
+    synapse::SYNT = DoubleExpSynapse(FT = eltype(VFT))
+    spike::PST = PostSpike(FT = eltype(VFT))
 
     N::IT = 100 # Number of neurons
-    v::VFT = param.Vr .+ rand(Float32, N) .* (param.Vt - param.Vr)
-    w::VFT = zeros(Float32, N) # Adaptation current
+    v::VFT = param.Vr .+ rand(eltype(VFT), N) .* (param.Vt - param.Vr)
+    w::VFT = zeros(eltype(VFT), N) # Adaptation current
 
     fire::VBT = zeros(Bool, N) # Store spikes
-    θ::VFT = ones(Float32, N) .* param.Vt # Array with membrane potential thresholds
+    θ::VFT = ones(eltype(VFT), N) .* param.Vt # Array with membrane potential thresholds
     tabs::VIT = ones(Int, N) # Membrane time constant
-    I::VFT = zeros(Float32, N) # Current
+    I::VFT = zeros(eltype(VFT), N) # Current
 
     # Two receptors synaptic conductance
-    syn_curr::VFT = zeros(Float32, N)
-    synvars::SYNV = synaptic_variables(synapse, N) # Synaptic variables for receptor model
-    receptors::RECT = synaptic_receptors(synapse, N)
+    syn_curr::VFT = zeros(eltype(VFT), N)
+    synvars::SYNV = synaptic_variables(synapse, N, eltype(VFT)) # Synaptic variables for receptor model
+    receptors::RECT = synaptic_receptors(synapse, N, eltype(VFT))
 
     records::Dict = Dict()
 end
@@ -194,22 +195,22 @@ end
 # SNNModels <= 1.9 (every value that is kept goes through the same floating-point operations in the same order).
 # The exponential term does not depend on the neuron through anything but `v` and `θ`; for a refractory neuron it may overflow to `Inf`,
 # which is discarded. Hoisted out of the loop: `round(Int, τabs / dt)` and the test `ΔT < 0`.
-function update_neuron!(p::P, param::T, dt::Float32) where {P<:AdEx,T<:AdExParameter}
+function update_neuron!(p::P, param::T, dt::AbstractFloat) where {P<:AdEx,T<:AdExParameter}
     update_neuron!(p, param, dt, 1:Int(p.N))
 end
 
 function update_neuron!(
     p::P,
     param::T,
-    dt::Float32,
+    dt::FT,
     rng::UnitRange{Int},
-) where {P<:AdEx,T<:AdExParameter{Float32}}
+) where {P<:AdEx,FT<:AbstractFloat,T<:AdExParameter{FT}}
     @unpack N, v, w, fire, θ, I, tabs, syn_curr = p
     @unpack τm, Vt, Vr, El, R, ΔT, τw, a, b = param
     @unpack At, τA, τabs = p.spike
     _check_state_lengths(N, v, w, fire, θ, I, tabs, syn_curr)
     nabs = round(Int, τabs / dt)    # refractory steps, loop invariant
-    useexp = !(ΔT < 0.0f0)          # the exponential term is removed by a negative slope factor
+    useexp = !(ΔT < zero(FT))       # the exponential term is removed by a negative slope factor
 
     @inbounds @simd for i ∈ rng
         vi = ifelse(fire[i], Vr, v[i])      # reset after the spike of the previous step
@@ -219,7 +220,7 @@ function update_neuron!(
         thi = θ[i]
 
         w1 = wi + dt * (a * (vi - El) - wi) / τw
-        ex = ifelse(useexp, ΔT * @inline(exp((vi - thi) / ΔT)), 0.0f0)
+        ex = ifelse(useexp, ΔT * @inline(exp((vi - thi) / ΔT)), zero(FT))
         v1 = vi +
              dt * (
             -(vi - El)  # leakage
@@ -232,7 +233,7 @@ function update_neuron!(
         spk = act & (v1 >= 0mV)
 
         fire[i] = spk
-        v[i] = ifelse(act, ifelse(spk, 20.0f0, v1), vi)
+        v[i] = ifelse(act, ifelse(spk, FT(20), v1), vi)
         w[i] = ifelse(act, ifelse(spk, w1 + b, w1), wi)
         θ[i] = ifelse(act, ifelse(spk, th1 + At, th1), thi)
         tabs[i] = ifelse(spk, nabs, ti)
@@ -244,9 +245,9 @@ end
 function update_neuron!(
     p::P,
     param::T,
-    dt::Float32,
+    dt::FT,
     rng::UnitRange{Int},
-) where {P<:AdEx,T<:AdExParameter{Vector{Float32}}}
+) where {P<:AdEx,FT<:AbstractFloat,T<:AdExParameter{Vector{FT}}}
     @unpack N, v, w, fire, θ, I, tabs, syn_curr = p
     @unpack τm, Vt, Vr, El, R, ΔT, τw, a, b = param
     @unpack At, τA, τabs = p.spike
@@ -262,7 +263,7 @@ function update_neuron!(
         Ti = ΔT[i]
 
         w1 = wi + dt * (a[i] * (vi - El[i]) - wi) / τw[i]
-        ex = ifelse(Ti < 0.0f0, 0.0f0, Ti * @inline(exp((vi - thi) / Ti)))
+        ex = ifelse(Ti < zero(FT), zero(FT), Ti * @inline(exp((vi - thi) / Ti)))
         v1 = vi +
              dt * (
             -(vi - El[i])  # leakage
@@ -275,7 +276,7 @@ function update_neuron!(
         spk = act & (v1 >= 0mV)
 
         fire[i] = spk
-        v[i] = ifelse(act, ifelse(spk, 20.0f0, v1), vi)
+        v[i] = ifelse(act, ifelse(spk, FT(20), v1), vi)
         w[i] = ifelse(act, ifelse(spk, w1 + b[i], w1), wi)
         θ[i] = ifelse(act, ifelse(spk, th1 + At, th1), thi)
         tabs[i] = ifelse(spk, nabs, ti)
@@ -284,5 +285,11 @@ end
 
 
 _chunk_population(::AdEx) = true
+
+# one precision per population (see `IF`)
+function snn_kw_finalize(::Type{T}, f::NamedTuple) where {T<:AdEx}
+    _check_precision("AdEx", _state_float(T, :v), "param" => f.param, "synapse" => f.synapse, "spike" => f.spike)
+    return f
+end
 
 export AdEx, AdExParameter

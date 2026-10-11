@@ -22,6 +22,7 @@ equations (no separate E and I variables, no refractory term, no sigmoid paramet
 # Fields
 - `id::String = randstring(12)`, `name::String = "WilsonCowan"`, `param::WCParameter`.
 - `N::Int32 = 100`; `x = 0.5randn(N)`; `r = tanh.(x)`; `g`, `I`: inputs, zeros; `records::Dict`.
+- `VFT = Vector{Float32}`: type of the state vectors; `VFT = Vector{Float64}` gives a `Float64` population (see `float_type`).
 
 `RateSynapse` (and the FORCE connections) target `g`, as for `Rate` (any target symbol is mapped
 to `:g`). Up to SNNModels 1.8.4 there was no `synaptic_target` method for `WilsonCowan`.
@@ -54,7 +55,7 @@ WilsonCowan
     records::Dict = Dict()
 end
 
-function integrate!(p::WilsonCowan, param::WCParameter, dt::Float32)
+function integrate!(p::WilsonCowan, param::WCParameter, dt::AbstractFloat)
     @unpack N, x, r, g, I = p
     _check_state_lengths(N, x, r, g, I)
     # `_tanh_inl`: the bits of `tanh`, with the exponential inlined so that the loop vectorises
@@ -62,7 +63,7 @@ function integrate!(p::WilsonCowan, param::WCParameter, dt::Float32)
         xi = x[i] + dt * (-x[i] + g[i] + I[i])
         x[i] = xi
         r[i] = _tanh_inl(xi)
-        g[i] = 0.0f0 # g is the synaptic input of this step (connections add to it)
+        g[i] = zero(eltype(g)) # g is the synaptic input of this step (connections add to it)
     end
 end
 

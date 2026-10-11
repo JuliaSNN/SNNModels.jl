@@ -35,6 +35,7 @@ recorded, see above).
 # Fields
 - `id::String = randstring(12)`, `name::String = "Rate"`, `param::RateParameter = RateParameter()`.
 - `N::Int32 = 100`.
+- `VFT = Vector{Float32}`: type of the state vectors; `VFT = Vector{Float64}` gives a `Float64` population (see `float_type`).
 - `x::Vector{Float32} = 0.5randn(N)`: internal state.
 - `r::Vector{Float32} = tanh.(x)`: output rate, in ``(-1, 1)``.
 - `g::Vector{Float32}`: synaptic input, zeros; the target of `RateSynapse` (any target symbol
@@ -88,7 +89,7 @@ end
 One forward-Euler step of the rate units: `x += dt * (-x + g + I)`, `r = tanh(x)`, then
 `g = 0` (see `Rate`).
 """
-function integrate!(p::Rate, param::RateParameter, dt::Float32)
+function integrate!(p::Rate, param::RateParameter, dt::AbstractFloat)
     @unpack N, x, r, g, I = p
     _check_state_lengths(N, x, r, g, I)
     # `_tanh_inl`: the bits of `tanh`, with the exponential inlined so that the loop vectorises
@@ -96,7 +97,7 @@ function integrate!(p::Rate, param::RateParameter, dt::Float32)
         xi = x[i] + dt * (-x[i] + g[i] + I[i])
         x[i] = xi
         r[i] = _tanh_inl(xi)
-        g[i] = 0.0f0 # g is the synaptic input of this step (connections add to it)
+        g[i] = zero(eltype(g)) # g is the synaptic input of this step (connections add to it)
     end
 end
 

@@ -115,13 +115,7 @@ end
 # Copy of a synapse model in the precision `T` (the floating-point fields and type parameters converted, see `convert_precision`);
 # the object itself when it already has type `T` or has no floating-point field (`DeltaSynapse`). Used by the populations to bring
 # their default synapse models to the precision of their state.
-function convert_precision(x::S, ::Type{T}) where {S<:AbstractSynapseParameter,T<:AbstractFloat}
-    ps = S.parameters
-    (isempty(ps) || !any(_is_float_param, ps) || _float_type(S) === T) && return x
-    newps = map(p -> _convert_param(p, T), ps)
-    vals = map(f -> _convert_value(getfield(x, f), T), fieldnames(S))
-    return Base.typename(S).wrapper{newps...}(vals...)
-end
+convert_precision(x::AbstractSynapseParameter, ::Type{T}) where {T<:AbstractFloat} = _convert_float_struct(x, T)
 
 """
     update_synapses!(p, synapse, receptors::NamedTuple, synvars::AbstractSynapseVariable, dt::Float32)

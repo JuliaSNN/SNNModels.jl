@@ -65,6 +65,8 @@ finally spikes are detected (`v > 30`) and reset. No refractory period.
 # Fields
 - `id::String = randstring(12)`, `name::String = "IZ"`, `param::IZParameter = IZParameter()`.
 - `N::Int32 = 100`.
+- `VFT = Vector{Float32}`: type of the state vectors; `VFT = Vector{Float64}` gives a `Float64` population (the parameters
+  follow; see `float_type`).
 - `v::Vector{Float32} = fill(-65, N)`: membrane potential (mV).
 - `u::Vector{Float32} = param.b * v`: recovery variable.
 - `fire::Vector{Bool}`; `I::Vector{Float32}`: external input (mV/ms), zeros.
@@ -93,7 +95,7 @@ IZ
 @snn_kw mutable struct IZ{VFT = Vector{Float32},VBT = Vector{Bool}} <: AbstractPopulation
     id::String = randstring(12)
     name::String = "IZ"
-    param::IZParameter = IZParameter()
+    param::IZParameter = IZParameter(FT = eltype(VFT))
     N::Int32 = 100
     v::VFT = fill(-65.0, N)
     u::VFT = param.b * v
@@ -123,11 +125,12 @@ One step of the Izhikevich population: exponential decay of `ge`, `gi` (forward 
 half steps of the quadratic membrane equation, one step of `u`, the synaptic term, then spike
 detection (`v > 30`) with reset `v = c`, `u += d`. See `IZ`.
 """
-function integrate!(p::IZ, param::IZParameter, dt::Float32)
+function integrate!(p::IZ, param::IZParameter, dt::AbstractFloat)
     @unpack N, v, u, fire, I = p
     @unpack a, b, c, d, τe, τi, Ee, Ei = param
     @unpack ge, gi = p
     _check_state_lengths(N, v, u, fire, I, ge, gi)
+    T = eltype(v)    # literals in the precision of the state (`T(0.04) === 0.04f0` in Float32)
     # One pass over the neurons (the three loops of SNNModels <= 1.9 fused: every neuron is independent, same operations in the same order).
     Tv = eltype(v); Tu = eltype(u); Tg = eltype(ge); Tgi = eltype(gi)    # every `x[i] += ...` of the old loops rounded to the array type
     @inbounds @simd for i = 1:N
@@ -137,16 +140,22 @@ function integrate!(p::IZ, param::IZParameter, dt::Float32)
         gi[i] = gii
         vi = v[i]
         ui = u[i]
-        vi = convert(Tv, vi + 0.5f0 * dt * (0.04f0 * vi^2 + 5.0f0 * vi + 140.0f0 - ui + I[i]))
-        vi = convert(Tv, vi + 0.5f0 * dt * (0.04f0 * vi^2 + 5.0f0 * vi + 140.0f0 - ui + I[i]))
+        vi = convert(Tv, vi + T(0.5) * dt * (T(0.04) * vi^2 + T(5.0) * vi + T(140.0) - ui + I[i]))
+        vi = convert(Tv, vi + T(0.5) * dt * (T(0.04) * vi^2 + T(5.0) * vi + T(140.0) - ui + I[i]))
         ui = convert(Tu, ui + dt * (a * (b * vi - ui)))
         vi = convert(Tv, vi + dt * (gei * (Ee - vi) + gii * (Ei - vi)))
-        spk = vi > 30.0f0
+        spk = vi > T(30.0)
         fire[i] = spk
         v[i] = ifelse(spk, c, vi)
-        u[i] = ui + ifelse(spk, d, 0.0f0)
+        u[i] = ui + ifelse(spk, d, T(0.0))
     end
 end
 
+
+# one precision per population (see `IF`)
+function snn_kw_finalize(::Type{T}, f::NamedTuple) where {T<:IZ}
+    _check_precision("IZ", _state_float(T, :v), "param" => f.param)
+    return f
+end
 
 export IZ, IZParameter

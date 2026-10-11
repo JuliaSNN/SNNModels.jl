@@ -39,7 +39,7 @@ end
 @snn_kw mutable struct HH{VFT = Vector{Float32},VBT = Vector{Bool}} <: AbstractPopulation
     name::String = "HH"
     id::String = randstring(12)
-    param::HHParameter = HHParameter()
+    param::HHParameter = HHParameter(FT = eltype(VFT))
     N::Int32 = 100
     v::VFT = param.El .+ 5(randn(N) .- 1)
     m::VFT = zeros(N)
@@ -111,6 +111,8 @@ test `v > -20mV`, true for every step above -20 mV, i.e. several flags per actio
 # Fields
 - `name::String = "HH"`, `id::String = randstring(12)`, `param::HHParameter = HHParameter()`.
 - `N::Int32 = 100`.
+- `VFT = Vector{Float32}`: type of the state vectors; `VFT = Vector{Float64}` gives a `Float64` population (the parameters
+  follow; see `float_type`).
 - `v = El .+ 5(randn(N) .- 1)`: membrane potential (mV).
 - `m = zeros(N)`, `n = zeros(N)`, `h = ones(N)`: gating variables.
 - `ge = (1.5randn(N) .+ 4) .* 10nS`, `gi = (12randn(N) .+ 20) .* 10nS`: synaptic conductances
@@ -138,30 +140,31 @@ SNN.sim!([E]; duration = 50ms, dt = 0.01ms)
 """
 HH
 
-function integrate!(p::HH, param::HHParameter, dt::Float32)
+function integrate!(p::HH, param::HHParameter, dt::AbstractFloat)
     @unpack N, v, m, n, h, ge, gi, fire, I = p
     @unpack Cm, gl, El, Ek, En, gn, gk, Vt, τe, τi, Ee, Ei = param
     _check_state_lengths(N, v, m, n, h, ge, gi, fire, I)
+    T = eltype(v)    # literals in the precision of the state (`T(0.32) === 0.32f0` in Float32)
     # `@inline exp`: the exponentials are inlined so that the loop vectorises (same bits as the `exp` call)
     @inbounds @simd for i = 1:N
         v_old = v[i]
         m[i] +=
             dt * (
-                0.32f0 * (13.0f0 - v[i] + Vt) /
-                (@inline(exp((13.0f0 - v[i] + Vt) / 4.0f0)) - 1.0f0) * (1.0f0 - m[i]) -
-                0.28f0 * (v[i] - Vt - 40.0f0) /
-                (@inline(exp((v[i] - Vt - 40.0f0) / 5.0f0)) - 1.0f0) * m[i]
+                T(0.32) * (T(13.0) - v[i] + Vt) /
+                (@inline(exp((T(13.0) - v[i] + Vt) / T(4.0))) - T(1.0)) * (T(1.0) - m[i]) -
+                T(0.28) * (v[i] - Vt - T(40.0)) /
+                (@inline(exp((v[i] - Vt - T(40.0)) / T(5.0))) - T(1.0)) * m[i]
             )
         n[i] +=
             dt * (
-                0.032f0 * (15.0f0 - v[i] + Vt) /
-                (@inline(exp((15.0f0 - v[i] + Vt) / 5.0f0)) - 1.0f0) * (1.0f0 - n[i]) -
-                0.5f0 * @inline(exp((10.0f0 - v[i] + Vt) / 40.0f0)) * n[i]
+                T(0.032) * (T(15.0) - v[i] + Vt) /
+                (@inline(exp((T(15.0) - v[i] + Vt) / T(5.0))) - T(1.0)) * (T(1.0) - n[i]) -
+                T(0.5) * @inline(exp((T(10.0) - v[i] + Vt) / T(40.0))) * n[i]
             )
         h[i] +=
             dt * (
-                0.128f0 * @inline(exp((17.0f0 - v[i] + Vt) / 18.0f0)) * (1.0f0 - h[i]) -
-                4.0f0 / (1.0f0 + @inline(exp((40.0f0 - v[i] + Vt) / 5.0f0))) * h[i]
+                T(0.128) * @inline(exp((T(17.0) - v[i] + Vt) / T(18.0))) * (T(1.0) - h[i]) -
+                T(4.0) / (T(1.0) + @inline(exp((T(40.0) - v[i] + Vt) / T(5.0)))) * h[i]
             )
         v[i] +=
             dt / Cm * (
@@ -175,8 +178,14 @@ function integrate!(p::HH, param::HHParameter, dt::Float32)
         ge[i] += dt * -ge[i] / τe
         gi[i] += dt * -gi[i] / τi
         # spike = upward crossing of -20 mV (one flag per action potential)
-        fire[i] = (v_old <= -20.0f0) & (v[i] > -20.0f0)
+        fire[i] = (v_old <= -T(20.0)) & (v[i] > -T(20.0))
     end
+end
+
+# one precision per population (see `IF`)
+function snn_kw_finalize(::Type{T}, f::NamedTuple) where {T<:HH}
+    _check_precision("HH", _state_float(T, :v), "param" => f.param)
+    return f
 end
 
 export HH, HHParameter

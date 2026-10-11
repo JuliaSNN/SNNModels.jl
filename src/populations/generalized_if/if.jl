@@ -261,8 +261,8 @@ end
 _chunk_population(::IF) = true
 
 # one precision per population: the parameter objects must have the type of the state arrays (`float_type`)
-function snn_kw_finalize(::Type{<:IF}, f::NamedTuple)
-    _check_precision("IF", eltype(f.v), "param" => f.param, "synapse" => f.synapse, "spike" => f.spike)
+function snn_kw_finalize(::Type{T}, f::NamedTuple) where {T<:IF}
+    _check_precision("IF", _state_float(T, :v), "param" => f.param, "synapse" => f.synapse, "spike" => f.spike)
     return f
 end
 

@@ -72,9 +72,9 @@ one forward-Euler step of ``v``, threshold test, reset to `Vr` and `tabs = round
 - `id::String = randstring(12)`, `name::String = "ExtendedIF"`.
 - `param::ExtendedIFParameter = ExtendedIFParameter()`.
 - `N::Int32 = 100`.
-- `v`: membrane potential (mV), uniform in `[Vr, Vt]`.
+- `v::VFT`: membrane potential (mV), uniform in `[Vr, Vt]`. `VFT = Vector{Float32}` by default; `VFT = Vector{Float64}` gives a `Float64` population (the parameters follow; see `float_type`).
 - `g_Exc`, `g_PV`, `g_SST`: conductances (nS), zeros.
-- `tabs`: refractory counters (steps, stored as `Float32`), zeros.
+- `tabs`: refractory counters (steps, stored in the float type of the state), zeros.
 - `w`: unused by the dynamics, zeros.
 - `fire::Vector{Bool}`; `I`: external current (pA); `records::Dict`.
 - `Δv`, `Δv_temp`: unused buffers.
@@ -98,7 +98,7 @@ ExtendedIF
 } <: AbstractGeneralizedIF
     id::String = randstring(12)
     name::String = "ExtendedIF"
-    param::IFT = ExtendedIFParameter()
+    param::IFT = ExtendedIFParameter(FT = eltype(VFT))
     N::Int32 = 100
     v::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
     g_Exc::VFT = zeros(N)
@@ -109,18 +109,18 @@ ExtendedIF
     fire::VBT = zeros(Bool, N)
     I::VFT = zeros(N)
     records::Dict = Dict()
-    Δv::VFT = zeros(Float32, N)
-    Δv_temp::VFT = zeros(Float32, N)
+    Δv::VFT = zeros(eltype(VFT), N)
+    Δv_temp::VFT = zeros(eltype(VFT), N)
 end
 
-function integrate!(p::ExtendedIF, param::ExtendedIFParameter, dt::Float32)
+function integrate!(p::ExtendedIF, param::ExtendedIFParameter, dt::AbstractFloat)
     update_synapses!(p, param, dt)
     update_neuron!(p, param, dt)
 end
 
 # Branchless and vectorised (`@inbounds @simd`), bit-identical to the branching loop of SNNModels <= 1.9: the membrane update is
 # evaluated for every neuron and discarded (`ifelse`) for the refractory ones; `round(Int, τabs / dt)` is hoisted.
-function update_neuron!(p::ExtendedIF, param::ExtendedIFParameter, dt::Float32)
+function update_neuron!(p::ExtendedIF, param::ExtendedIFParameter, dt::AbstractFloat)
     @unpack N, v, g_Exc, g_PV, g_SST, w, I, tabs, fire = p
     @unpack El, E_i, E_e, gl, α, Vt, Vr, τabs, Cm = param
     _check_state_lengths(N, v, g_Exc, g_PV, g_SST, I, tabs, fire)
@@ -150,7 +150,7 @@ function update_neuron!(p::ExtendedIF, param::ExtendedIFParameter, dt::Float32)
     end
 end
 
-function update_synapses!(p::ExtendedIF, param::ExtendedIFParameter, dt::Float32)
+function update_synapses!(p::ExtendedIF, param::ExtendedIFParameter, dt::AbstractFloat)
     @unpack N, g_Exc, g_PV, g_SST = p
     @unpack τe, τi = param
     _check_state_lengths(N, g_Exc, g_PV, g_SST)
@@ -174,6 +174,12 @@ function synaptic_target(
     v_post = getfield(post, :v)
     push!(targets, :sym => sym)
     return g, v_post
+end
+
+# one precision per population (see `IF`)
+function snn_kw_finalize(::Type{T}, f::NamedTuple) where {T<:ExtendedIF}
+    _check_precision("ExtendedIF", _state_float(T, :v), "param" => f.param)
+    return f
 end
 
 export ExtendedIF, ExtendedIFParameter, update_neuron!, update_synapses!

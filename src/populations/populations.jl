@@ -35,6 +35,19 @@ const _FLOAT64_POPULATIONS = "Identity, IF, AdEx, ExtendedIF, HH, IZ, MorrisLeca
 # One precision per population (used by the `snn_kw_finalize` of every population that has a Float64 model): each parameter
 # object of the population (`what => obj` pairs) must have the floating-point type `FT` of its state arrays (`float_type`).
 # Objects without a floating-point type parameter (`DeltaSynapse()`, `RateParameter()`) are precision-agnostic and pass.
+# Copy of a parametric parameter struct with its floating-point fields and type parameters converted to `T` (the methods of
+# `convert_precision` for synapse models and spike parameters); `x` itself when it is already `T` or has no float type parameter.
+function _convert_float_struct(x::S, ::Type{T}) where {S,T<:AbstractFloat}
+    ps = S.parameters
+    (isempty(ps) || !any(_is_float_param, ps) || _float_type(S) === T) && return x
+    newps = map(p -> _convert_param(p, T), ps)
+    vals = map(f -> _convert_value(getfield(x, f), T), fieldnames(S))
+    return Base.typename(S).wrapper{newps...}(vals...)
+end
+
+# float type of the state of a population type `T` (with its type parameters, as `snn_kw_finalize` receives it): the element type of the
+# field `field` (`:v` for most models, a field of type `VFT`), Float32 when the type is not parameterised
+_state_float(::Type{T}, field::Symbol) where {T} = (V = fieldtype(T, field); V isa DataType && V <: AbstractArray ? eltype(V) : Float32)
 function _check_precision(name, FT, objs::Pair...)
     for (what, obj) in objs
         T = _float_type(typeof(obj))
