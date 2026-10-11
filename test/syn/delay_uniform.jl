@@ -1,6 +1,9 @@
-# Constant delays (the delay is stored once for all synapses, `_dconst(param) >= 0`): `forward!` delivers through one ring-buffer
-# column per step. It must be bit-identical to the general per-synapse path (the same delay stored per synapse, `_dconst == -1`): same
-# `g`, buffer, ring position, weights, STP state and post membrane potential after every step.
+# Constant delays (the delay is stored once for all synapses, `_dconst(param) >= 0`).
+# - With plasticity (LTP or STP): `forward!` delivers through one ring-buffer column per step. It must be bit-identical to the general
+#   per-synapse path (the same delay stored per synapse, `_dconst == -1`): same `g`, buffer, ring position, weights, STP state and post
+#   membrane potential after every step.
+# - Without plasticity (NoLTP, NoSTP): the spike list is delayed instead (ring of the last d + 1 lists, scattered into `g` on arrival,
+#   no buffer). Same arrival step; the increments of one step are added to `g` one by one (rounding only) and `W` is read at arrival.
 using Test, Random, SNNModels
 using SNNModels: SparseArrays
 const _DU = SNNModels
@@ -112,8 +115,7 @@ end
 @testset "constant delay bit-identical to the general path: $FT, $dname, dt $dt, $pname" for FT in (Float32, Float64),
         (dname, delay) in (("0", _DUD.Dirac(0.0)), ("dt", nothing), ("0.8", _DUD.Dirac(0.8))),
         dt in (0.1, 0.125),
-        (pname, ltp, stp) in (("fixed", _DU.NoLTP(), _DU.NoSTP()),
-                              ("STDP", _DU.STDPGerstner(A_pre = 5e-3, A_post = -5e-3), _DU.NoSTP()),
+        (pname, ltp, stp) in (("STDP", _DU.STDPGerstner(A_pre = 5e-3, A_post = -5e-3), _DU.NoSTP()),
                               ("STP", _DU.NoLTP(), _DU.MarkramSTPParameterEvent()))
     d = delay === nothing ? _DUD.Dirac(dt) : delay
     nsp, sA, _ = _du_compare(FT, d, dt, ltp, stp)
@@ -126,4 +128,85 @@ end
     nsp, sA, _ = _du_compare(FT, _DUD.Dirac(0.8), 0.1, _DU.STDPGerstner(A_pre = 5e-3, A_post = -5e-3), _DU.NoSTP(); dt2 = 0.125)
     @test nsp > 0
     @test _DU._dconst(sA.param) == 7
+end
+
+# ---- constant delay without plasticity: delayed spike list ----
+@testset "spike-list delay: selection" begin
+    pre, post = Identity(N = 3), Identity(N = 4)
+    mk(d; kw...) = SpikingSynapse(pre, post, :g; conn = fill(1.0f0, 4, 3), delay_dist = d, kw...)
+    for (c, used) in ((mk(_DUD.Dirac(0.8)), true), (mk(_DUD.Dirac(0.0)), true), (mk(_DUD.Uniform(0.2, 3.0)), false),
+                      (mk(_DUD.Dirac(0.8); LTPParam = _DU.STDPGerstner()), false),
+                      (mk(_DUD.Dirac(0.8); STPParam = _DU.MarkramSTPParameterEvent()), false))
+        _DU.forward!(c, c.param, 0.1f0, Time())
+        @test _DU._use_spike_ring(c) == used
+        @test length(c.param.spike_ring) == (used ? _DU._dconst(c.param) + 1 : 0)
+    end
+    @test mk(_DUD.Dirac(0.8)).param.spike_ring !== mk(_DUD.Dirac(0.8)).param.spike_ring   # not a shared default
+end
+
+# feed-forward replay: the same spike trains through the spike-list path and the general path; g after every step
+function _du_ff(FT, d, dt; steps = 1500, rate = 0.08, wchange = false)
+    Random.seed!(5)
+    pre = Identity(N = 80)
+    postA = Identity(N = 50, VFT = Vector{FT}); postB = Identity(N = 50, VFT = Vector{FT})
+    conn = SparseArrays.sprand(FT, 50, 80, 0.3)
+    a = SpikingSynapse(pre, postA, :g; conn = copy(conn), delay_dist = _DUD.Dirac(d))
+    b = SpikingSynapse(pre, postB, :g; conn = copy(conn), delay_dist = _DUD.Dirac(d))
+    _du_general!(b)                                                 # b: general path from the first step
+    rng = MersenneTwister(9); T = Time{FT}()
+    maxrel = 0.0; same_step = true; nmulti = 0; exact_single = true
+    for n in 1:steps
+        pre.fire .= rand(rng, 80) .< rate
+        update_time!(T, FT(dt))
+        _DU.forward!(a, a.param, FT(dt), T)
+        _DU.forward!(b, b.param, FT(dt), T)
+        same_step &= (a.g .!= 0) == (b.g .!= 0)
+        for i in eachindex(a.g)
+            Δ = abs(Float64(a.g[i]) - Float64(b.g[i]))
+            maxrel = max(maxrel, Δ / max(abs(Float64(b.g[i])), eps(FT)))
+        end
+        a.g .= 0; b.g .= 0
+        if wchange && n == steps ÷ 2
+            a.W .*= 2; b.W .*= 2
+        end
+    end
+    return a, b, maxrel, same_step
+end
+
+@testset "spike-list delay against the general path, $FT, delay $d, dt $dt" for FT in (Float32, Float64), d in (0.0, 0.1, 0.8), dt in (0.1, 0.125)
+    a, b, maxrel, same_step = _du_ff(FT, d, dt)
+    @test _DU._use_spike_ring(a) && !_DU._use_spike_ring(b)
+    @test same_step                                   # every increment arrives in the same step as on the general path
+    @test maxrel <= 8 * eps(FT)                       # only the rounding of the per-step sum differs
+end
+
+@testset "spike-list delay: one increment per target is exact; W read at arrival" begin
+    pre, post = Identity(N = 2), Identity(N = 3)
+    c = SpikingSynapse(pre, post, :g; conn = Float32[1 0; 0 2; 3 0], delay_dist = _DUD.Dirac(0.5))
+    T = Time(); got = Vector{Float32}[]
+    for n in 1:12
+        pre.fire .= (n == 2, n == 2)
+        n == 4 && (c.W .*= 10)                       # weight changed between emission (step 2) and arrival (step 7)
+        update_time!(T, 0.1f0)
+        _DU.forward!(c, c.param, 0.1f0, T)
+        any(!iszero, c.g) && (push!(got, copy(c.g)); c.g .= 0)
+    end
+    @test got == [Float32[10, 20, 30]]
+    @test _DU._dconst(c.param) == 5
+end
+
+_du_alloc(c, T) = @allocated _DU.forward!(c, c.param, 0.1f0, T)
+@testset "spike-list delay: no allocation after warm-up; dt change resizes the ring" begin
+    Random.seed!(3)
+    pre, post = Identity(N = 200), Identity(N = 100)
+    c = SpikingSynapse(pre, post, :g; conn = (p = 0.2, μ = 1.0), delay_dist = _DUD.Dirac(0.8))
+    T = Time()
+    step!() = (pre.fire .= rand(200) .< 0.5; _DU.forward!(c, c.param, 0.1f0, T))
+    for _ in 1:30; step!(); end
+    pre.fire .= rand(200) .< 0.5
+    @test _du_alloc(c, T) == 0
+    @test length(c.param.spike_ring) == 9
+    _DU.forward!(c, c.param, 0.125f0, T)
+    @test _DU._dconst(c.param) == 7 && length(c.param.spike_ring) == 8
+    @test (@inferred _DU.forward!(c, c.param, 0.125f0, T)) isa Int
 end

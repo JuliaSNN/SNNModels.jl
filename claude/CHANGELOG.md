@@ -5,7 +5,7 @@ Faster event-driven STDP and delayed transmission: fewer scans of the spike flag
 plasticity calls, no per-step passes over the neurons when a `SpikeTimeStimulus` drives the network.
 Weights of the event-driven STDP rules are no longer bit-identical to 1.9.1 (lazy trace decay, differences up
 to about 1e-5 relative, see "Behaviour notes"); the other models checked are, except delayed transmission at a
-`dt` that is not exactly representable in Float32. Breaking changes in the types (listed with their migration below);
+`dt` that is not exactly representable in Float32 and constant delays without plasticity (rounding of the per-step sum, see "Behaviour notes"). Breaking changes in the types (listed with their migration below);
 saved models from 1.9.1 or earlier cannot be used (`load_model` throws an `ArgumentError` at load time, see "Saved models and parameters"). `vSTDPParameter` is now the event-driven voltage-based rule (the dense one
 is `vSTDPDenseParameter`) and its weights are read through `plasticity_value(syn, :W)`; the library runs in Float64 when the
 populations are built with `Float64` state (see "Precision from the population type").
@@ -156,6 +156,21 @@ populations are built with `Float64` state (see "Precision from the population t
     `test/syn/delay_uniform.jl` (every step against the general path, Float32 and Float64, delays 0, dt, 0.8 at dt 0.1 and 0.125,
     STDP and STP, a change of dt) and `threading_synapses.jl` (1, 4, 8 threads); spike rasters and final `v`, `g`, buffers SHA1-identical
     to the previous commit for T8 (N = 2000, 500 Hz), T4 (delay 0.8), T7 (delay 5 ms) and the Float64 DoubleExp network.
+  - Constant delays without plasticity (`NoLTP` and `NoSTP`, a delay of `d` steps stored once) delay the spike list instead of the
+    increments (`param.spike_ring`: the lists of the last `d + 1` steps, capacity kept, 0 B per step after warm-up): the list emitted `d`
+    steps ago is scattered straight into `g` (one touch, `@simd ivdep`), with no buffer and no arrival pass over the targets. Adopted by
+    the rule of the plan: after the previous item the arrival pass was still 55 % of `forward!` at 1 Hz (1.36 of 2.49 us per step at
+    N = 10000). Replay at N = 10000: 1 Hz `forward!` 2.49 -> 1.07 us per step (what is left is the scan of the 1e4 spike flags, 1.0 us),
+    500 Hz transmission 1.365 -> 1.301 ns per event. Whole networks, s per simulated second, base -> constant column -> spike list:
+    T8 N = 10000 500 Hz 1.854 -> 1.232 -> 1.084 (0.86x Auryn, 1.266-1.308 the same day), 50 Hz 0.429 -> 0.308 -> 0.276, 1 Hz 0.214 ->
+    0.192 -> 0.158 (Auryn 1.29 / 0.305 / 0.178 in the campaign); N = 2000 500 Hz 0.261 -> 0.187 -> 0.171 (0.84x Auryn); T4 (k100,
+    N = 10000, delay 0.8 on the four recurrent connections) 0.159 -> 0.156 -> 0.125; T7 delay 1 ms 0.174 -> 0.151 -> 0.126, 10 ms 0.185 ->
+    0.169 -> 0.129 (the recurrent connections at a few Hz were dominated by their arrival passes). Not bit-identical: the increments of
+    one step reach `g[i]` one by one (`g + w1 + w2` instead of `g + (w1 + w2)`) and `W` is read at arrival (see Behaviour notes).
+    Acceptance on T8 N = 2000 at 500 Hz against the buffer path from the same state and the same Poisson draws: over 100 ms max |dv| =
+    1.5e-5 mV (3.3e-7 of max |v - El|; first difference at step 353, no spike differs), max |dg| 1.2e-4 (1e-7 of max |g|); over 2 s
+    rates 6.587 vs 6.638 Hz (E, 0.8 %) and 6.506 vs 6.513 Hz (I), CV-ISI 0.951 vs 0.944 and 0.958 vs 0.971. Same spike counts as before in
+    the four hash configurations above (rasters differ). Synapses with plasticity keep the bit-identical column path of the previous item.
   - Trace decay: the factors `exp(-dt/τ)` are cached in the rule variables (`decay` field of `STDPVariables`,
     `STDPTripletVariables`) and recomputed only if `dt` or a `τ` changes. `_rescale!` (was `_decay!`) sets values
     below `floatmin(Float32)` to zero: the trace of a silent neuron used to run through the subnormal range at
@@ -313,6 +328,12 @@ Each item gives the migration.
 - Tests: `test/syn/spike_index.jl`, `test/syn/spike_handoff.jl`, `test/syn/lazy_traces.jl`, `test/syn/lazy_traces_euler.jl`, `test/stim/poisson_sparse.jl`.
 
 ### Behaviour notes
+- Constant delays without plasticity (`NoLTP`, `NoSTP`, a delay stored once for all synapses, e.g. `Dirac`) deliver the spike list
+  emitted `d` steps ago (see Performance): the weight `W` is read at arrival, not at emission, so a weight changed in between by
+  the user or by metaplasticity (`SynapseNormalization`, `AggregateScaling`) is delivered with its new value; the increments of one
+  step are added to `g` one at a time (rounding differences of a few ulp, chaotic trajectories diverge after some hundred steps,
+  statistics unchanged). Delays that differ between synapses, and synapses with LTP or STP, keep the buffer (increment at emission).
+  `with_plasticity` on such a connection with spikes in flight drops them (the new rule uses the buffer).
 - Weights of `STDPGerstner`, `STDPConfavreux2025`, `STDPWeightDependent`, `STDPTriplet` differ from 1.9.1 (lazy decay,
   see below). Bit-identical to 1.9.1 in the seeded audit of the dev tree before the lazy decay became the only path
   (Poisson and `SpikeTimeStimulus` inputs, `Identity` relay and two-layer networks, 4 s to 2 s of `train!`):

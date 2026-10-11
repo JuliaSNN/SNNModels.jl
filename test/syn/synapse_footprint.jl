@@ -210,8 +210,10 @@ end
         @test sum(length, a.P[1] |> spiketimes) > 0
         @test _fp_state(a) == _fp_state(b)
     end
-    # (b) a uniform delay stored once vs stored per synapse
-    a = _fp_net(delay = Dirac(0.8f0)); b = _fp_net(delay = Dirac(0.8f0))
+    # (b) a uniform delay stored once vs stored per synapse, on the buffer path: without plasticity a delay stored once delivers
+    # the delayed spike list instead (not bit-identical, see test/syn/delay_uniform.jl); a rule that `sim!` never applies keeps the buffer
+    _buffer_path!(net) = (net.C .= [with_plasticity(c; LTP = STDPGerstner(A_pre = 0.0, A_post = 0.0)) for c in net.C]; net)
+    a = _buffer_path!(_fp_net(delay = Dirac(0.8f0))); b = _buffer_path!(_fp_net(delay = Dirac(0.8f0)))
     for c in b.C
         c.param.delaytime = fill(0.8f0, length(c.W))
     end

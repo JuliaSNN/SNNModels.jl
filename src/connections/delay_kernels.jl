@@ -50,3 +50,57 @@ end
     end
     return nothing
 end
+
+# Constant delay without plasticity (NoLTP, NoSTP): the spike list is delayed instead of the increments. `param.spike_ring` keeps the
+# lists of the last `d + 1` steps (`d = _dconst(param)`) (slot `pos` = this step, as the buffer columns; capacity kept, no allocation after warm-up) and
+# the list emitted `d` steps ago is scattered into `g` directly: one touch of the target array, no arrival pass over the `Npost`
+# targets. Not bit-identical to the buffer: the increments of one step reach `g[i]` one by one (`g + w1 + w2`, not `g + (w1 + w2)`)
+# and `W` is read at arrival (a weight changed in between by the user or by metaplasticity is delivered with its new value).
+@inline _use_spike_ring(c::SpikingSynapse) = c.LTPParam isa NoLTP && c.STPParam isa NoSTP && _dconst(c.param) >= 0
+
+function _forward_spike_ring!(c::SpikingSynapse, param::SpikingSynapseDelayParameter, Npost::Int)
+    @unpack colptr, I, W, g = c
+    ring = param.spike_ring
+    nslots = _dconst(param) + 1
+    if length(ring) != nslots          # first call or new delay in steps: empty ring (pending spikes are dropped, as the buffer)
+        resize!(ring, nslots)
+        for k in eachindex(ring)
+            ring[k] = Int32[]
+        end
+        param.pos[1] = 0
+    end
+    pos = param.pos[1]
+    spikes = presynaptic_spikes(c)
+    cur = ring[pos+1]
+    resize!(cur, length(spikes))
+    copyto!(cur, spikes)
+    nxt = pos + 1 == nslots ? 0 : pos + 1
+    arr = ring[nxt+1]                  # emitted d steps ago ((pos - d) mod nslots); `cur` itself when d == 0
+    ptr = _syn_chunk_ptr(c.chunkptr, Npost, colptr, I, arr)
+    _ring_deliver!(g, W, _efficacy_or_nothing(c), I, colptr, ptr, arr, Npost)   # function barrier on the efficacy
+    return param.pos[1] = nxt
+end
+
+function _ring_deliver!(g, W, ρ, I, colptr, ptr, arr, Npost)
+    if ptr === nothing
+        @inbounds for j ∈ arr
+            @simd ivdep for s ∈ colptr[j]:(colptr[j+1]-1)
+                g[I[s]] += _wρ(W, ρ, s)
+            end
+        end
+    else
+        foreach_chunk_c(Npost) do ch, rng
+            _ring_chunk!(g, W, ρ, I, ptr, ch, arr)
+        end
+    end
+    return nothing
+end
+
+@inline function _ring_chunk!(g, W, ρ, I, ptr, ch, spikes)
+    @inbounds for j ∈ spikes
+        @simd ivdep for s ∈ ptr[ch, j]:(ptr[ch+1, j]-1)
+            g[I[s]] += _wρ(W, ρ, s)
+        end
+    end
+    return nothing
+end

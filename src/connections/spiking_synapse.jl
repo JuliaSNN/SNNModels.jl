@@ -26,15 +26,18 @@ A delay stored once (common to all synapses) is delivered through one ring colum
   (evaluated at emission time) per target and arrival step, a ring indexed from `pos`.
 - `dt::Vector{FT}`: the step `delaysteps` was computed for (`NaN` before the first `forward!`).
 - `pos::Vector{Int}`: ring slot (0-based) of the current step.
+- `spike_ring::Vector{Vector{Int32}}`: without plasticity and with a delay of `d` steps stored once, the spike lists of the last `d + 1` steps (delayed instead of the increments).
 """
 SpikingSynapseDelayParameter
 
+const SpikeRing = Vector{Vector{Int32}}   # spike lists of the delayed constant-delay path (delay_kernels.jl)
 @snn_kw mutable struct SpikingSynapseDelayParameter{VFT = Vector{Float32}, VIT = Vector{Int32}, MFT = Matrix{Float32}, VPT = Vector{Int}} <: AbstractSpikingSynapseParameter
     delaytime::VFT
     delaysteps::VIT = Int32[]
     buffer::MFT = zeros(eltype(delaytime), 0, 1)
     dt::VFT = [eltype(delaytime)(NaN)]
     pos::VPT = [0]
+    spike_ring::SpikeRing = Vector{Int32}[]
 end
 
 # Round the delays to steps of `dt` (up) and size the ring buffer; a no-op while `dt` and the delays are unchanged.
@@ -491,6 +494,7 @@ function forward!(c::SpikingSynapse, param::SpikingSynapseDelayParameter, dt::Ab
     @unpack colptr, I, W, g = c
     Npost = length(c.fireI)
     _delay_steps!(param, dt, Npost)
+    _use_spike_ring(c) && return _forward_spike_ring!(c, param, Npost)   # constant delay, no plasticity (delay_kernels.jl)
     @unpack delaysteps, buffer = param
     nslots = size(buffer, 2)
     pos = param.pos[1]
