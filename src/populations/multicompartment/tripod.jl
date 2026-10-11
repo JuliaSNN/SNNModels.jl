@@ -80,7 +80,7 @@ between spikes.
   (resting value of the threshold ``\theta``), `Vr`, `a`, `b`, `τw`.
 - `soma_syn::SYNS = TripodSomaSynapse`, `dend_syn::SYND = TripodDendSynapse`: synapse models.
 - `spike::PST = PostSpike()`: `AP_membrane`, `up`, `τabs`, `At`, `τA`.
-- `d1::VDT`, `d2::VDT`: `Dendrite`s built with `create_dendrite(N, param.ds[k]; El = adex.El, FT = eltype(VFT))`.
+- `d1::VDT`, `d2::VDT`: `Dendrite`s built with `create_dendrite(N, param.ds[k]; El = adex.El, FT = eltype(VFT), physiology = param.physiology)`.
 - `Vspike::Float32 = -10mV`: spike detection threshold on the predicted somatic potential (`Float32` in both precisions;
   compared after promotion).
 
@@ -91,7 +91,7 @@ between spikes.
   `float_type`); `param` (morphology) and `Vspike` stay `Float32`. Parameter values of a `Float64` population: the defaults
   are the decimal values (receptors `τr = 0.26`, `g0 = 0.73`, NMDA `b = 3.36`, `adex.τm = 281/40`), the derived receptor
   fields are computed in `Float64`, and the dendritic geometry is computed in `Float64` from the decimal lengths, diameter
-  and cable constants (`param.ds` read as decimals, `200um` as `0.02`; see `create_dendrite`). Not decimal: the threshold
+  and cable constants (`param.ds`, `param.physiology` read as decimals, `200um` as `0.02`; see `create_dendrite`). Not decimal: the threshold
   `Vspike` (a `Float32` field, `-10mV` is exact) and a user-given `Float32` object converted with `convert_precision` (its
   values keep their `Float32` rounding, unless it is one of the predefined receptors).
 - `w_s::VFT`: somatic adaptation current (pA), zeros.
@@ -152,8 +152,8 @@ Tripod
     dend_syn::SYND = convert_precision(TripodDendSynapse, eltype(VFT))
     spike::PST = PostSpike(FT = eltype(VFT))
     Vspike::Float32 = -10mV
-    d1::VDT = create_dendrite(N, param.ds[1]; El = adex.El, FT = eltype(VFT))
-    d2::VDT = create_dendrite(N, param.ds[2]; El = adex.El, FT = eltype(VFT))
+    d1::VDT = create_dendrite(N, param.ds[1]; El = adex.El, FT = eltype(VFT), physiology = param.physiology)
+    d2::VDT = create_dendrite(N, param.ds[2]; El = adex.El, FT = eltype(VFT), physiology = param.physiology)
 
     # Membrane potential and adaptation
     v_s::VFT = rand_value(N, adex.Vt, adex.Vr)
