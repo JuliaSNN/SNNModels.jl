@@ -1,5 +1,21 @@
 # SNNModels changelog
 
+## 2.0.1
+
+Bug-fix release; STTC values change.
+
+- `STTC` (#86): both trains are restricted to `[t0, t1]` before computing P and T, and T is the length of the union of the
+  `[s-Δt, s+Δt]` windows clipped to `[t0, t1]` divided by `t1 - t0` (Cutts & Eglen 2014), without the `2Δt` extension.
+  With 800 independent Poisson trains recorded for 6 s and `interval = 3s:5s`, `Δt = 50ms`, 2.0.0 gave |STTC| > 1 for 1-2 %
+  of the pairs at 25 Hz and about 25 % at 50 Hz, with -Inf and NaN matrix means; now all values are finite and in [-1, 1].
+  Independent 50 Hz trains over 10 s score 0.18 instead of 0.34; at 25 Hz over 60 s the mean is 0.002. A term with
+  `P T = 1` is 1 (Elephant convention), so a train against itself gives 1 instead of NaN; trains without spikes in the
+  interval give 0. STTC saturates when `Δt` times the rate is about 1 or more.
+- `monitor!`: `monitor_rate` carries units like the other rates (`monitor_rate = 50Hz` sizes the spike buffer for 50 Hz;
+  in 2.0.0 it sized it for 0.05 Hz). A plain number (above `1kHz` in library units) is an `ArgumentError`.
+
+No other change.
+
 ## 2.0.0
 
 Major release with breaking changes in the types of synapses, populations and stimuli, in random streams and in how
