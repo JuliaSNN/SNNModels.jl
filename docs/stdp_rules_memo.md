@@ -1,5 +1,12 @@
 # STDP Rules — Inconsistencies Memo
 
+!!! note "Superseded in 2.0.0"
+    Parts of this memo describe 1.9: in 2.0.0 the traces of Scheme A and of the Euler rules (except
+    `iSTDPPotential`) are stored lazily as value times scale, `vSTDPParameter` is event-driven
+    (`vSTDPDenseParameter` is the 1.9 rule), the rules no longer use `Threads.@threads`, and the
+    event-driven STDP, iSTDP and STP kernels run threaded with `neurons_per_thread`. The current
+    description is the header of `src/connections/sparse_plasticity/STDP_kernels.jl`.
+
 Two incompatible trace-update schemes coexist in the codebase. This memo documents what each rule does and where the schemes diverge.
 
 ---
