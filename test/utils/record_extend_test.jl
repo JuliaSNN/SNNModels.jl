@@ -50,3 +50,11 @@ end
     @test_logs SNNModels._extend_fire!(fire, meta, 10)      # latched: no second warning
     @test length(fire[:times_buf]) == 18                    # max(8 + 10, 16)
 end
+
+@testset "monitor_rate carries units" begin
+    pop = IF(N = 50)
+    monitor!(pop, [:fire]; monitor_rate = 50Hz)
+    SNNModels._allocate_records!(AbstractPopulation[pop], AbstractConnection[EmptySynapse()], AbstractStimulus[EmptyStimulus()], 0.1f0, 1000f0)
+    @test length(pop.records[:fire][:times_buf]) == 50 * 50   # 50 Hz x 50 neurons x 1 s
+    @test_throws ArgumentError monitor!(IF(N = 5), [:fire]; monitor_rate = 50)
+end

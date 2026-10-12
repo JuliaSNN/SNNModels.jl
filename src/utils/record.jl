@@ -698,6 +698,13 @@ function _classify_record(sample, has_indices::Bool, n_indices::Int = 0)
     end
 end
 
+# monitor_rate in Hz. Rates carry units (1Hz = 0.001 per ms): a value above 1kHz is a plain number of Hz.
+function _rate_Hz(monitor_rate)
+    monitor_rate > kHz && throw(ArgumentError(
+        "monitor_rate = $monitor_rate is $(monitor_rate / Hz) Hz: rates carry units, write e.g. monitor_rate = $(monitor_rate)Hz"))
+    return Float32(monitor_rate / Hz)
+end
+
 """
     monitor!(obj, keys; sr = 1000Hz, variables = :none, monitor_time = nothing, monitor_rate = nothing, verbose = false)
     monitor!(objs::Union{Array,NamedTuple}, keys; sr = 200Hz, kwargs...)
@@ -726,8 +733,8 @@ here.
 - `monitor_time`: capacity hint in ms used to size the buffers (default: the duration of the
   `sim!` call, at least 1 s). Recording beyond the capacity is still correct: the buffer is
   doubled with a one-time warning.
-- `monitor_rate`: expected maximum firing rate (Hz) used to size the `:fire` buffers
-  (default 20 Hz).
+- `monitor_rate`: expected maximum firing rate, with units (e.g. `50Hz`), used to size the
+  `:fire` buffers (default `20Hz`). A plain number (any value above `1kHz`) is an `ArgumentError`.
 - `verbose = false`: warn about keys already monitored or not found.
 
 # Storage
@@ -796,7 +803,7 @@ function monitor!(
             meta[:allocated][:fire] = 0
             meta[:step_count][:fire] = 0
             meta[:grew][:fire] = false
-            monitor_rate !== nothing && (meta[:monitor_rate][:fire] = Float32(monitor_rate))
+            monitor_rate !== nothing && (meta[:monitor_rate][:fire] = _rate_Hz(monitor_rate))
             @debug "Monitoring :fire in $(obj.name)"
             :fire ∉ obj.records[:data] && push!(obj.records[:data], :fire)
             continue
