@@ -1120,6 +1120,14 @@ Files:
 - tests: `test/syn/population_spike_list.jl` (new, L1-L14) and `test/utils/record_spikeindex_test.jl` (T9).
 
 ### Known limitations
+- The five-argument `sim!(P, C, S, dt, T)` / `train!(P, C, S, dt, T)` (one call per step, as in hand-written loops) costs about
+  12 to 30 ns per call more than in the 1.10-dev builds before the spike lists: a heap `Ref` for `dt` (16 B per call; it keeps
+  the per-component calls allocation-free when the vectors have an abstract element type) and a `try/finally` that closes the
+  spike-list windows after an exception (test L10), plus the function barrier of `_train_step!`. It is a fixed cost per call,
+  independent of the number of synapses: visible only in networks of a few components with steps of 100 to 200 ns (the
+  event-driven STDP timing benchmarks of 2e5 steps: +3 to +4 ms on 20 to 40 ms). `sim!(model, duration)` and
+  `train!(model, duration)` pay the `Ref` and the `finally` once per run. Measured by
+  `papers/JuliaSNN_publication/validation/profilation_v1.10/perf/final_v2/out/step_ablation_*.txt`.
 - A record closed by a switch (rule variable the new rule does not have) is not reopened by a later switch; re-monitoring the
   same key needs `clear_records!`/`clear_monitor!` first. `records` is shared, so the source synapse stops sampling it too.
 - `compose` cannot replace a component by name (`compose(; model..., EE = new)` fails with a misleading "Receptors EE already
