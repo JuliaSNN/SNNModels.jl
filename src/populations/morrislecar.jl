@@ -39,7 +39,7 @@ MorrisLecarParameter
     V2::FT = 15mV
     V3::FT = 0mV
     V4::FT = 30mV
-    ϕ::FT = 25Hz
+    ϕ::FT = 0.025   # 25Hz; the decimal literal is the same Float32 value and exact in Float64
     Ee::FT = 0mV
     Ei::FT = -75mV
 end
@@ -49,13 +49,14 @@ end
                        AbstractPopulation
     name::String = "MorrisLecar"
     id::String = randstring(12)
-    param::MorrisLecarParameter = MorrisLecarParameter()
+    param::MorrisLecarParameter = MorrisLecarParameter(FT = eltype(VFT))
     N::Int32 = 100
     v::VFT = -52.14 .+ zeros(N)
     w::VFT = 0.2 .+ zeros(N)
     ge::VFT = zeros(N)
     gi::VFT = zeros(N)
     fire::VBT = zeros(Bool, N)
+    spikes::SpikeIndex = owned_spike_index(N)
     I::VFT = zeros(N)
     records::Dict = Dict()
 end
@@ -67,8 +68,7 @@ Population of Morris-Lecar neurons (instantaneous calcium activation, slow potas
 activation ``w``) with conductance-based exponential synapses `ge`, `gi`.
 Connections target `ge` or `gi`: `SpikingSynapse(pre, post, :ge; conn)` (`:glu` is mapped to
 `:ge`, `:gaba` to `:gi`); a presynaptic spike of weight ``w`` (nS) increments the conductance by
-``w``. (Up to SNNModels 1.8.4 there was no `synaptic_target` method and this raised a
-`MethodError`.)
+``w``.
 
 # Equations
 ```math
@@ -88,18 +88,20 @@ Forward Euler, sequential per neuron: ``v`` is advanced with the intrinsic and e
 currents (old ``w``), then ``w`` with the new ``v``, then the synaptic term
 `dt / Cm * (ge * (Ee - v) + gi * (Ei - v))` is added, then `ge`, `gi` decay.
 A spike is flagged in the step in which ``v`` crosses 20 mV upwards (one flag per action
-potential); there is no reset. (Up to SNNModels 1.8.4 `fire` was the level test `v > 20mV`.)
+potential); there is no reset.
 
 # Fields
 - `name::String = "MorrisLecar"`, `id::String = randstring(12)`,
   `param::MorrisLecarParameter = MorrisLecarParameter()`, `N::Int32 = 100`.
+- `VFT = Vector{Float32}`: type of the state vectors; `Vector{Float64}` gives a `Float64` population (see `float_type`).
 - `v = -52.14 .+ zeros(N)` (mV), `w = 0.2 .+ zeros(N)`.
 - `ge`, `gi`: synaptic conductances (nS), zeros.
 - `fire::Vector{Bool}`; `I`: external current (pA); `records::Dict`.
+- `spikes::SpikeIndex`: neurons that fired in the step (see `spike_index`).
 
 # References
 Morris C., Lecar H. (1981). Voltage oscillations in the barnacle giant muscle fiber.
-Biophys. J. 35:193-213 (linked in the code). Parameters from the NEST ode-toolbox test
+Biophys. J. 35:193-213. Parameters from the NEST ode-toolbox test
 `morris_lecar.json`.
 
 # Example
@@ -114,25 +116,16 @@ SNN.sim!([E]; duration = 200ms, dt = 0.05ms)
 """
 MorrisLecar
 
-function integrate!(p::MorrisLecar, param::MorrisLecarParameter, dt::Float32)
+function integrate!(p::MorrisLecar, param::MorrisLecarParameter, dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # in the precision of the population
     @unpack N, v, w, ge, gi, fire, I = p
-    @unpack Cm, El, EK, ECa, gl, gK, gCa, τe, τi, V1, V2, V3, V4, ϕ = param
+    @unpack Cm, τe, τi = param
     @unpack Ee, Ei = param
-    @inbounds for i = 1:N
+    _check_state_lengths(N, v, w, ge, gi, fire, I)
+    T = eltype(v)
+    # the inlined `tanh` / `cosh` of `MorrisLecar_dv`/`_dw` (same bits as `Base`) let the loop vectorise
+    @inbounds @simd for i = 1:N
         v_old = v[i]
-        m_ss = 0.5*(1+tanh((v[i]-V1)/V2))
-        n_ss = 0.5*(1+tanh((v[i]-V3)/V4))
-        τ = 1 / (ϕ * cosh((v[i]-V3)/(2V4)))
-
-        # v[i] += dt / Cm * (
-        #         I[i] +
-        #         gl  * (El  - v[i]) +
-        #         gCa * (ECa - v[i]) * m_ss +
-        #         gK  * (EK  - v[i]) * w[i] +
-        #         0
-        #     )
-        # w[i]  += dt * (n_ss - w[i])/τ
-
         v[i] += dt / Cm * MorrisLecar_dv(v[i], w[i], I[i], param)
         w[i] += dt * MorrisLecar_dw(v[i], w[i], param)
 
@@ -140,31 +133,30 @@ function integrate!(p::MorrisLecar, param::MorrisLecarParameter, dt::Float32)
         ge[i] += dt * -ge[i] / τe
         gi[i] += dt * -gi[i] / τi
         # spike = upward crossing of 20 mV (one flag per action potential)
-        fire[i] = (v_old <= 20.0f0) & (v[i] > 20.0f0)
+        fire[i] = (v_old <= T(20.0)) & (v[i] > T(20.0))
     end
 end
 
-
 # Intrinsic + external current of the Morris-Lecar membrane equation (pA), i.e. `Cm * dv/dt`
 # without the synaptic term.
-function MorrisLecar_dv(v::Float32, w::Float32, I::Float32, param::MorrisLecarParameter)
+@inline function MorrisLecar_dv(v::T, w::T, I::T, param::MorrisLecarParameter) where {T<:AbstractFloat}
     @unpack Cm, El, EK, ECa, gl, gK, gCa, τe, τi, V1, V2, V3, V4, ϕ = param
-    m_ss = 0.5*(1+tanh((v-V1)/V2))
+    m_ss = 0.5*(1+_tanh_inl((v-V1)/V2))
     return I + gl * (El - v) + gCa * (ECa - v) * m_ss + gK * (EK - v) * w
 end
 
 
 # Right-hand side of the potassium gating equation, `(w_inf(v) - w) / τw(v)` (1/ms).
-function MorrisLecar_dw(v::Float32, w::Float32, param::MorrisLecarParameter)
+@inline function MorrisLecar_dw(v::T, w::T, param::MorrisLecarParameter) where {T<:AbstractFloat}
     @unpack Cm, El, EK, ECa, gl, gK, gCa, τe, τi, V1, V2, V3, V4, ϕ = param
-    n_ss = 0.5*(1+tanh((v-V3)/V4))
-    τ = 1 / (ϕ * cosh((v-V3)/(2V4)))
+    n_ss = 0.5*(1+_tanh_inl((v-V3)/V4))
+    τ = 1 / (ϕ * _cosh_inl((v-V3)/(2V4)))
     return (n_ss - w)/τ
 end
 
 
-# w-nullcline helper: the w-nullcline is `w = w_inf(v)` (returned `-w_inf(v)` up to 1.8.4).
-function MorrisLecar_w_nullcline(v::Float32, param::MorrisLecarParameter)
+# w-nullcline helper: `w = w_inf(v)`.
+function MorrisLecar_w_nullcline(v::T, param::MorrisLecarParameter) where {T<:AbstractFloat}
     @unpack Cm, El, EK, ECa, gl, gK, gCa, τe, τi, V1, V2, V3, V4, ϕ = param
     n_ss = 0.5*(1+tanh((v-V3)/V4))
     return n_ss
@@ -172,13 +164,13 @@ end
 
 
 # v-nullcline helper: value of `w` for which `dv/dt = 0` (synaptic input excluded).
-function MorrisLecar_v_nullcline(v::Float32, I::Float32, param::MorrisLecarParameter)
+function MorrisLecar_v_nullcline(v::T, I::T, param::MorrisLecarParameter) where {T<:AbstractFloat}
     @unpack Cm, El, EK, ECa, gl, gK, gCa, τe, τi, V1, V2, V3, V4, ϕ = param
     m_ss = 0.5*(1+tanh((v-V1)/V2))
     return -(I + gl * (El - v) + gCa * (ECa - v) * m_ss)/(gK * (EK - v))
 end
 
-function plasticity!(p::MorrisLecar, param::MorrisLecarParameter, dt::Float32, T::Time) end
+function plasticity!(p::MorrisLecar, param::MorrisLecarParameter, dt::AbstractFloat, T::Time) end
 
 function synaptic_target(
     targets::Dict,
@@ -192,6 +184,12 @@ function synaptic_target(
     v_post = getfield(post, :v)
     push!(targets, :sym => sym)
     return g, v_post
+end
+
+# one precision per population (see `IF`)
+function snn_kw_finalize(::Type{T}, f::NamedTuple) where {T<:MorrisLecar}
+    _check_precision("MorrisLecar", _state_float(T, :v), "param" => f.param)
+    return f
 end
 
 export MorrisLecar

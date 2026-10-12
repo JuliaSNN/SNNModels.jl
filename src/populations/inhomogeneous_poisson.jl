@@ -36,14 +36,16 @@ P(\text{spike}) &= 1 - e^{-\nu_i dt}
 \end{aligned}
 ```
 with ``\tau_{rate}`` = `rate_timescale`; ``\rho_i`` (field `r`) is initialised to ``r_0``.
-The noise uses `randcache_β`, the spike draw uses `rand(Float32)` from the global RNG.
+The noise uses `randcache_β` (one uniform number per neuron and step). The spikes are sampled
+sparsely, as in `Poisson`.
 
 # Fields
-- `id`, `param`, `name = "InhomogeneousPoisson"`, `N::Int32 = 100`, `fire::BitVector`.
-- `r::Vector{Float32}`: rate offsets ``\rho_i``; `noise::Vector{Float32}`: ``\eta_i``.
+- `id`, `param`, `name = "InhomogeneousPoisson"`, `N::Int32 = 100`, `fire::Vector{Bool}`.
+- `r::VFT`: rate offsets ``\rho_i``; `noise::VFT`: ``\eta_i``. `VFT = Vector{Float64}` with
+  `param = InhomogeneousPoissonParam(FT = Float64)` gives a `Float64` population (see `float_type`).
+- `pspike::VFT`: spike probability ``1 - e^{-\nu_i dt}`` of each neuron in the last step.
+- `spikes::SpikeIndex`: neurons that fired in the last step, filled by `integrate!` (see `spike_index`).
 - `randcache_β`; `records::Dict`; `targets::Dict` (unused).
-
-Reference not given in the code.
 
 # Example
 ```julia
@@ -63,9 +65,10 @@ InhomogeneousPoisson
     ##
     N::IT=100
     fire::VBT = falses(N)
-    r::VFT= ones(Float32, N) * param.r0
-    noise::VFT = zeros(Float32, N)
-    # sparse connectivity
+    r::VFT= ones(eltype(VFT), N) * param.r0
+    noise::VFT = zeros(eltype(VFT), N)
+    pspike::VFT = zeros(eltype(VFT), N)  # spike probability of each neuron in the last step
+    spikes::SpikeIndex = fed_spike_index(N)  # ascending list of the neurons with fire[j], fed by `integrate!`
     randcache_β::VFT = rand(N) # random cache
     records::Dict = Dict()
     targets::Dict = Dict()
@@ -75,28 +78,47 @@ function Population(p::InhomogeneousPoissonParam; kwargs...)
     return InhomogeneousPoisson(param = p; kwargs...)
 end
 
-function integrate!(p::InhomogeneousPoisson, param::InhomogeneousPoissonParam, dt::Float32)
-    @unpack N, randcache_β, fire = p
+function integrate!(p::InhomogeneousPoisson, param::InhomogeneousPoissonParam, dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # in the precision of the population
+    @unpack N, randcache_β, fire, spikes, pspike = p
     ## Inhomogeneous Poisson process
     @unpack r0, β, τ, rate_timescale = param
     @unpack noise, r = p
-    R(x::Float32, v0::Float32 = 0.0f0) = x > 0.0f0 ? x : v0
+    _check_state_lengths(N, randcache_β, fire, pspike, noise, r)
 
-    re::Float32 = 0.0f0
-    cc::Float32 = 0.0f0
-    Erate::Float32 = 0.0f0
     rand!(randcache_β)
-    fire .= false
-    @inbounds @fastmath for i = 1:N
-        re = randcache_β[i] - 0.5f0
-        cc = 1.0f0 - dt / τ
-        noise[i] = (noise[i] - re) * cc + re
-        Erate = R(r0 ./ 2 * R(noise[i] * β, 1.0f0) + r[i], 0.0f0)
+    FT = eltype(pspike)
+    cc = one(FT) - dt / τ
+    pmax = zero(FT)
+    # rate and spike probability of every neuron, vectorised
+    @inbounds @simd for i = 1:N
+        re = randcache_β[i] - FT(0.5)
+        ni = (noise[i] - re) * cc + re
+        noise[i] = ni
+        x = ni * β
+        E = r0 / 2 * ifelse(x > zero(FT), x, one(FT)) + r[i]
+        Erate = ifelse(E > zero(FT), E, zero(FT))
         r[i] += (r0 - Erate) / rate_timescale * dt
-        @assert Erate >= 0
-        p_spike = 1f0 - exp(-Erate * dt)
-        fire[i] = rand(Float32) < p_spike
+        pi_ = one(FT) - @inline(exp(-Erate * dt))
+        pspike[i] = pi_
+        pmax = max(pmax, pi_)
     end
+    # sparse sampling of the spikes (see `Poisson`); `randcache_β` is reused as scratch
+    if pmax >= _POP_DENSE_SPIKE_P
+        _pop_dense!(j -> @inbounds(pspike[j]), fire, spikes, randcache_β, Int(N))
+    else
+        _pop_sparse_start!(fire, spikes)
+        _pop_thinned!(j -> Float64(@inbounds(pspike[j])), fire, spikes, Int(N), Float64(pmax))
+    end
+    return nothing
+end
+
+spike_index(p::InhomogeneousPoisson) = p.spikes
+
+# one precision per population (see `IF`)
+function snn_kw_finalize(::Type{T}, f::NamedTuple) where {T<:InhomogeneousPoisson}
+    _check_precision("InhomogeneousPoisson", _state_float(T, :r), "param" => f.param)
+    return f
 end
 
 export InhomogeneousPoisson, InhomogeneousPoissonParam, integrate!

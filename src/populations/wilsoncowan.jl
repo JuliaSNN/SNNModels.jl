@@ -8,8 +8,7 @@ struct WCParameter <: AbstractPopulationParameter end
 @doc raw"""
     WilsonCowan(; N = 100, name = "WilsonCowan", kwargs...)
 
-Population of rate units named after the Wilson-Cowan model. In SNNModels 1.8.4 its dynamics
-are identical to `Rate`: a single variable per unit with unit time constant and `tanh`
+Population of rate units named after the Wilson-Cowan model. Its dynamics are identical to `Rate`: a single variable per unit with unit time constant and `tanh`
 transfer function. It does not implement the coupled excitatory/inhibitory Wilson-Cowan
 equations (no separate E and I variables, no refractory term, no sigmoid parameters).
 
@@ -22,14 +21,14 @@ equations (no separate E and I variables, no refractory term, no sigmoid paramet
 # Fields
 - `id::String = randstring(12)`, `name::String = "WilsonCowan"`, `param::WCParameter`.
 - `N::Int32 = 100`; `x = 0.5randn(N)`; `r = tanh.(x)`; `g`, `I`: inputs, zeros; `records::Dict`.
+- `VFT = Vector{Float32}`: type of the state vectors; `Vector{Float64}` gives a `Float64` population (see `float_type`).
 
 `RateSynapse` (and the FORCE connections) target `g`, as for `Rate` (any target symbol is mapped
-to `:g`). Up to SNNModels 1.8.4 there was no `synaptic_target` method for `WilsonCowan`.
+to `:g`).
 
 # References
-The canonical model is Wilson H. R., Cowan J. D. (1972). Excitatory and inhibitory interactions
-in localized populations of model neurons. Biophys. J. 12:1-24. The code does not cite it and
-does not implement it in full (see above).
+Wilson H. R., Cowan J. D. (1972). Excitatory and inhibitory interactions in localized
+populations of model neurons. Biophys. J. 12:1-24 (not implemented in full, see above).
 
 # Example
 ```julia
@@ -54,12 +53,16 @@ WilsonCowan
     records::Dict = Dict()
 end
 
-function integrate!(p::WilsonCowan, param::WCParameter, dt::Float32)
+function integrate!(p::WilsonCowan, param::WCParameter, dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # in the precision of the population
     @unpack N, x, r, g, I = p
-    @inbounds for i = 1:N
-        x[i] += dt * (-x[i] + g[i] + I[i])
-        r[i] = tanh(x[i])
-        g[i] = 0.0f0 # g is the synaptic input of this step (connections add to it)
+    _check_state_lengths(N, x, r, g, I)
+    # as in `Rate`
+    @inbounds @simd for i = 1:N
+        xi = x[i] + dt * (-x[i] + g[i] + I[i])
+        x[i] = xi
+        r[i] = _tanh_inl(xi)
+        g[i] = zero(eltype(g)) # g is the synaptic input of this step (connections add to it)
     end
 end
 

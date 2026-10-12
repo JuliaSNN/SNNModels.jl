@@ -74,17 +74,12 @@ mean with time constant ``τ_m / k_i``); `tabs -= 1`, `fire = false`,
 the neuron fires with the probability above, which sets `tabs = round(Int, τabs / dt)` and
 `trace += 1`.
 
-!!! note "Changed after SNNModels 1.8.4"
-    Up to 1.8.4 the soma was updated once per connected dendrite in sequence (same equation,
-    but the result depended on the order of the dendrites) and the adaptive baseline was
-    updated with `trace += (v_s - trace) / τrate`, without `dt`, so its time constant was
-    `τrate * dt` (in steps) and results depended on `dt`.
-
 # Fields
 - `id`, `name = "HetRec"`, `N::Int32 = 100`, `param::HetRecParameter`.
 - `v_d` (length `N * Nd`), `v_s` (length `N`): dendritic and somatic potentials.
 - `M::Matrix{Float32}`: dense mapping (unused after construction, zeros by default).
 - `r`: maximal rates (1/ms); `fire`; `tabs`; `trace`: adaptive baseline; `randcache`.
+- `spikes::SpikeIndex`: neurons that fired in the step (see `spike_index`).
 - `τd`: dendritic time constants (ms).
 - `rowptr`, `colptr`, `I`, `J`, `index`, `W`: CSC representation of the dendrite-to-soma
   mapping (columns = neurons, rows = dendrites).
@@ -127,6 +122,7 @@ HetRec
     M::MFT = zeros(N, N*param.Nd)
     r::VFT = zeros(N)
     fire::VBT = zeros(Bool, N)
+    spikes::SpikeIndex = owned_spike_index(N)
     tabs::VIT = zeros(N)
     trace::VFT = zeros(N)
     randcache::VFT = rand(N) # random cache for stochastic firing
@@ -198,6 +194,8 @@ function synaptic_target(
     push!(targets, :g => post.id)
     return g, v
 end
+
+_float64_supported(::HetRec) = false   # Float32 only (see `float_type`)
 
 function integrate!(p::HetRec, param::HetRecParameter, dt::Float32)
     @unpack N, v_s, v_d, τd, synapse, receptors, synvars, is, tabs, trace, fire, r, randcache = p

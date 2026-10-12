@@ -59,12 +59,12 @@ State variables of `CurrentSynapse`, created by `synaptic_variables(::CurrentSyn
 CurrentSynapseVars
 @snn_kw struct CurrentSynapseVars{VFT = Vector{Float32}} <: AbstractSynapseVariable
     N::Int = 100
-    ge::VFT = zeros(Float32, N)
-    gi::VFT = zeros(Float32, N)
+    ge::VFT = zeros(eltype(VFT), N)
+    gi::VFT = zeros(eltype(VFT), N)
 end
 
-function synaptic_variables(synapse::CurrentSynapse, N::Int)
-    return CurrentSynapseVars(; N = N, ge = zeros(Float32, N), gi = zeros(Float32, N))
+function synaptic_variables(synapse::CurrentSynapse, N::Int, ::Type{FT}) where {FT<:AbstractFloat}
+    return CurrentSynapseVars(; N = N, VFT = Vector{FT})
 end
 
 @inline function update_synapses!(
@@ -72,19 +72,36 @@ end
     param::T,
     receptors::RECT,
     synvars::CurrentSynapseVars,
-    dt::Float32,
+    dt::AbstractFloat,
+) where {P<:AbstractGeneralizedIF,T<:AbstractCurrentParameter,RECT<:NamedTuple}
+    update_synapses!(p, param, receptors, synvars, dt, 1:Int(input_N(p)))
+end
+
+# Chunk method: the neurons `rng` only; clears the spike buffers of the same neurons. `@noinline`: inlined into the chunk
+# closure, the `@fastmath` loop compiles to different last bits for some N.
+@noinline function update_synapses!(
+    p::P,
+    param::T,
+    receptors::RECT,
+    synvars::CurrentSynapseVars,
+    dt::AbstractFloat,
+    rng::UnitRange{Int},
 ) where {P<:AbstractGeneralizedIF,T<:AbstractCurrentParameter,RECT<:NamedTuple}
     @unpack glu, gaba = receptors
     @unpack N, ge, gi = synvars
     @unpack τe, τi = param
-    @fastmath @inbounds @simd for i ∈ 1:input_N(p)
+    @fastmath @inbounds @simd for i ∈ rng
         ge[i] += glu[i]
         gi[i] += gaba[i]
         ge[i] += dt * (-ge[i] / τe)
         gi[i] += dt * (-gi[i] / τi)
     end
-    fill!(glu, 0.0f0)
-    fill!(gaba, 0.0f0)
+    # cleared in a loop of their own: stores inside the `@fastmath` loop above change its last bits
+    z = zero(eltype(glu))
+    @inbounds @simd for i ∈ rng
+        glu[i] = z
+        gaba[i] = z
+    end
 end
 
 @inline function synaptic_current!(
@@ -105,6 +122,7 @@ end
     synvars::AbstractSynapseVariable,
     v::VT1, # membrane potential
     syncurr::VT2, # synaptic current
+    rng::UnitRange{Int} = 1:Int(input_N(p)),
 ) where {
     P<:AbstractGeneralizedIF,
     T<:AbstractCurrentParameter,
@@ -112,10 +130,11 @@ end
     VT2<:AbstractVector,
 }
     @unpack ge, gi = synvars
-    @unpack N = p
-    @inbounds @simd for i ∈ 1:input_N(p)
+    @inbounds @simd for i ∈ rng
         syncurr[i] = -(ge[i] - gi[i])
     end
 end
+
+_chunk_synapse(::AbstractCurrentParameter) = true
 
 export CurrentSynapse

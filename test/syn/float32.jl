@@ -38,8 +38,7 @@ using SNNModels.Distributions
         s = SpikingSynapse(E, E, :ge; conn = rand(30, 30), delay_dist = Uniform(1.0, 2.0))
         @test eltype(s.W) == Float32
         @test eltype(s.param.delaytime) == Float32
-        @test eltype(s.param.spike_time) == Vector{Float32}
-        @test eltype(s.param.spike_w) == Vector{Float32}
+        @test eltype(s.param.buffer) == Float32
     end
 
     @testset "triplet and weight-dependent variables" begin

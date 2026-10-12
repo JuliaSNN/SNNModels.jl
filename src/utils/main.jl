@@ -14,6 +14,8 @@ Simulate a network with plasticity for `duration` (ms) with time step `dt` (ms).
 2. for every stimulus: `stimulate!`, `record!`;
 3. for every population: `update_traces!`, `integrate!`, `plasticity!`, `record!`;
 4. for every connection: `update_traces!`, `forward!`, `plasticity!`, `record!`.
+The spike list of a population (`spike_index`) is built once per step and shared by its connections and recorder.
+A step that throws is a fatal error: discard the run.
 
 `sim!` runs the same sequence without `update_traces!` and `plasticity!`, so weights and STP
 variables only change under `train!` (long-term STDP/iSTDP/vSTDP rules, short-term
@@ -23,7 +25,7 @@ plasticity, metaplasticity components).
 - `model`: a NamedTuple built with `compose`; its populations, connections and stimuli
   (stimulus groups are unpacked) are simulated and `model.time` is advanced.
 - `args...`: extra components (or vectors of them) added to those of `model`.
-- `dt = 0.125ms`: time step (converted to `Float32`).
+- `dt = 0.125ms`: time step (converted to the float type of `time`; each component gets it in its own precision).
 - `duration = 10ms` (vector and keyword forms) or `1s` (positional model form): simulated time; the loop
   runs over `0:dt:(duration - dt)`, i.e. `round(duration / dt)` steps.
 - `time = Time()`: clock of the vector form.
@@ -31,6 +33,10 @@ plasticity, metaplasticity components).
   `perturbation!(; P, C, S, t, dt, start_time)`.
 - `pbar = false`: show a progress bar with the running firing rates of the populations that
   record `:fire`.
+- `neurons_per_thread = nothing`: chunk size of the threaded updates for this run (`nothing` keeps the current
+  setting; `0` or `Inf` turns threading off). See [`neurons_per_thread`](@ref).
+- `flush_subnormals = true`: run with subnormal results flushed to zero (on all threads, restored afterwards), which
+  avoids slow subnormal arithmetic in decaying variables; `false` keeps IEEE gradual underflow. See `SNNModels.with_flush_subnormals`.
 
 Recording buffers are sized before the loop from `duration` (see `monitor!`). If the model
 time is 0, a first sample of every record is taken before the first step.
@@ -56,37 +62,68 @@ function train!(
     S::Vector{TS} = [EmptyStimulus()];
     dt = 0.125ms,
     duration = 10ms,
-    time = Time(),
+    time = Time{_model_float(P)}(),
     perturbation! = nothing,
     pbar = false,
+    neurons_per_thread = nothing,
+    flush_subnormals::Bool = true,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
-    dt = Float32(dt)
-    _allocate_records!(P, C, S, dt, Float32(duration))
-    dts = 0.0f0:dt:(duration-dt)
-    iter = pbar ? ProgressBar(dts, printing_delay=0.1) : dts
+    FT = eltype(time.t)
+    dt = FT(dt)
+    dts = zero(FT):dt:(duration-dt)
+    return _run!(_train_step!, P, C, S, dt, dts, duration, time, perturbation!, pbar, neurons_per_thread, flush_subnormals)
+end
+
+# Loop of `sim!` / `train!` (keyword forms). `dt` goes in a `Ref` (`dtr`): the per-component calls are dynamically
+# dispatched and a float argument of a dynamic call would be boxed (allocated) per component and step.
+function _run!(step!::F, P, C, S, dt::AbstractFloat, dts, duration, time::Time, perturbation!, pbar, neurons_per_thread,
+               flush_subnormals::Bool) where {F}
+    _allocate_records!(P, C, S, Float32(dt), Float32(duration))
     start_time = get_time(time)
-    firing_rates = Dict{String, Float32}(p.name => 0.f0 for p in P if haskey(p.records, :fire))
-    τ_rate = 100.0f0
-    for t in iter
-        if pbar
-            map(P) do p
-                if haskey(p.records, :fire)
-                    rate = mean(p.fire)
-                    firing_rates[p.name] += rate / p.N - firing_rates[p.name]/τ_rate
-                end
+    dtr = Ref(dt)
+    with_neurons_per_thread(neurons_per_thread) do
+        with_flush_subnormals(flush_subnormals) do
+            if pbar
+                _run_pbar!(step!, P, C, S, dt, dtr, dts, time, perturbation!, start_time)
+            else
+                _run_loop!(step!, P, C, S, dt, dtr, dts, time, perturbation!, start_time)
             end
-            set_multiline_postfix(iter, join(vcat(
-                        ["$(name) rate =  $(round(mean(firing_rates[name])*s*dt *τ_rate, digits=2))Hz\n"
-                        for name in keys(firing_rates)],
-                        "Time = $(round(get_time(time)/s, digits=3))s")
-                        ))
         end
-        if !isnothing(perturbation!) 
-            perturbation!(;P, C, S, t=t, dt=dt, start_time = start_time)
-        end
-        train!(P, C, S, dt, time)
     end
     return time
+end
+
+function _run_loop!(step!::F, P, C, S, dt, dtr, dts, time, perturbation!, start_time) where {F}
+    for t in dts
+        if !isnothing(perturbation!)
+            perturbation!(; P, C, S, t = t, dt = dt, start_time = start_time)
+        end
+        step!(P, C, S, dtr, time)
+    end
+    return nothing
+end
+
+function _run_pbar!(step!::F, P, C, S, dt, dtr, dts, time, perturbation!, start_time) where {F}
+    iter = ProgressBar(dts, printing_delay = 0.1)
+    firing_rates = Dict{String,Float32}(p.name => 0.0f0 for p in P if haskey(p.records, :fire))
+    τ_rate = 100.0f0
+    for t in iter
+        map(P) do p
+            if haskey(p.records, :fire)
+                rate = mean(p.fire)
+                firing_rates[p.name] += rate / p.N - firing_rates[p.name] / τ_rate
+            end
+        end
+        set_multiline_postfix(iter, join(vcat(
+                    ["$(name) rate =  $(round(mean(firing_rates[name])*s*dt *τ_rate, digits=2))Hz\n"
+                     for name in keys(firing_rates)],
+                    "Time = $(round(get_time(time)/s, digits=3))s")))
+        if !isnothing(perturbation!)
+            perturbation!(; P, C, S, t = t, dt = dt, start_time = start_time)
+        end
+        step!(P, C, S, dtr, time)
+    end
+    return nothing
 end
 
 function _args_model(args, model)
@@ -138,32 +175,73 @@ function train!(
     P::Vector{TP},
     C::Vector{TC},
     S::Vector{TS},
-    dt::Float32,
+    dt::AbstractFloat,
     T::Time,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
-    record_zero!(P, C, S, T)
-    update_time!(T, dt)
-    for s in S
-        stimulate!(s, getfield(s, :param), T, dt)
-        record!(s, T)
-    end
-    for p in P
-        update_traces!(p, p.param, dt, T)
-        integrate!(p, p.param, dt)
-        plasticity!(p, p.param, dt, T)
-        record!(p, T)
-    end
-    for c in C
-        update_traces!(c, c.param, dt, T)
-        forward!(c, c.param, dt, T)
-        plasticity!(c, c.param, dt, T)
-        record!(c, T)
-    end
-    # flush(stdout)  # removed from hot path: flushed every dt, ~10k calls/s
+    _train_step!(P, C, S, _dtarg(dt, Val(isconcretetype(TP) && isconcretetype(TC) && isconcretetype(TS))), T)
+    return nothing
 end
 
-function record_zero!(P, C, S, T)
-    get_time(T) > 0.0f0 && return
+# Step argument of the five-argument `sim!`/`train!`: `dt` itself for concretely typed vectors (static dispatch), else a
+# `Ref` (see `_run!`). `_dtval` reads either.
+@inline _dtarg(dt, ::Val{true}) = dt
+@inline _dtarg(dt, ::Val{false}) = Ref(dt)
+@inline _dtval(d::Base.RefValue) = d[]
+@inline _dtval(d::AbstractFloat) = d
+
+# One `train!` step; every component gets `dt` in its own precision. Each component runs behind one dynamically dispatched
+# function barrier taking the component, its `param` (read here: some populations have an abstractly typed `param`) and
+# `dtr`, returning `nothing`, so nothing is boxed and the body is statically dispatched.
+function _train_step!(P::Vector, C::Vector, S::Vector, dtr::Union{Base.RefValue{<:AbstractFloat},AbstractFloat}, T::Time)
+    record_zero!(P, C, S, T)
+    update_time!(T, _dtval(dtr))
+    for s in S
+        _train_component!(s, getfield(s, :param), dtr, T)
+    end
+    for p in P
+        _train_component!(p, p.param, dtr, T)
+    end
+    for c in C
+        _train_component!(c, c.param, dtr, T)
+    end
+    _retire_all_spikes!(P)
+    return nothing
+end
+
+function _train_component!(s::AbstractStimulus, param, dtr, T)
+    stimulate!(s, param, T, _step_dt(s, _dtval(dtr)))
+    record!(s, T)
+    return nothing
+end
+function _train_component!(p::AbstractPopulation, param, dtr, T)
+    dtp = _step_dt(p, _dtval(dtr))
+    update_traces!(p, param, dtp, T)
+    integrate!(p, param, dtp)
+    _publish_spikes!(p)
+    plasticity!(p, param, dtp, T)
+    record!(p, T)
+    return nothing
+end
+function _train_component!(c::AbstractConnection, param, dtr, T)
+    dtc = _step_dt(c, _dtval(dtr))
+    prepare_spikes!(c)
+    update_traces!(c, param, dtc, T)
+    forward!(c, param, dtc, T)
+    plasticity!(c, param, dtc, T)
+    record!(c, T)
+    release_spikes!(c)
+    return nothing
+end
+
+# `dt` in the precision of the component (a no-op when they agree)
+@inline _step_dt(c, dt::AbstractFloat) = convert(float_type(typeof(c)), dt)
+
+@inline function record_zero!(P, C, S, T)
+    get_time(T) > 0 && return nothing
+    return _record_zero!(P, C, S, T)
+end
+
+function _record_zero!(P, C, S, T)
     for p in P
         record!(p, T)
     end
@@ -191,6 +269,8 @@ Each step runs:
 2. for every stimulus: `stimulate!(s, s.param, T, dt)`, `record!`;
 3. for every population: `integrate!(p, p.param, dt)`, `record!`;
 4. for every connection: `forward!(c, c.param, dt, T)`, `record!`.
+The spike list of a population (`spike_index`) is built once per step and shared by its connections and recorder.
+A step that throws is a fatal error: discard the run.
 
 No plasticity is applied: `sim!` never calls `update_traces!` or `plasticity!`, so weights
 and short-term plasticity variables stay constant even if a synapse carries an `LTPParam`
@@ -200,7 +280,7 @@ or `STPParam`. Use [`train!`](@ref) for plastic networks.
 - `model`: a NamedTuple built with `compose`; its populations, connections and stimuli
   (stimulus groups are unpacked) are simulated and `model.time` is advanced.
 - `args...`: extra components (or vectors of them) added to those of `model`.
-- `dt = 0.125` ms: time step (converted to `Float32`).
+- `dt = 0.125` ms: time step (converted to the float type of `time`; each component gets it in its own precision).
 - `duration = 10` ms (vector and keyword forms) or `1s` (positional model form): the loop runs over
   `0:dt:(duration - dt)`.
 - `time = Time()`: clock of the vector form.
@@ -208,6 +288,10 @@ or `STPParam`. Use [`train!`](@ref) for plastic networks.
   `perturbation!(; P, C, S, t, dt, start_time)`.
 - `pbar = false`: show a progress bar with the running firing rates of the populations that
   record `:fire`.
+- `neurons_per_thread = nothing`: chunk size of the threaded updates for this run (`nothing` keeps the current
+  setting; `0` or `Inf` turns threading off). See [`neurons_per_thread`](@ref).
+- `flush_subnormals = true`: run with subnormal results flushed to zero (on all threads, restored afterwards), which
+  avoids slow subnormal arithmetic in decaying variables; `false` keeps IEEE gradual underflow. See `SNNModels.with_flush_subnormals`.
 
 Recording buffers are sized before the loop (see `monitor!`). If the model time is 0, a first
 sample of every record is taken before the first step. Simulations can be continued by
@@ -236,41 +320,17 @@ function sim!(
     dt = 0.125f0,
     duration = 10.0f0,
     pbar = false,
-    time = Time(),
+    time = Time{_model_float(P)}(),
     perturbation! = nothing,
+    neurons_per_thread = nothing,
+    flush_subnormals::Bool = true,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
-    dt = Float32(dt)
-    duration = Float32(duration)
-    _allocate_records!(P, C, S, dt, duration)
-    dts = 0.0f0:dt:(duration-dt)
-    iter = pbar ? ProgressBar(dts, printing_delay=0.1) : dts
-    start_time = get_time(time)
-    firing_rates = Dict{String, Float32}(p.name => 0.f0 for p in P if haskey(p.records, :fire))
-    τ_rate = 100.0f0
-    for t in iter
-        if pbar
-            map(P) do p
-                if haskey(p.records, :fire)
-                    rate = mean(p.fire)
-                    firing_rates[p.name] += rate / p.N - firing_rates[p.name]/100ms
-                end
-            end
-            set_multiline_postfix(iter, join(vcat(
-                        ["$(name) rate =  $(round(mean(firing_rates[name])*s*dt *τ_rate, digits=2))Hz\n"
-                        for name in keys(firing_rates)],
-                        "Time = $(round(get_time(time)/s, digits=3))s")
-                        ))
-        end
-        if !isnothing(perturbation!)
-            perturbation!(; P, C, S, t=t, dt=dt, start_time=start_time)
-        end
-        sim!(P, C, S, dt, time)
-    end
-    return time
+    FT = eltype(time.t)
+    dt = FT(dt)
+    duration = FT(duration)
+    dts = zero(FT):dt:(duration-dt)
+    return _run!(_sim_step!, P, C, S, dt, dts, duration, time, perturbation!, pbar, neurons_per_thread, flush_subnormals)
 end
-
-
-
 
 sim!(model::NamedTuple, duration::R = 1s; kwargs...) where {R<:Real} =
     sim!(; model, duration, kwargs...)
@@ -288,24 +348,47 @@ function sim!(
     P::Vector{TP},
     C::Vector{TC},
     S::Vector{TS},
-    dt::Float32,
+    dt::AbstractFloat,
     T::Time,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
+    _sim_step!(P, C, S, _dtarg(dt, Val(isconcretetype(TP) && isconcretetype(TC) && isconcretetype(TS))), T)
+    return nothing
+end
+
+# One `sim!` step (see `_train_step!` for the `Ref` and the function barrier)
+function _sim_step!(P::Vector, C::Vector, S::Vector, dtr::Union{Base.RefValue{<:AbstractFloat},AbstractFloat}, T::Time)
     record_zero!(P, C, S, T)
-    update_time!(T, dt)
+    update_time!(T, _dtval(dtr))
     for s in S
-        stimulate!(s, getfield(s, :param), T, dt)
-        record!(s, T)
+        _sim_component!(s, getfield(s, :param), dtr, T)
     end
     for p in P
-        integrate!(p, getfield(p, :param), dt)
-        record!(p, T)
+        _sim_component!(p, getfield(p, :param), dtr, T)
     end
     for c in C
-        forward!(c, getfield(c, :param), dt, T)
-        record!(c, T)
+        _sim_component!(c, getfield(c, :param), dtr, T)
     end
-    # flush(stdout)
+    _retire_all_spikes!(P)
+    return nothing
+end
+
+function _sim_component!(s::AbstractStimulus, param, dtr, T)
+    stimulate!(s, param, T, _step_dt(s, _dtval(dtr)))
+    record!(s, T)
+    return nothing
+end
+function _sim_component!(p::AbstractPopulation, param, dtr, T)
+    integrate!(p, param, _step_dt(p, _dtval(dtr)))
+    _publish_spikes!(p)
+    record!(p, T)
+    return nothing
+end
+function _sim_component!(c::AbstractConnection, param, dtr, T)
+    prepare_spikes!(c)
+    forward!(c, param, _step_dt(c, _dtval(dtr)), T)
+    record!(c, T)
+    release_spikes!(c)
+    return nothing
 end
 
 

@@ -76,7 +76,8 @@ end
     end
     H = HH(N = 1); H.ge .= 0; H.gi .= 0
     nf, np = flags_and_peaks(H, 500.0f0, 0.01f0, 200.0f0)
-    @test np > 2 && nf == np
+    # the initial membrane potential is random: a spike flagged in the last step may not have reached its maximum yet (at most one)
+    @test np > 2 && abs(nf - np) <= 1
     # Default MorrisLecar fires once and then stays depolarised under a constant current:
     # use three current pulses separated by pauses.
     M = MorrisLecar(N = 1)
@@ -132,26 +133,31 @@ end
 end
 
 @testset "vSTDP: dt-independent rule, traces start at the membrane potential" begin
-    function vstdp_dw(dt; Tsim = 30.0f0, vpost = -40.0f0)
-        E = Identity(N = 1)
-        P = AdEx(N = 1)
-        syn = SpikingSynapse(E, P, :glu; conn = (p = 1.0, μ = 1.0), LTPParam = vSTDPParameter())
-        W0 = copy(syn.W)
-        T = SNNModels.Time()
-        for k = 1:round(Int, Tsim / dt)
-            E.fire .= (k == 1)
-            P.v .= vpost
-            SNNModels.plasticity!(syn, syn.LTPParam, syn.LTPVars, Float32(dt), T)
+    # the event-driven rule (vSTDPParameter, default) and its dense reference (vSTDPDenseParameter)
+    for Rule in (vSTDPParameter, vSTDPDenseParameter)
+        @testset "$Rule" begin
+            function vstdp_dw(dt; Tsim = 30.0f0, vpost = -40.0f0)
+                E = Identity(N = 1)
+                P = AdEx(N = 1)
+                syn = SpikingSynapse(E, P, :glu; conn = (p = 1.0, μ = 1.0), LTPParam = Rule())
+                W0 = copy(syn.W)
+                T = SNNModels.Time()
+                for k = 1:round(Int, Tsim / dt)
+                    E.fire .= (k == 1)
+                    P.v .= vpost
+                    SNNModels.plasticity!(syn, syn.LTPParam, syn.LTPVars, Float32(dt), T)
+                end
+                plasticity_value(syn, :W)[1] - W0[1], plasticity_value(syn, :LTPVars, :x, 0.0f0)[1]
+            end
+            dw1, x1 = vstdp_dw(0.125)
+            dw2, x2 = vstdp_dw(0.0625)
+            @test dw1 > 0 && isapprox(dw1, dw2; rtol = 0.05)
+            @test isapprox(x1, x2; rtol = 0.05)
+            # silent target at rest: no spurious LTD from 0 mV initial traces
+            dw_rest, _ = vstdp_dw(0.125; vpost = -70.6f0)
+            @test dw_rest == 0
         end
-        syn.W[1] - W0[1], syn.LTPVars.x[1]
     end
-    dw1, x1 = vstdp_dw(0.125)
-    dw2, x2 = vstdp_dw(0.0625)
-    @test dw1 > 0 && isapprox(dw1, dw2; rtol = 0.05)
-    @test isapprox(x1, x2; rtol = 0.05)
-    # silent target at rest: no spurious LTD from 0 mV initial traces
-    dw_rest, _ = vstdp_dw(0.125; vpost = -70.6f0)
-    @test dw_rest == 0
 end
 
 @testset "AggregateScaling: rate estimate in 1/ms, dt-independent" begin
@@ -202,6 +208,7 @@ end
     EE = SpikingSynapse(E, E, :ge; conn = (p = 0.2, μ = 2.0))
     TO = MetaPlasticity(RandomTurnover(τ = 5.0f0ms, threshold = 0.3f0, μ = 1.0f0), EE)
     I0 = copy(EE.I)
+    SNNModels.materialize_efficacy!(EE)   # ρ is stored only with a short-term rule
     EE.ρ .= range(0.1f0, 0.9f0, length = length(EE.ρ))
     @test train!([E], [EE, TO]; duration = 20ms) isa SNNModels.Time
     @test EE.I != I0
@@ -215,12 +222,13 @@ end
     F = IF(N = 4)
     FF = SpikingSynapse(F, F, :ge; conn = (p = 0.75, μ = 1.0))
     synaptic_turnover!(FF; p_rewire = 1.0)
-    @test length(FF.W) == length(FF.ρ)
+    @test length(FF.W) == length(SNNModels.efficacy(FF))
 end
 
 @testset "connect!/update_sparse_matrix! keep per-synapse state; set_plasticity!" begin
     E = IF(N = 10)
     EE = SpikingSynapse(E, E, :ge; conn = (p = 0.2, μ = 1.0))
+    SNNModels.materialize_efficacy!(EE)
     EE.ρ .= 0.5f0
     M = matrix(EE)
     i, j = findfirst(iszero, M - SNNModels.spdiagm(0 => ones(Float32, 10)) .* 0) |> Tuple

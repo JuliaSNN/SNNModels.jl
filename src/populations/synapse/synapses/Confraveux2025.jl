@@ -61,7 +61,7 @@ Confavreux2025Synapse
     τGABA::FT = 10ms # Decay time of the GABA conductance
     E_i::FT = -80mV # Reversal potential inhibitory synapses
     E_e::FT = 0mV #Reversal potential excitatory synapses
-    α::FT = 0.23f0 # AMPA fraction of the excitatory conductance
+    α::FT = 0.23 # AMPA fraction of the excitatory conductance
 end
 
 """
@@ -79,15 +79,13 @@ Confavreux2025SynapseVars
 
 @snn_kw struct Confavreux2025SynapseVars{VFT = Vector{Float32}} <: AbstractSynapseVariable
     N::Int = 100
-    gAMPA::VFT = zeros(Float32, N)
-    gNMDA::VFT = zeros(Float32, N)
-    gGABA::VFT = zeros(Float32, N)
+    gAMPA::VFT = zeros(eltype(VFT), N)
+    gNMDA::VFT = zeros(eltype(VFT), N)
+    gGABA::VFT = zeros(eltype(VFT), N)
 end
 
-function synaptic_variables(synapse::Confavreux2025Synapse, N::Int)
-    return Confavreux2025SynapseVars(;
-        N = N,
-    )
+function synaptic_variables(synapse::Confavreux2025Synapse, N::Int, ::Type{FT}) where {FT<:AbstractFloat}
+    return Confavreux2025SynapseVars(; N = N, VFT = Vector{FT})
 end
 
 function update_synapses!(
@@ -95,7 +93,7 @@ function update_synapses!(
     synapse::T,
     receptors::RECT,
     synvars::Confavreux2025SynapseVars,
-    dt::Float32,
+    dt::AbstractFloat,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractConfavreux2025,RECT<:NamedTuple}
     @unpack N, gAMPA, gNMDA, gGABA = synvars
     @unpack τAMPA, τNMDA, τGABA = synapse
@@ -105,8 +103,8 @@ function update_synapses!(
         gGABA[i] += -dt * gGABA[i] / τGABA + gaba[i]
         gNMDA[i] += dt * (gAMPA[i] - gNMDA[i])/ τNMDA
     end
-    fill!(glu, 0.0f0)
-    fill!(gaba, 0.0f0)
+    fill!(glu, zero(eltype(glu)))
+    fill!(gaba, zero(eltype(gaba)))
 end
 
 

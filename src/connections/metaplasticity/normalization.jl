@@ -142,9 +142,11 @@ function SynapseNormalization(synapses; param::NormParam, kwargs...)
     end
     N = length(synapses[1].fireI)
 
-    W0 = zeros(Float32, N)
-    W1 = zeros(Float32, N)
-    μ = zeros(Float32, N)
+    FT = eltype(EE.W)                # the precision of the synapses (see `float_type`)
+    param = convert_precision(param, FT)
+    W0 = zeros(FT, N)
+    W1 = zeros(FT, N)
+    μ = zeros(FT, N)
 
     # Test that all synapses have the same postsynaptic neurons
 
@@ -155,6 +157,8 @@ function SynapseNormalization(synapses; param::NormParam, kwargs...)
     targets[:synapses] = [syn.id for syn in synapses]
     for syn in synapses
         @assert isa(syn, AbstractSparseSynapse)
+        sync_weights!(syn)   # event-driven rules (vSTDPParameter) keep `W` stale between syncs
+        ensure_transpose!(syn)   # the inputs of every neuron are read through `index`
         @unpack rowptr, W, index = syn
         Is = 1:(length(rowptr)-1)
         @assert length(Is) == N
@@ -164,7 +168,7 @@ function SynapseNormalization(synapses; param::NormParam, kwargs...)
             end
         end
     end
-    SynapseNormalization(; @symdict(param, W0, W1, μ, synapses)..., targets, kwargs...)
+    SynapseNormalization(; VFT = Vector{FT}, @symdict(param, W0, W1, μ, synapses)..., targets, kwargs...)
 end
 
 """
@@ -181,12 +185,12 @@ end
 function forward!(c::SynapseNormalization, param::NormParam) end
 
 """
-    plasticity!(c::SynapseNormalization, param::NormParam, dt::Float32, T::Time)
+    plasticity!(c::SynapseNormalization, param::NormParam, dt::AbstractFloat, T::Time)
 
 Apply the normalization (see `SynapseNormalization`) when `get_step(T)` is a multiple of
 `max(1, round(Int, param.τ / dt))`; otherwise do nothing. Called only by `train!`.
 """
-function plasticity!(c::SynapseNormalization, param::NormParam, dt::Float32, T::Time)
+function plasticity!(c::SynapseNormalization, param::NormParam, dt::AbstractFloat, T::Time)
     tt = get_step(T)
     @unpack τ = param
     if tt % max(1, round(Int, τ / dt)) == 0
@@ -203,7 +207,9 @@ update the weights of all `c.synapses`.
 function plasticity!(c::SynapseNormalization, param::NormParam)
     @unpack W1, W0, μ, synapses = c
     additive = param isa AdditiveNorm
-    fill!(W1, 0.0f0)
+    foreach(sync_weights!, synapses)   # the rescaling acts on the current weights (deferred updates are materialised)
+    foreach(ensure_transpose!, synapses)
+    fill!(W1, zero(eltype(W1)))
     nsyn = zeros(Int, length(W1))
     for syn in synapses
         @unpack rowptr = syn
@@ -213,7 +219,7 @@ function plasticity!(c::SynapseNormalization, param::NormParam)
     end
     for syn in synapses
         @unpack rowptr, W, index = syn
-        Threads.@threads for i = 1:(length(rowptr)-1) # Iterate over all postsynaptic neuron
+        for i = 1:(length(rowptr)-1) # Iterate over all postsynaptic neuron
             @inbounds @fastmath @simd for j = rowptr[i]:(rowptr[i+1]-1) # all presynaptic neurons of i
                 W1[i] += W[index[j]]
             end
@@ -223,15 +229,15 @@ function plasticity!(c::SynapseNormalization, param::NormParam)
     # @fastmath @inbounds @simd 
     @inbounds for i in eachindex(μ)
         if additive
-            μ[i] = nsyn[i] > 0 ? (W0[i] - W1[i]) / nsyn[i] : 0.0f0
+            μ[i] = nsyn[i] > 0 ? (W0[i] - W1[i]) / nsyn[i] : zero(eltype(μ))
         else
-            μ[i] = W1[i] > 0 ? W0[i] / W1[i] : 1.0f0
+            μ[i] = W1[i] > 0 ? W0[i] / W1[i] : one(eltype(μ))
         end
     end
     # apply
     for syn in synapses
         @unpack rowptr, W, index = syn
-        Threads.@threads for i = 1:(length(rowptr)-1) # Iterate over all postsynaptic neuron
+        for i = 1:(length(rowptr)-1) # Iterate over all postsynaptic neuron
             @inbounds @fastmath @simd for j = rowptr[i]:(rowptr[i+1]-1) # all presynaptic neurons connected to neuron i
                 W[index[j]] = additive ? W[index[j]] + μ[i] : W[index[j]] * μ[i]
             end

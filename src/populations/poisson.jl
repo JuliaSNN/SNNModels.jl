@@ -1,11 +1,12 @@
 """
     PoissonParameter <: AbstractPopulationParameter
-    PoissonParameter(rate::Real)                   -> PoissonHomoParameter
-    PoissonParameter(rate::AbstractVector{<:AbstractFloat}) -> PoissonHetParameter
+    PoissonParameter(rate::Real; FT = Float32)                   -> PoissonHomoParameter
+    PoissonParameter(rate::AbstractVector{<:AbstractFloat}; FT = Float32) -> PoissonHetParameter
 
 Abstract parameter type of the `Poisson` population, and convenience constructor: a scalar rate
 gives a homogeneous population, a vector of rates (one per neuron) a heterogeneous one.
-Rates are in the library unit system (use `Hz`, e.g. `10Hz`).
+Rates are in the library unit system (use `Hz`, e.g. `10Hz`). `FT` is the precision of the rate: `FT = Float64` for a
+`Float64` population (`Poisson(VFT = Vector{Float64}, param = PoissonParameter(10Hz; FT = Float64))`).
 """
 abstract type PoissonParameter <: AbstractPopulationParameter end
 
@@ -17,7 +18,7 @@ Same firing rate `rate` (Hz units) for all neurons of a `Poisson` population.
 PoissonHomoParameter
 
 @snn_kw struct PoissonHomoParameter{FT = Float32} <: PoissonParameter
-    rate::FT = 1Hz
+    rate::FT = 0.001   # 1Hz; the decimal literal is the same Float32 value and exact in Float64
 end
 
 """
@@ -32,21 +33,22 @@ PoissonHetParameter
     rate::FT = 1Hz
 end
 
-function PoissonParameter(rate::FT) where FT <: Real
-    return PoissonHomoParameter(Float32(rate))
+function PoissonParameter(rate::Real; FT::Type{<:AbstractFloat} = Float32)
+    return PoissonHomoParameter(FT(rate))
 end
 
-function PoissonParameter(rate::AbstractVector{FT}) where FT <: AbstractFloat
-    return PoissonHetParameter(Float32.(rate))
+function PoissonParameter(rate::AbstractVector{<:AbstractFloat}; FT::Type{<:AbstractFloat} = Float32)
+    return PoissonHetParameter(FT.(rate))
 end
 
 @snn_kw mutable struct Poisson{VFT = Vector{Float32}, IT = Int32, PP <: PoissonParameter} <: AbstractPopulation
     id::String = randstring(12)
     name::String = "Poisson"
-    param::PP = PoissonHomoParameter()
+    param::PP = PoissonHomoParameter(FT = eltype(VFT))
     N::IT = 100
-    randcache::VFT = rand(N)
+    randcache::VFT = rand(N)   # uniform numbers of the dense regime (probabilities above 3 % per step)
     fire::VBT = zeros(Bool, N)
+    spikes::SpikeIndex = fed_spike_index(N)  # ascending list of the neurons with fire[j], fed by `integrate!`
     records::Dict = Dict()
 end
 
@@ -71,15 +73,19 @@ the Bernoulli approximation of a Poisson process of rate ``\nu_i`` (accurate whe
 (heterogeneous).
 
 # Integration
-`rand!(randcache)`, then `fire[i] = randcache[i] < rate * dt`.
+Spikes are sampled sparsely, with one random draw per spike: the gap to the next firing neuron is drawn from the
+geometric distribution (homogeneous rate), or candidates drawn at the largest probability are thinned (heterogeneous
+rates). When the largest per-step probability is at least 3 % (`_POP_DENSE_SPIKE_P`), every neuron is tested against
+one uniform draw (`randcache`) instead. `spikes` holds the ascending list of the neurons that fired (sparse regime only).
 
 # Fields
 - `id::String = randstring(12)`, `name::String = "Poisson"`.
 - `param::PoissonParameter = PoissonHomoParameter()` (1 Hz).
-- `N::Int32 = 100`; `randcache::Vector{Float32}`; `fire::Vector{Bool}`; `records::Dict`.
+- `N::Int32 = 100`; `randcache::VFT` (dense regime only); `VFT = Vector{Float64}` gives a `Float64` population
+  (see `float_type`); `fire::Vector{Bool}`; `spikes::SpikeIndex`; `records::Dict`.
 
 # References
-[Poisson model of spike generation (D. Heeger, handout)](https://www.cns.nyu.edu/~david/handouts/poisson.pdf), linked in the code.
+[Poisson model of spike generation (D. Heeger, handout)](https://www.cns.nyu.edu/~david/handouts/poisson.pdf).
 
 # Example
 ```julia
@@ -94,38 +100,165 @@ SNN.firing_rate(P; interval = 0:10ms:1s)
 """
 Poisson
 
-function integrate!(p::Poisson, param::PoissonHomoParameter , dt::Float32) 
-    @unpack N, randcache, fire = p
-    @unpack rate = param
-    rand!(randcache)
-    @inbounds for i = 1:N
-        fire[i] = randcache[i] < rate * dt
+# ---- sparse sampling of the spikes of a population (Poisson, InhomogeneousPoisson, VariablePoisson)
+
+# From this per-step probability on, testing every neuron is cheaper than geometric skipping.
+const _POP_DENSE_SPIKE_P = 0.03
+
+# Neuron `j` fires: flag it and append it to the (ascending) list.
+@inline function _pop_fire!(fire::AbstractVector{Bool}, spikes::SpikeIndex, j::Int)
+    @inbounds begin
+        fire[j] = true
+        n = spikes.n + 1
+        spikes.n = n
+        spikes.idx[n] = j
     end
+    return nothing
 end
 
-function integrate!(p::Poisson, param::PoissonHetParameter , dt::Float32) 
-    @unpack N, randcache, fire = p
-    @unpack rate = param
-    rand!(randcache)
-    @inbounds for i = 1:N
-        fire[i] = randcache[i] < rate[i] * dt
+# Clear the flags set in the previous step (where they were set, not with a pass over `N`).
+@inline function _pop_clear!(fire::AbstractVector{Bool}, spikes::SpikeIndex)
+    @inbounds for q in 1:spikes.n
+        fire[spikes.idx[q]] = false
     end
+    spikes.n = 0
+    return nothing
+end
+
+# Dense regime: every neuron is tested against its probability `pj(j)` with a fresh uniform number of `cache`. Only `fire` is
+# written; the list is not fed (`fed = false`), so the connections scan `fire`.
+function _pop_dense!(pj::F, fire, spikes::SpikeIndex, cache::AbstractVector{<:AbstractFloat}, N::Int) where {F}
+    (length(cache) >= N && length(fire) >= N) ||
+        throw(DimensionMismatch("random cache or flags shorter than N = $N"))
+    rand!(cache)
+    @inbounds @simd for j in 1:N
+        fire[j] = cache[j] < pj(j)
+    end
+    spikes.fed = false
+    spikes.valid = false
+    spikes.n = 0
+    return nothing
+end
+
+# Enter or stay in the sparse regime: clear the previous flags (all of them after a dense step) and feed the list.
+@inline function _pop_sparse_start!(fire::AbstractVector{Bool}, spikes::SpikeIndex)
+    if spikes.fed
+        _pop_clear!(fire, spikes)
+    else
+        fill!(fire, false)
+        spikes.n = 0
+        spikes.fed = true
+        spikes.valid = false
+    end
+    return nothing
+end
+
+# Bernoulli(`pr`) trial for each of `N` neurons by geometric skipping: the gap to the next spike is `floor(log(1 - U) / log(1 - pr))`.
+# The previous flags must have been cleared.
+function _pop_bernoulli!(fire, spikes::SpikeIndex, N::Int, pr::Float64)
+    pr > 0 || return nothing
+    lq = log1p(-pr)
+    j = 0
+    @inbounds while true
+        x = log1p(-rand()) / lq
+        j + 1.0 + x >= N + 1.0 && break
+        j += 1 + floor(Int, x)
+        _pop_fire!(fire, spikes, j)
+    end
+    return nothing
+end
+
+# Neuron `j` fires with probability `pj(j) <= pmax`, independently: candidates with probability `pmax` (geometric skipping), each kept with
+# probability `pj(j) / pmax`, so every neuron fires with probability exactly `pj(j)`. The previous flags must have been cleared.
+function _pop_thinned!(pj::F, fire, spikes::SpikeIndex, N::Int, pmax::Float64) where {F}
+    pmax > 0 || return nothing
+    lq = log1p(-pmax)
+    j = 0
+    @inbounds while true
+        x = log1p(-rand()) / lq
+        j + 1.0 + x >= N + 1.0 && break
+        j += 1 + floor(Int, x)
+        q = pj(j)
+        (q >= pmax || rand() * pmax < q) && _pop_fire!(fire, spikes, j)
+    end
+    return nothing
+end
+
+function integrate!(p::Poisson, param::PoissonHomoParameter , dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # in the precision of the population
+    @unpack N, fire, spikes, randcache = p
+    pr = Float64(param.rate * dt)
+    if pr >= _POP_DENSE_SPIKE_P
+        pf = convert(eltype(randcache), param.rate * dt)
+        _pop_dense!(j -> pf, fire, spikes, randcache, Int(N))
+    else
+        _pop_sparse_start!(fire, spikes)
+        _pop_bernoulli!(fire, spikes, Int(N), pr)
+    end
+    return nothing
+end
+
+function integrate!(p::Poisson, param::PoissonHetParameter , dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # in the precision of the population
+    @unpack N, fire, spikes, randcache = p
+    @unpack rate = param
+    length(rate) >= N || throw(DimensionMismatch("the rate vector has $(length(rate)) entries for N = $N neurons"))
+    n = Int(N)
+    if !spikes.fed
+        # dense regime of the last step: stay dense and get the largest probability in the same pass; when it drops below the
+        # threshold, resume the sparse sampling next step
+        length(randcache) >= n && length(fire) >= n || throw(DimensionMismatch("random cache or flags shorter than N = $N"))
+        rand!(randcache)
+        pm = zero(eltype(randcache))
+        @inbounds @simd for j in 1:n
+            q = rate[j] * dt
+            fire[j] = randcache[j] < q
+            pm = @fastmath max(pm, q)
+        end
+        spikes.valid = false
+        spikes.n = 0
+        if Float64(pm) < _POP_DENSE_SPIKE_P
+            spikes.n = _flags_to_list!(spikes.idx, fire)
+            spikes.fed = true
+        end
+        return nothing
+    end
+    rmax = eltype(rate)(-Inf)
+    @inbounds @fastmath for j in 1:n
+        rmax = max(rmax, rate[j])
+    end
+    pmax = Float64(rmax * dt)
+    if pmax >= _POP_DENSE_SPIKE_P
+        _pop_dense!(j -> @inbounds(rate[j] * dt), fire, spikes, randcache, n)
+    else
+        _pop_clear!(fire, spikes)
+        _pop_thinned!(j -> Float64(@inbounds(rate[j]) * dt), fire, spikes, n, pmax)
+    end
+    return nothing
+end
+
+spike_index(p::Poisson) = p.spikes
+
+# one precision per population (see `IF`)
+function snn_kw_finalize(::Type{T}, f::NamedTuple) where {T<:Poisson}
+    _check_precision("Poisson", _state_float(T, :randcache), "param" => f.param)
+    return f
 end
 
 @doc raw"""
-    VariablePoissonParameter(; β = 0, τ = 50ms, r0 = 1kHz)
+    VariablePoissonParameter{FT = Float32}(; β = 0, τ = 50ms, r0 = 1kHz)
 
-Parameters of `VariablePoisson`.
-- `β::Float32 = 0.0`: gain of the filtered noise on the rate.
-- `τ::Float32 = 50ms`: time constant of the noise low-pass filter (ms).
-- `r0::Float32 = 1kHz`: target total rate of the population.
+Parameters of `VariablePoisson` (`FT = Float64` for a `Float64` population).
+- `β::FT = 0.0`: gain of the filtered noise on the rate.
+- `τ::FT = 50ms`: time constant of the noise low-pass filter (ms).
+- `r0::FT = 1kHz`: target total rate of the population.
 """
 VariablePoissonParameter
 
-@snn_kw struct VariablePoissonParameter <: AbstractPopulationParameter
-    β::Float32 = 0.0
-    τ::Float32 = 50.0ms
-    r0::Float32 = 1kHz
+@snn_kw struct VariablePoissonParameter{FT = Float32} <: AbstractPopulationParameter
+    β::FT = 0.0
+    τ::FT = 50.0ms
+    r0::FT = 1kHz
 end
 
 
@@ -149,14 +282,13 @@ total rate ``\nu``:
 and each neuron fires with probability ``\nu\, dt / N``, so ``\nu`` is the rate of the whole
 population. With ``\beta = 0`` the slow feedback on ``\rho`` (initialised to ``r_0``) drives
 ``\nu`` to ``r_0``. Note the discontinuity of ``F`` at 0 (values of ``\beta\eta`` in ``(0, 1)``
-reduce the rate below the ``\beta\eta \le 0`` value); this is how the code is written.
+reduce the rate below the ``\beta\eta \le 0`` value).
 
 # Fields
 - `id`, `param`, `name = "VariablePoisson"`, `N::Int32 = 100`, `fire`.
-- `noise::Vector{Float32}` (length 1): ``\eta``; `r::Vector{Float32}` (length 1): ``\rho``.
-- `randcache`; `records::Dict`.
-
-Reference not given in the code.
+- `noise::VFT` (length 1): ``\eta``; `r::VFT` (length 1): ``\rho``; `Erate::VFT` (length 1): the total rate ``\nu`` of the last step.
+  `VFT = Vector{Float64}` with `param = VariablePoissonParameter(FT = Float64)` gives a `Float64` population.
+- `spikes::SpikeIndex`, `randcache`, `records::Dict`. The spikes are sampled as in `Poisson`.
 
 # Example
 ```julia
@@ -176,43 +308,51 @@ VariablePoisson
     name::String = "VariablePoisson"
     N::IT = 100
     fire::VBT = zeros(Bool, N)
-    noise::VFT = zeros(Float32, 1)
-    r::VFT = ones(Float32, 1) * param.r0
+    noise::VFT = zeros(eltype(VFT), 1)
+    r::VFT = ones(eltype(VFT), 1) * param.r0
+    Erate::VFT = zeros(eltype(VFT), 1)  # total rate of the last step
+    spikes::SpikeIndex = fed_spike_index(N)  # ascending list of the neurons with fire[j], fed by `integrate!`
     ##
-    randcache::VFT = rand(N) # random cache
+    randcache::VFT = rand(N) # random cache of the dense regime
     records::Dict = Dict()
 end
 
 
-function integrate!(p::VariablePoisson, param::VariablePoissonParameter, dt::Float32)
-    @unpack N, randcache, fire = p
+function integrate!(p::VariablePoisson, param::VariablePoissonParameter, dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # in the precision of the population
+    @unpack N, fire, spikes, randcache = p
 
     ## Inhomogeneous Poisson process
     @unpack r0, β, τ = param
-    @unpack noise, r = p
-    # Irate::Float32 = r0 * kIE
-    R(x::Float32, v0::Float32 = 0.0f0) = x > 0.0f0 ? x : v0
+    @unpack noise, r, Erate = p
+    FT = eltype(noise)
+    R(x, v0 = zero(x)) = x > zero(x) ? x : v0
 
-    # Excitatory spike
-    re::Float32 = 0.0f0
-    cc::Float32 = 0.0f0
-    Erate::Float32 = 0.0f0
-    rand!(randcache)
-    re = rand() - 0.5f0
-    cc = 1.0f0 - dt / τ
+    re = convert(FT, rand() - 0.5f0)    # Float64 draw rounded to the state type
+    cc = convert(FT, one(FT) - dt / τ)
     i = 1
     noise[i] = (noise[i] - re) * cc + re
-    Erate = R(r0 ./ 2 * R(noise[i] * β, 1.0f0) + r[i], 0.0f0)
-    r[i] += (r0 - Erate) / 400ms * dt
-    @assert Erate >= 0
-    # @inbounds @fastmath 
-    for j = 1:N # loop on presynaptic neurons
-        if randcache[j] < Erate / N * dt
-            fire[j] = true
-        else
-            fire[j] = false
-        end
+    E = convert(FT, R(r0 ./ 2 * R(noise[i] * β, one(FT)) + r[i], zero(FT)))
+    r[i] += (r0 - E) / 400ms * dt
+    @assert E >= 0
+    Erate[1] = E
+    # every neuron fires with probability E / N * dt (sparse sampling, see `Poisson`)
+    pr = Float64(E / N * dt)
+    if pr >= _POP_DENSE_SPIKE_P
+        pf = convert(FT, E / N * dt)
+        _pop_dense!(j -> pf, fire, spikes, randcache, Int(N))
+    else
+        _pop_sparse_start!(fire, spikes)
+        _pop_bernoulli!(fire, spikes, Int(N), pr)
     end
+    return nothing
+end
+
+spike_index(p::VariablePoisson) = p.spikes
+
+function snn_kw_finalize(::Type{T}, f::NamedTuple) where {T<:VariablePoisson}
+    _check_precision("VariablePoisson", _state_float(T, :noise), "param" => f.param)
+    return f
 end
 
 

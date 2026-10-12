@@ -48,8 +48,7 @@ inhibition. Unlike `IF` and `AdEx`, it has no `synapse` field: the conductances 
 population and decay exponentially. Connections
 target one of the conductances: `SpikingSynapse(pre, post, sym; conn)` with `sym` in `:g_Exc`,
 `:g_PV`, `:g_SST`; `:ge`/`:glu` are mapped to `:g_Exc` and `:gi`/`:gaba` to `:g_PV`. A spike of
-weight ``w`` (nS) increments the conductance by ``w``. (Up to SNNModels 1.8.4 there was no
-`synaptic_target` method and this raised a `MethodError`.)
+weight ``w`` (nS) increments the conductance by ``w``.
 
 # Equations
 ```math
@@ -72,11 +71,12 @@ one forward-Euler step of ``v``, threshold test, reset to `Vr` and `tabs = round
 - `id::String = randstring(12)`, `name::String = "ExtendedIF"`.
 - `param::ExtendedIFParameter = ExtendedIFParameter()`.
 - `N::Int32 = 100`.
-- `v`: membrane potential (mV), uniform in `[Vr, Vt]`.
+- `v::VFT`: membrane potential (mV), uniform in `[Vr, Vt]`. `VFT = Vector{Float64}` gives a `Float64` population (see `float_type`).
 - `g_Exc`, `g_PV`, `g_SST`: conductances (nS), zeros.
-- `tabs`: refractory counters (steps, stored as `Float32`), zeros.
+- `tabs`: refractory counters (steps, stored in the float type of the state), zeros.
 - `w`: unused by the dynamics, zeros.
 - `fire::Vector{Bool}`; `I`: external current (pA); `records::Dict`.
+- `spikes::SpikeIndex`: neurons that fired in the step (see `spike_index`).
 - `Δv`, `Δv_temp`: unused buffers.
 
 # Example
@@ -98,7 +98,7 @@ ExtendedIF
 } <: AbstractGeneralizedIF
     id::String = randstring(12)
     name::String = "ExtendedIF"
-    param::IFT = ExtendedIFParameter()
+    param::IFT = ExtendedIFParameter(FT = eltype(VFT))
     N::Int32 = 100
     v::VFT = param.Vr .+ rand(N) .* (param.Vt - param.Vr)
     g_Exc::VFT = zeros(N)
@@ -107,51 +107,55 @@ ExtendedIF
     tabs::VFT = zeros(N)
     w::VFT = zeros(N)
     fire::VBT = zeros(Bool, N)
+    spikes::SpikeIndex = owned_spike_index(N)
     I::VFT = zeros(N)
     records::Dict = Dict()
-    Δv::VFT = zeros(Float32, N)
-    Δv_temp::VFT = zeros(Float32, N)
+    Δv::VFT = zeros(eltype(VFT), N)
+    Δv_temp::VFT = zeros(eltype(VFT), N)
 end
 
-function integrate!(p::ExtendedIF, param::ExtendedIFParameter, dt::Float32)
+function integrate!(p::ExtendedIF, param::ExtendedIFParameter, dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # in the precision of the population
     update_synapses!(p, param, dt)
     update_neuron!(p, param, dt)
 end
 
-function update_neuron!(p::ExtendedIF, param::ExtendedIFParameter, dt::Float32)
+# Branchless: the membrane update is evaluated for every neuron and discarded with `ifelse` for the refractory ones.
+function update_neuron!(p::ExtendedIF, param::ExtendedIFParameter, dt::AbstractFloat)
     @unpack N, v, g_Exc, g_PV, g_SST, w, I, tabs, fire = p
-    @unpack El, E_i, E_e, τabs, gl, α = param
-    @unpack N, v, w, tabs, fire = p
-    @unpack Vt, Vr, τabs = param
-    @inbounds for i = 1:N
-        if tabs[i] > 0
-            fire[i] = false
-            tabs[i] -= 1
-            continue
-        end
+    @unpack El, E_i, E_e, gl, α, Vt, Vr, τabs, Cm = param
+    _check_state_lengths(N, v, g_Exc, g_PV, g_SST, I, tabs, fire)
+    nabs = convert(eltype(tabs), round(Int, τabs / dt))    # refractory steps, loop invariant
+    one_ = one(eltype(tabs))
+    @inbounds @simd for i = 1:N
+        ti = tabs[i]
+        vi = v[i]
+        refr = ti > 0
         # Membrane potential
         dv =
             (
-                gl * (El - v[i]) +
-                g_Exc[i] * (E_e - v[i]) +
-                g_PV[i] * (E_i - v[i]) +
-                g_SST[i] * (E_i - v[i]) +
-                -α * g_Exc[i] * g_SST[i] * (E_e - v[i]) +
+                gl * (El - vi) +
+                g_Exc[i] * (E_e - vi) +
+                g_PV[i] * (E_i - vi) +
+                g_SST[i] * (E_i - vi) +
+                -α * g_Exc[i] * g_SST[i] * (E_e - vi) +
                 + I[i] # synaptic term
                 # 0
-            ) / param.Cm
-        v[i] += dt * dv
-        fire[i] = v[i] > Vt
-        v[i] = ifelse(fire[i], Vr, v[i])
+            ) / Cm
+        vn = vi + dt * dv
+        spk = !refr & (vn > Vt)
+        fire[i] = spk
+        v[i] = ifelse(refr, vi, ifelse(spk, Vr, vn))
         # Absolute refractory period
-        tabs[i] = ifelse(fire[i], round(Int, τabs / dt), tabs[i])
+        tabs[i] = ifelse(refr, ti - one_, ifelse(spk, nabs, ti))
     end
 end
 
-function update_synapses!(p::ExtendedIF, param::ExtendedIFParameter, dt::Float32)
+function update_synapses!(p::ExtendedIF, param::ExtendedIFParameter, dt::AbstractFloat)
     @unpack N, g_Exc, g_PV, g_SST = p
     @unpack τe, τi = param
-    @inbounds for i = 1:N
+    _check_state_lengths(N, g_Exc, g_PV, g_SST)
+    @inbounds @simd for i = 1:N
         g_Exc[i] += dt * (-g_Exc[i] / τe)
         g_PV[i] += dt * (-g_PV[i] / τi)
         g_SST[i] += dt * (-g_SST[i] / τi)
@@ -171,6 +175,12 @@ function synaptic_target(
     v_post = getfield(post, :v)
     push!(targets, :sym => sym)
     return g, v_post
+end
+
+# one precision per population (see `IF`)
+function snn_kw_finalize(::Type{T}, f::NamedTuple) where {T<:ExtendedIF}
+    _check_precision("ExtendedIF", _state_float(T, :v), "param" => f.param)
+    return f
 end
 
 export ExtendedIF, ExtendedIFParameter, update_neuron!, update_synapses!

@@ -54,8 +54,8 @@ DoubleExpSynapse
     τdi::FT = 2ms # Decay time for inhibitory synapses
     E_i::FT = -75mV # Reversal potential excitatory synapses
     E_e::FT = 0mV #Reversal potential excitatory synapses
-    gsyn_e::FT = 1.0f0 #norm_synapse(τre, τde) # Synaptic conductance for excitatory synapses
-    gsyn_i::FT = 1.0f0 #norm_synapse(τri, τdi) # Synaptic conductance for inhibitory synapses
+    gsyn_e::FT = 1.0 #norm_synapse(τre, τde) # Synaptic conductance for excitatory synapses
+    gsyn_i::FT = 1.0 #norm_synapse(τri, τdi) # Synaptic conductance for inhibitory synapses
 end
 
 """
@@ -73,20 +73,14 @@ State variables of `DoubleExpSynapse`, created by `synaptic_variables(::DoubleEx
 DoubleExpSynapseVars
 @snn_kw struct DoubleExpSynapseVars{VFT = Vector{Float32}} <: AbstractSynapseVariable
     N::Int = 100
-    ge::VFT = zeros(Float32, N)
-    gi::VFT = zeros(Float32, N)
-    he::VFT = zeros(Float32, N)
-    hi::VFT = zeros(Float32, N)
+    ge::VFT = zeros(eltype(VFT), N)
+    gi::VFT = zeros(eltype(VFT), N)
+    he::VFT = zeros(eltype(VFT), N)
+    hi::VFT = zeros(eltype(VFT), N)
 end
 
-function synaptic_variables(synapse::DoubleExpSynapse, N::Int)
-    return DoubleExpSynapseVars(;
-        N = N,
-        ge = zeros(Float32, N),
-        gi = zeros(Float32, N),
-        he = zeros(Float32, N),
-        hi = zeros(Float32, N),
-    )
+function synaptic_variables(synapse::DoubleExpSynapse, N::Int, ::Type{FT}) where {FT<:AbstractFloat}
+    return DoubleExpSynapseVars(; N = N, VFT = Vector{FT})
 end
 
 function update_synapses!(
@@ -94,21 +88,34 @@ function update_synapses!(
     synapse::T,
     receptors::RECT,
     synvars::DoubleExpSynapseVars,
-    dt::Float32,
+    dt::AbstractFloat,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractDoubleExpParameter,RECT<:NamedTuple}
-    @unpack N, ge, gi, he, hi = synvars
+    update_synapses!(p, synapse, receptors, synvars, dt, 1:Int(synvars.N))
+end
+
+# Chunk method: the neurons `rng` only; clears the spike buffers of the same neurons.
+function update_synapses!(
+    p::P,
+    synapse::T,
+    receptors::RECT,
+    synvars::DoubleExpSynapseVars,
+    dt::AbstractFloat,
+    rng::UnitRange{Int},
+) where {P<:AbstractGeneralizedIF,T<:AbstractDoubleExpParameter,RECT<:NamedTuple}
+    @unpack ge, gi, he, hi = synvars
     @unpack τde, τre, τdi, τri = synapse
     @unpack gaba, glu = receptors
-    @inbounds @simd for i ∈ 1:N
+    z = zero(eltype(glu))
+    @inbounds @simd for i ∈ rng
         he[i] += glu[i]
         hi[i] += gaba[i]
         ge[i] += dt * (-ge[i] / τde + he[i])
         he[i] += dt * (-he[i] / τre)
         gi[i] += dt * (-gi[i] / τdi + hi[i])
         hi[i] += dt * (-hi[i] / τri)
+        glu[i] = z
+        gaba[i] = z
     end
-    fill!(glu, 0.0f0)
-    fill!(gaba, 0.0f0)
 end
 
 
@@ -118,13 +125,15 @@ end
     synvars::DoubleExpSynapseVars,
     v::VT1, # membrane potential
     syncurr::VT2, # synaptic current
+    rng::UnitRange{Int} = 1:Int(p.N),
 ) where {T<:AbstractPopulation,VT1<:AbstractVector,VT2<:AbstractVector}
     @unpack gsyn_e, gsyn_i, E_e, E_i = synapse
-    @unpack N = p
     @unpack ge, gi = synvars
-    @inbounds @simd for i ∈ 1:N
+    @inbounds @simd for i ∈ rng
         syncurr[i] = ge[i] * (v[i] - E_e) * gsyn_e + gi[i] * (v[i] - E_i) * gsyn_i
     end
 end
+
+_chunk_synapse(::AbstractDoubleExpParameter) = true
 
 export DoubleExpSynapse

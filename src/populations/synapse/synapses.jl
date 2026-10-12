@@ -9,7 +9,7 @@ A synapse model is a parameter struct that is stored in the population (field `s
 connections are turned into a synaptic current. Each population owns three objects created
 from it:
 
-- `receptors::NamedTuple` (built by `synaptic_receptors`): one `Vector{Float32}` of length `N`
+- `receptors::NamedTuple` (built by `synaptic_receptors`): one vector (`Float32` by default) of length `N`
   per receptor group, by default `(glu = ..., gaba = ...)`. Connections (`SpikingSynapse`)
   add the weight of every presynaptic spike to the entry of the postsynaptic neuron in
   `forward!`.
@@ -25,8 +25,8 @@ current from the state and the membrane potential). The neuron equations use the
 convention ``C\,dV/dt = \ldots - I_{syn}``, so a positive `syn_curr` hyperpolarises.
 
 # Interface to implement for a new synapse model
-- `synaptic_variables(synapse, N)` returning an `AbstractSynapseVariable`;
-- `synaptic_receptors(synapse, N)` (optional, default `(glu = zeros(Float32, N), gaba = zeros(Float32, N))`);
+- `synaptic_variables(synapse, N, FT)` returning an `AbstractSynapseVariable` with state of element type `FT`;
+- `synaptic_receptors(synapse, N, FT)` (optional, default `(glu = zeros(FT, N), gaba = zeros(FT, N))`);
 - `update_synapses!(p, synapse, receptors, synvars, dt)`;
 - `synaptic_current!(p, synapse, synvars, v, syn_curr)`.
 
@@ -52,7 +52,8 @@ per compartment, created by `synaptic_variables(synapse, N)`).
   `AbstractReceptorVariable`): matrices `g`, `h` of size `N x n_receptors`
 - `Confavreux2025SynapseVars` (for `Confavreux2025Synapse`): `gAMPA`, `gNMDA`, `gGABA`
 
-All state variables are `Float32`.
+The state variables have the precision of the population (`Float32` by default, `Float64` for a population built with
+`VFT = Vector{Float64}`).
 """
 abstract type AbstractSynapseVariable <: AbstractComponent end
 
@@ -61,7 +62,6 @@ include("synapses/DeltaSynapse.jl")
 include("synapses/DoubleExpSynapse.jl")
 include("synapses/SingleExpSynapse.jl")
 include("synapses/ReceptorSynapse.jl")
-# include("synapses/MultiReceptorSynapse.jl")
 include("synapses/DoubleExpCurrentSynapse.jl")
 include("synapses/Confraveux2025.jl")
 
@@ -85,27 +85,42 @@ function get_synapse_symbol(synapse::T, sym::Symbol) where {T<:AbstractSynapsePa
 end
 
 """
-    synaptic_variables(synapse::AbstractSynapseParameter, N::Int) -> AbstractSynapseVariable
+    synaptic_variables(synapse::AbstractSynapseParameter, N::Int[, FT]) -> AbstractSynapseVariable
 
-Allocate the state variables (all zero, `Float32`) of the synapse model `synapse` for `N`
-neurons or compartments. Every synapse model implements a method; the fallback throws an error.
+Allocate the state variables (all zero, element type `FT`, default `float_type(synapse)`) of the synapse model
+`synapse` for `N` neurons or compartments. Every synapse model implements the three-argument method.
 """
-function synaptic_variables(synapse::AbstractSynapseParameter, N::Int)
+synaptic_variables(synapse::AbstractSynapseParameter, N::Int) = synaptic_variables(synapse, N, float_type(synapse))
+function synaptic_variables(synapse::AbstractSynapseParameter, N::Int, ::Type{FT}) where {FT<:AbstractFloat}
+    _two_argument_only(synaptic_variables, synapse, FT) && return synaptic_variables(synapse, N)
     error("synaptic_variables not implemented for synapse type $(typeof(synapse))")
 end
 
-"""
-    synaptic_receptors(synapse::AbstractSynapseParameter, N::Int) -> NamedTuple
-
-Allocate the spike-input buffers of a population: a `NamedTuple` of `Vector{Float32}` of length
-`N`, one per receptor group. The default is `(glu = zeros(Float32, N), gaba = zeros(Float32, N))`;
-`MultiReceptorSynapse` creates one buffer per distinct receptor `target`. Connections add their
-weights into these buffers and `update_synapses!` empties them at every step.
-"""
-function synaptic_receptors(synapse::AbstractSynapseParameter, N::Int)
-    return (glu = zeros(Float32, N), gaba = zeros(Float32, N))
-    # error("synaptic_receptors not implemented for synapse type $(typeof(synapse))")
+# A synapse model that defines only the two-argument `synaptic_variables`/`synaptic_receptors` keeps working when `FT` is
+# its own precision; for another precision the error asks for the three-argument method.
+function _two_argument_only(f, synapse, ::Type{FT}) where {FT}
+    which(f, Tuple{typeof(synapse),Int}).sig == Tuple{typeof(f),AbstractSynapseParameter,Int} && return false
+    FT === float_type(synapse) && return true
+    error("synapse type $(typeof(synapse)) defines only `$(nameof(f))(synapse, N)` (precision $(float_type(synapse))); " *
+          "a $FT population needs the method `$(nameof(f))(synapse, N, FT)` (SNNModels 1.10)")
 end
+
+"""
+    synaptic_receptors(synapse::AbstractSynapseParameter, N::Int[, FT]) -> NamedTuple
+
+Allocate the spike-input buffers of a population: a `NamedTuple` of `Vector{FT}` of length
+`N`, one per receptor group. The default is `(glu = zeros(FT, N), gaba = zeros(FT, N))`;
+`MultiReceptorSynapse` creates one buffer per distinct receptor `target`. Connections add their
+weights into these buffers and `update_synapses!` empties them at every step. `FT` defaults to `float_type(synapse)`.
+"""
+synaptic_receptors(synapse::AbstractSynapseParameter, N::Int) = synaptic_receptors(synapse, N, float_type(synapse))
+function synaptic_receptors(synapse::AbstractSynapseParameter, N::Int, ::Type{FT}) where {FT<:AbstractFloat}
+    _two_argument_only(synaptic_receptors, synapse, FT) && return synaptic_receptors(synapse, N)
+    return (glu = zeros(FT, N), gaba = zeros(FT, N))
+end
+
+# Copy of a synapse model in precision `T`; the object itself when already in `T` or without floating-point fields.
+convert_precision(x::AbstractSynapseParameter, ::Type{T}) where {T<:AbstractFloat} = _convert_float_struct(x, T)
 
 """
     update_synapses!(p, synapse, receptors::NamedTuple, synvars::AbstractSynapseVariable, dt::Float32)

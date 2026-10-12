@@ -34,7 +34,7 @@ later step.
    `fireI` inside, then clamp all W. `MexicanHat(x)` returns `Int 0` on NaN (type instability).
 5. `STDPSymmetric`/`STDPAntiSymmetric` (`STDP_structured.jl`): weight updates already event-driven,
    but a full `clamp` over all W every step (O(nnz)).
-6. `iSTDPRate/iSTDPTime/iSTDPPotential`: already event-driven with touched-only clamp (traces Euler
+6. `iSTDPRate/iSTDPPotential`: already event-driven with touched-only clamp (traces Euler
    per step). Not modified. Suspicious but out of scope, to be reported: `@turbo for st = rowptr...;
    st = index[st]` rebinds the loop variable inside `@turbo`.
 7. `vSTDPParameter` (Clopath): LTP depends on the continuous post voltage every step; it cannot be

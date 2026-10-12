@@ -1,10 +1,10 @@
 # abstract type AbstractIFParameter <: AbstractGeneralizedIFParameter end
 
 """
-    integrate!(p::AbstractGeneralizedIF, param::AbstractGeneralizedIFParameter, dt::Float32)
+    integrate!(p::AbstractGeneralizedIF, param::AbstractGeneralizedIFParameter, dt)
 
-One integration step of a generalized integrate-and-fire population (`IF`, `AdEx`, `Tripod`,
-`BallAndStick`). Calls, in this order,
+One integration step of a generalized integrate-and-fire population (`IF`, `AdEx`; the other
+models have their own method). Calls, in this order,
 1. `update_synapses!(p, p.synapse, p.receptors, p.synvars, dt)`: the spikes written by the
    connections into `p.receptors` during the previous step are added to the synaptic variables,
    which are then integrated over `dt`; the receptor buffers are zeroed;
@@ -16,12 +16,32 @@ One integration step of a generalized integrate-and-fire population (`IF`, `AdEx
 function integrate!(
     p::P,
     param::T,
-    dt::Float32,
+    dt_::AbstractFloat,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractGeneralizedIFParameter}
-    update_synapses!(p, p.synapse, p.receptors, p.synvars, dt)
-    synaptic_current!(p, p.synapse, p.synvars)
-    update_neuron!(p, param, dt)
+    dt = _step_dt(p, dt_)   # in the precision of the population
+    dt_ isa Float32 || _float64_supported(p) || throw(ArgumentError(
+        "population $(nameof(typeof(p))) is not implemented in $(typeof(dt_)) (populations with Float64 state: $(_FLOAT64_POPULATIONS))"))
+    if _chunkable(p, p.synapse)
+        # the three stages are per-neuron and independent across neurons: one fork/join per population and step
+        synapse, receptors, synvars = p.synapse, p.receptors, p.synvars
+        foreach_chunk(Int(p.N)) do rng
+            update_synapses!(p, synapse, receptors, synvars, dt, rng)
+            synaptic_current!(p, synapse, synvars, rng)
+            update_neuron!(p, param, dt, rng)
+        end
+    else
+        update_synapses!(p, p.synapse, p.receptors, p.synvars, dt)
+        synaptic_current!(p, p.synapse, p.synvars)
+        update_neuron!(p, param, dt)
+    end
 end
+
+# populations and synapse models whose three stages have chunk methods (`..., rng::UnitRange{Int}`)
+_chunk_population(::AbstractGeneralizedIF) = false
+# generalized IF populations whose model is implemented in other precisions than Float32 (all but `HetRec`)
+_float64_supported(::AbstractGeneralizedIF) = true
+_chunk_synapse(::AbstractSynapseParameter) = false
+@inline _chunkable(p, synapse) = _chunk_population(p) && _chunk_synapse(synapse)
 
 # Three-argument form used by `integrate!`: writes the synaptic current of every neuron into
 # `p.syn_curr`, using the membrane potential `p.v`.
@@ -32,4 +52,14 @@ end
 ) where {P<:AbstractGeneralizedIF,T<:AbstractSynapseParameter,SYN<:AbstractSynapseVariable}
     @unpack N, v, syn_curr = p
     synaptic_current!(p, synapse, synvars, v, syn_curr)
+end
+
+# chunk form: the neurons `rng` only (synapse models with a six-argument method)
+@inline function synaptic_current!(
+    p::P,
+    synapse::T,
+    synvars::SYN,
+    rng::UnitRange{Int},
+) where {P<:AbstractGeneralizedIF,T<:AbstractSynapseParameter,SYN<:AbstractSynapseVariable}
+    synaptic_current!(p, synapse, synvars, p.v, p.syn_curr, rng)
 end

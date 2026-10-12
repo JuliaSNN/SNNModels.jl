@@ -65,12 +65,14 @@ finally spikes are detected (`v > 30`) and reset. No refractory period.
 # Fields
 - `id::String = randstring(12)`, `name::String = "IZ"`, `param::IZParameter = IZParameter()`.
 - `N::Int32 = 100`.
-- `v::Vector{Float32} = fill(-65, N)`: membrane potential (mV).
-- `u::Vector{Float32} = param.b * v`: recovery variable.
-- `fire::Vector{Bool}`; `I::Vector{Float32}`: external input (mV/ms), zeros.
-- `ge::Vector{Float32} = (1.5randn(N) .+ 4) .* 10nS`: excitatory conductance, random initial
+- `VFT = Vector{Float32}`: type of the state vectors; `Vector{Float64}` gives a `Float64` population (see `float_type`).
+- `v::VFT = fill(-65, N)`: membrane potential (mV).
+- `u::VFT = param.b * v`: recovery variable.
+- `fire::Vector{Bool}`; `I::VFT`: external input (mV/ms), zeros.
+- `spikes::SpikeIndex`: neurons that fired in the step (see `spike_index`).
+- `ge::VFT = (1.5randn(N) .+ 4) .* 10nS`: excitatory conductance, random initial
   values (mean 40 nS).
-- `gi::Vector{Float32} = (12randn(N) .+ 20) .* 10nS`: inhibitory conductance, random initial
+- `gi::VFT = (12randn(N) .+ 20) .* 10nS`: inhibitory conductance, random initial
   values (mean 200 nS, can be negative).
 - `records::Dict`.
 
@@ -93,11 +95,12 @@ IZ
 @snn_kw mutable struct IZ{VFT = Vector{Float32},VBT = Vector{Bool}} <: AbstractPopulation
     id::String = randstring(12)
     name::String = "IZ"
-    param::IZParameter = IZParameter()
+    param::IZParameter = IZParameter(FT = eltype(VFT))
     N::Int32 = 100
     v::VFT = fill(-65.0, N)
     u::VFT = param.b * v
     fire::VBT = zeros(Bool, N)
+    spikes::SpikeIndex = owned_spike_index(N)
     I::VFT = zeros(N)
     records::Dict = Dict()
     ge::VFT = (1.5randn(N) .+ 4) .* 10nS
@@ -117,32 +120,44 @@ function synaptic_target(
 end
 
 """
-    integrate!(p::IZ, param::IZParameter, dt::Float32)
+    integrate!(p::IZ, param::IZParameter, dt)
 
 One step of the Izhikevich population: exponential decay of `ge`, `gi` (forward Euler), two
 half steps of the quadratic membrane equation, one step of `u`, the synaptic term, then spike
 detection (`v > 30`) with reset `v = c`, `u += d`. See `IZ`.
 """
-function integrate!(p::IZ, param::IZParameter, dt::Float32)
+function integrate!(p::IZ, param::IZParameter, dt_::AbstractFloat)
+    dt = _step_dt(p, dt_)   # in the precision of the population
     @unpack N, v, u, fire, I = p
-    @unpack a, b, c, d = param
+    @unpack a, b, c, d, τe, τi, Ee, Ei = param
     @unpack ge, gi = p
-    @inbounds for i = 1:N
-        ge[i] += dt * -ge[i] / param.τe
-        gi[i] += dt * -gi[i] / param.τi
-    end
-    @inbounds for i = 1:N
-        v[i] += 0.5f0 * dt * (0.04f0 * v[i]^2 + 5.0f0 * v[i] + 140.0f0 - u[i] + I[i])
-        v[i] += 0.5f0 * dt * (0.04f0 * v[i]^2 + 5.0f0 * v[i] + 140.0f0 - u[i] + I[i])
-        u[i] += dt * (a * (b * v[i] - u[i]))
-        v[i] += dt * (ge[i] * (param.Ee - v[i]) + gi[i] * (param.Ei - v[i]))
-    end
-    @inbounds for i = 1:N
-        fire[i] = v[i] > 30.0f0
-        v[i] = ifelse(fire[i], c, v[i])
-        u[i] += ifelse(fire[i], d, 0.0f0)
+    _check_state_lengths(N, v, u, fire, I, ge, gi)
+    T = eltype(v)    # literals in the precision of the state (`T(0.04) === 0.04f0` in Float32)
+    # one fused pass over the independent neurons; every intermediate is rounded to its array type
+    Tv = eltype(v); Tu = eltype(u); Tg = eltype(ge); Tgi = eltype(gi)
+    @inbounds @simd for i = 1:N
+        gei = convert(Tg, ge[i] + dt * -ge[i] / τe)
+        gii = convert(Tgi, gi[i] + dt * -gi[i] / τi)
+        ge[i] = gei
+        gi[i] = gii
+        vi = v[i]
+        ui = u[i]
+        vi = convert(Tv, vi + T(0.5) * dt * (T(0.04) * vi^2 + T(5.0) * vi + T(140.0) - ui + I[i]))
+        vi = convert(Tv, vi + T(0.5) * dt * (T(0.04) * vi^2 + T(5.0) * vi + T(140.0) - ui + I[i]))
+        ui = convert(Tu, ui + dt * (a * (b * vi - ui)))
+        vi = convert(Tv, vi + dt * (gei * (Ee - vi) + gii * (Ei - vi)))
+        spk = vi > T(30.0)
+        fire[i] = spk
+        v[i] = ifelse(spk, c, vi)
+        u[i] = ui + ifelse(spk, d, T(0.0))
     end
 end
 
+
+# one precision per population (see `IF`)
+function snn_kw_finalize(::Type{T}, f::NamedTuple) where {T<:IZ}
+    _check_precision("IZ", _state_float(T, :v), "param" => f.param)
+    return f
+end
 
 export IZ, IZParameter

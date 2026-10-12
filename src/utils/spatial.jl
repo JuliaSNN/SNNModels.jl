@@ -1,6 +1,5 @@
 using Random
 using LinearAlgebra
-using Parameters
 using SpecialFunctions
 
 """

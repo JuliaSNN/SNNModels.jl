@@ -197,7 +197,6 @@ Exported but undefined: `SNN.LTPParam`, `SNN.SNNModel`, `SNN.STPParam`, `SNN.mak
 | `iSTDPParameter (not exported)` | SNNModels | abstract type | connections/sparse_plasticity/iSTDP.jl | n | y | y |  | y | n | n |
 | `iSTDPPotential` | SNNModels | type | connections/sparse_plasticity/iSTDP.jl | y | y | y | correct; added equations and the 0 mV initial trace | y | y | y |
 | `iSTDPRate` | SNNModels | type | connections/sparse_plasticity/iSTDP.jl | y | y | y | correct; example not self-contained (undefined SNN in a fresh module), no equations | y | y | y |
-| `iSTDPTime` | SNNModels | type | connections/sparse_plasticity/iSTDP.jl | y | y | y |  | y | y | y |
 | `iSTDPVariables` | SNNModels | type | connections/sparse_plasticity/iSTDP.jl | y | y | y |  | y | y | y |
 | `LTP` | SNNModels | type | connections/sparse_plasticity.jl | y | n | na |  | y | n | y |
 | `no_PlasticityVariables` | SNNModels | undef | connections/sparse_plasticity.jl | y | n | na | exported but not defined | n | n | n |

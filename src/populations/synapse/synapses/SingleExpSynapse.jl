@@ -45,8 +45,8 @@ SingleExpSynapse
     τi::FT = 0.5ms # Rise time for inhibitory synapses
     E_i::FT = -75mV # Reversal potential excitatory synapses
     E_e::FT = 0mV # Reversal potential excitatory synapses
-    gsyn_e::FT = 1.0f0 #norm_synapse(τre, τde) # Synaptic conductance for excitatory synapses
-    gsyn_i::FT = 1.0f0 #norm_synapse(τri, τdi) # Synaptic conductance for inhibitory synapses
+    gsyn_e::FT = 1.0 #norm_synapse(τre, τde) # Synaptic conductance for excitatory synapses
+    gsyn_i::FT = 1.0 #norm_synapse(τri, τdi) # Synaptic conductance for inhibitory synapses
 end
 
 """
@@ -63,12 +63,12 @@ SingleExpSynapseVars
 
 @snn_kw struct SingleExpSynapseVars{VFT = Vector{Float32}} <: AbstractSynapseVariable
     N::Int = 100
-    ge::VFT = zeros(Float32, N)
-    gi::VFT = zeros(Float32, N)
+    ge::VFT = zeros(eltype(VFT), N)
+    gi::VFT = zeros(eltype(VFT), N)
 end
 
-function synaptic_variables(synapse::SingleExpSynapse, N::Int)
-    return SingleExpSynapseVars(; N = N, ge = zeros(Float32, N), gi = zeros(Float32, N))
+function synaptic_variables(synapse::SingleExpSynapse, N::Int, ::Type{FT}) where {FT<:AbstractFloat}
+    return SingleExpSynapseVars(; N = N, VFT = Vector{FT})
 end
 
 function update_synapses!(
@@ -76,19 +76,35 @@ function update_synapses!(
     synapse::T,
     receptors::RECT,
     synvars::SingleExpSynapseVars,
-    dt::Float32,
+    dt::AbstractFloat,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractSinExpParameter,RECT<:NamedTuple}
-    @unpack N, ge, gi = synvars
+    update_synapses!(p, synapse, receptors, synvars, dt, 1:Int(synvars.N))
+end
+
+# Chunk method: the neurons `rng` only; clears the spike buffers of the same neurons. `@noinline` and a separate clearing
+# loop: as in `CurrentSynapse`.
+@noinline function update_synapses!(
+    p::P,
+    synapse::T,
+    receptors::RECT,
+    synvars::SingleExpSynapseVars,
+    dt::AbstractFloat,
+    rng::UnitRange{Int},
+) where {P<:AbstractGeneralizedIF,T<:AbstractSinExpParameter,RECT<:NamedTuple}
+    @unpack ge, gi = synvars
     @unpack τe, τi = synapse
     @unpack glu, gaba = receptors
-    @fastmath @inbounds for i ∈ 1:N
+    @fastmath @inbounds for i ∈ rng
         ge[i] += glu[i]
         gi[i] += gaba[i]
         ge[i] += dt * (-ge[i] / τe)
         gi[i] += dt * (-gi[i] / τi)
     end
-    fill!(glu, 0.0f0)
-    fill!(gaba, 0.0f0)
+    z = zero(eltype(glu))
+    @inbounds for i ∈ rng
+        glu[i] = z
+        gaba[i] = z
+    end
 end
 
 @inline function synaptic_current!(
@@ -97,6 +113,7 @@ end
     synvars::SingleExpSynapseVars,
     v::VT1, # membrane potential
     syncurr::VT2, # synaptic current
+    rng::UnitRange{Int} = 1:Int(p.N),
 ) where {
     P<:AbstractGeneralizedIF,
     T<:AbstractSinExpParameter,
@@ -104,11 +121,12 @@ end
     VT2<:AbstractVector,
 }
     @unpack gsyn_e, gsyn_i, E_e, E_i = synapse
-    @unpack N, = p
     @unpack ge, gi = synvars
-    @inbounds @simd for i ∈ 1:N
+    @inbounds @simd for i ∈ rng
         syncurr[i] = ge[i] * (v[i] - E_e) * gsyn_e + gi[i] * (v[i] - E_i) * gsyn_i
     end
 end
+
+_chunk_synapse(::AbstractSinExpParameter) = true
 
 export SingleExpSynapse

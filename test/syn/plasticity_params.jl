@@ -47,12 +47,6 @@ using Test
         @test p2.τy ≈ 80ms
     end
 
-    @testset "iSTDPTime" begin
-        p = iSTDPTime()
-        @test p isa iSTDPTime
-        @test hasproperty(p, :η) && hasproperty(p, :τy)
-    end
-
     @testset "iSTDPPotential" begin
         p = iSTDPPotential()
         @test p isa iSTDPPotential

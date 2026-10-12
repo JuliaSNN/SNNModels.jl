@@ -132,6 +132,7 @@ end
 Build a `Turnover` acting on `synapse`.
 """
 function MetaPlasticity(param::T, synapse; kwargs...) where {T<:TurnoverParam}
+    _require_float32("Turnover", synapse.W)
     targets = Dict(:synapses => [synapse.id], :post => synapse.targets[:post])
     Turnover(; param, kwargs..., synapse, targets, ST = typeof(synapse))
 end
@@ -139,12 +140,12 @@ end
 function forward!(c::Turnover, param::T) where {T<:TurnoverParam} end
 
 """
-    plasticity!(c::Turnover, param::RandomTurnover, dt::Float32, T::Time)
+    plasticity!(c::Turnover, param::RandomTurnover, dt::AbstractFloat, T::Time)
 
 Every `max(1, round(Int, τ / dt))` steps, rewire each synapse with probability
 `param.threshold` (see `RandomTurnover`). Called only by `train!`.
 """
-function plasticity!(c::Turnover, param::RandomTurnover, dt::Float32, T::Time)
+function plasticity!(c::Turnover, param::RandomTurnover, dt::AbstractFloat, T::Time)
     if get_step(T) % max(1, round(Int, param.τ / dt)) == 0
         resize!(c.p_values, length(c.synapse.W))
         rand!(c.p_values)
@@ -154,12 +155,12 @@ function plasticity!(c::Turnover, param::RandomTurnover, dt::Float32, T::Time)
 end
 
 """
-    plasticity!(c::Turnover, param::ActivityDependentTurnover, dt::Float32, T::Time)
+    plasticity!(c::Turnover, param::ActivityDependentTurnover, dt::AbstractFloat, T::Time)
 
 Update the activity traces and, every `max(1, round(Int, τ / dt))` steps, rewire the least
 co-active synapses (see `Turnover`). Called only by `train!`.
 """
-function plasticity!(c::Turnover, param::ActivityDependentTurnover, dt::Float32, T::Time)
+function plasticity!(c::Turnover, param::ActivityDependentTurnover, dt::AbstractFloat, T::Time)
     @unpack synapse, p, pre, post, p_values = c
     @unpack fraction, μ, τpre, τpost = param
     @turbo for i in eachindex(synapse.fireJ)
@@ -246,6 +247,7 @@ function synaptic_turnover!(
     p_values = nothing,
 ) where {S<:AbstractConnection}
     # @info "Performing synaptic turnover on $(C.name)"
+    sync_weights!(C)   # deferred weight updates (vSTDPParameter) are materialised before the synapses move
     p_values = isnothing(p_values) ? rand(Uniform(0, 1), length(C.W)) : p_values
     all_post = Set(1:length(C.fireI))
     all_posts = postsynaptic(C)
@@ -281,7 +283,7 @@ function synaptic_turnover!(
     for (s, new_post) in zip(rep_connections, rep_neurons)
         C.I[s] = new_post
         C.W[s] = rand(wdist)
-        hasfield(typeof(C), :ρ) && (C.ρ[s] = 1.0f0)
+        hasfield(typeof(C), :ρ) && length(C.ρ) == length(C.W) && (C.ρ[s] = 1.0f0)   # ρ is stored only with a short-term rule
     end
     update_sparse_matrix!(C)
 end

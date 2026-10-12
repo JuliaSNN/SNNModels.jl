@@ -121,8 +121,10 @@ At each step, for every targeted neuron ``n``:
 ```math
 g_n \leftarrow g_n + \mu\, k_n, \qquad k_n \sim \mathrm{Poisson}(\nu(t)\,\Delta t)
 ```
-Nothing is added when ``\nu(t)\,\Delta t \le 0`` (or approximately 0), or when
-`param.active[1] == false`.
+Nothing is added when ``\nu(t)\,\Delta t \le 0`` or when `param.active[1] == false`.
+
+The counts are sampled sparsely, at a cost proportional to the number of input spikes (see
+[`stimulate!`](@ref)). Neurons written are logged in `inbox` (see `attach_driver!`).
 
 # Constructor arguments
 - `post`: target population.
@@ -140,8 +142,11 @@ Nothing is added when ``\nu(t)\,\Delta t \le 0`` (or approximately 0), or when
 - `id::String`, `name::String = "Poisson"`
 - `param::PoissonStimulusParameter`
 - `neurons::Vector{Int}`: targeted neuron indices.
-- `g::Vector{Float32}`: the target variable of `post` (shared, not copied).
+- `g::VFT`: the target variable of `post` (shared, not copied); `VFT` and `param` follow the precision of `post`.
 - `targets::Dict`, `records::Dict`
+- `inbox`: log of the neurons of `post` written (see `attach_driver!`), or `nothing`.
+
+The stimulus has no spike vector of its own (it is not a presynaptic population).
 
 # Example
 ```julia
@@ -156,15 +161,20 @@ SNN.sim!(; model, duration = 100ms)
 """
 PoissonStimulus
 
-@snn_kw struct PoissonStimulus{VFT = Vector{Float32}} <: AbstractStimulus
+# whether `stimulate!` with this parameter logs the neurons it writes in `inbox` (only the built-in parameters do)
+_logs_writes(::PoissonStimulusParameter) = false
+_logs_writes(::Union{PoissonFixed,PoissonVariable,PoissonInterval}) = true
+
+@snn_kw struct PoissonStimulus{VFT = Vector{Float32},PT <: PoissonStimulusParameter,TLT = Nothing} <: AbstractStimulus
     id::String = randstring(12)
     name::String = "Poisson"
-    param::PoissonStimulusParameter
+    param::PT
     ##
     neurons::VIT
     g::VFT # target conductance for soma
     targets::Dict = Dict()
     records::Dict = Dict()
+    inbox::TLT = nothing  # log of the neurons of `post` written (TouchList), if post has a sparse update
 end
 
 
@@ -179,6 +189,7 @@ function PoissonStimulus(
 ) where {T<:AbstractPopulation}
     targets = Dict(:pre => :PoissonStim, :post => post.id)
     g, _ = synaptic_target(targets, post, sym, comp)
+    param = convert_precision(param, eltype(g))   # the stimulus has the precision of its target (`float_type`)
     if neurons == :ALL
         neurons = eachindex(1:post.N)
     elseif isa(neurons, Vector{Int})
@@ -192,9 +203,14 @@ function PoissonStimulus(
         end
     end
 
-    # Construct the SpikingSynapse instance
+    # a user-defined parameter with its own `stimulate!` does not log its writes: the target keeps its dense update
+    inbox = _logs_writes(param) ? attach_driver!(post) : nothing
     return PoissonStimulus(;
+        VFT = Vector{eltype(g)},
         param = param,
+        PT = typeof(param),
+        inbox = inbox,
+        TLT = typeof(inbox),
         targets = targets,
         neurons = neurons,
         g = g,
@@ -249,30 +265,69 @@ function get_poisson_rate(param::PoissonInterval, time::Time)
 end
 
 """
-    stimulate!(p::PoissonStimulus, param::PoissonStimulusParameter, time::Time, dt::Float32)
+    _zt_poisson(λ)
 
-If `param.active[1]`, draw for every neuron in `p.neurons` a Poisson count with mean
-`get_poisson_rate(param, time) * dt` and add `param.μ` times that count to `p.g`.
+Draw `k ~ Poisson(λ)` conditioned on `k >= 1`: by inversion of the truncated cdf for `λ < 1`, by
+rejection of `Poisson(λ)` draws otherwise.
+"""
+@inline function _zt_poisson(λ::Float64)
+    if λ < 1.0
+        pk = λ / expm1(λ)
+        u = rand()
+        u < pk && return 1
+        k = 1
+        cdf = pk
+        while k < 64
+            k += 1
+            pk *= λ / k
+            cdf += pk
+            u < cdf && break
+        end
+        return k
+    else
+        d = Distributions.Poisson(λ)
+        while true
+            k = rand(d)
+            k > 0 && return k
+        end
+    end
+end
+
+"""
+    stimulate!(p::PoissonStimulus, param::PoissonStimulusParameter, time::Time, dt)
+
+If `param.active[1]`, add `param.μ` times a Poisson count of mean `λ = get_poisson_rate(param, time) * dt`
+to `p.g[n]` for every neuron `n` in `p.neurons`, drawn independently per neuron.
+
+Sampling: a neuron receives at least one spike with probability `1 - exp(-λ)`, independently, so the
+next such neuron of `p.neurons` is found by a geometric gap `floor(-log(1 - U) / λ)`, and its count is
+drawn from the zero-truncated Poisson distribution (`_zt_poisson`). Every count is exactly `Poisson(λ)`
+and independent; the cost per step is `O(1 + λ n)` for `n` targeted neurons. The rate is read at every
+step. Neurons written are logged in `p.inbox` (see `attach_driver!`). Uses the global RNG.
 """
 function stimulate!(
     p::PoissonStimulus,
     param::PoissonStimulusParameter,
     time::Time,
-    dt::Float32,
+    dt::AbstractFloat,
 )
-    @unpack active = param
-    if !active[1]
-        return
+    param.active[1] || return nothing
+    λ = Float64(get_poisson_rate(param, time) * dt)
+    λ > 0 || return nothing
+    μ = param.μ
+    @unpack neurons, g, inbox = p
+    T = eltype(g)
+    n = length(neurons)
+    pos = 0
+    @inbounds while true
+        x = -log1p(-rand()) / λ        # gap to the next neuron with a spike
+        pos + 1.0 + x >= n + 1.0 && break
+        pos += 1 + floor(Int, x)
+        i = neurons[pos]
+        g[i] += μ * T(_zt_poisson(λ))
+        _touch!(inbox, i)
     end
-    @unpack μ = param
-    @unpack neurons, g = p
-    poisson_rate = get_poisson_rate(param, time) * dt
-    poisson_rate ≈ 0 && return
-    poisson_rate < 0 && return
-    my_rate = Distributions.Poisson{Float32}(poisson_rate)
-    @fastmath @simd for n in neurons
-        g[n] += μ * rand(my_rate)
-    end
+    return nothing
 end
 
 

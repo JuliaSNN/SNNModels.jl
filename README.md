@@ -96,7 +96,7 @@ Long-term plasticity rules are passed to `SpikingSynapse` with the `LTPParam` ke
 | `STDPConfavreux2025` | pair STDP with rate terms |
 | `STDPMexicanHat`, `STDPSymmetric`, `STDPAntiSymmetric` | kernels with zero integral / structured inhibition (Euler traces) |
 | `iSTDPRate`, `iSTDPPotential` | inhibitory STDP of Vogels et al. (2011) |
-| `vSTDPParameter` | voltage-based STDP of Clopath et al. (2010) |
+| `vSTDPParameter`, `vSTDPDenseParameter` | voltage-based STDP of Clopath et al. (2010), event-driven (default, lazy weights: `plasticity_value(syn, :W)`) and clock-driven reference |
 
 The trace-based pair and triplet rules are event-driven with Auryn's ordering (pre spike: LTD
 from the postsynaptic trace over outgoing synapses; post spike: LTP from the presynaptic trace
@@ -134,5 +134,7 @@ over incoming synapses; traces read before the current step's spikes). They agre
 - **Behaviour change, `sparse_matrix`.** Built directly in CSC form (no dense `Npost x Npre`
   matrix); seeded networks no longer reproduce earlier realisations (identical statistics);
   autapses are removed structurally. The old generator is `SNNModels.sparse_matrix_dense_legacy`.
-- **Float32** synaptic data (weights, delays, STP `ρ`) at all constructor boundaries.
+- **Float32 by default, Float64 by the population type.** Synaptic data (weights, delays, STP `ρ`, plasticity state) take the
+  precision of the target population at the constructor boundary: `Identity(N = 10, VFT = Vector{Float64})` or
+  `IF(N = 10, VFT = Vector{Float64})` make everything built on them `Float64` (see `float_type`).
 - Event-driven STDP is 18-83x faster than the clock-driven implementation (see `claude/performance.md`).

@@ -114,14 +114,19 @@ end
 
 _membrane(p) = (; C = p.C, gl = p.gl, R = p.R, τm = p.τm)
 
-snn_kw_finalize(::Type{<:AdExParameter}, f::NamedTuple) = merge(
-    f,
-    resolve_membrane(f.C, f.gl, f.R, f.τm; default = (C = 281pF, gl = 40nS), name = "AdExParameter"),
-)
-snn_kw_finalize(::Type{<:IFParameter}, f::NamedTuple) = merge(
-    f,
-    resolve_membrane(f.C, f.gl, f.R, f.τm; default = (τm = 15ms, R = 0.06f0), name = "IFParameter"),
-)
+snn_kw_finalize(T::Type{<:AdExParameter}, f::NamedTuple) =
+    _finalize_membrane(T, f, (C = 281pF, gl = 40nS), (C = 281.0, gl = 40.0), "AdExParameter")
+snn_kw_finalize(T::Type{<:IFParameter}, f::NamedTuple) =
+    _finalize_membrane(T, f, (τm = 15ms, R = 0.06f0), (τm = 15.0, R = 0.06), "IFParameter")
+
+# The membrane quadruple in the precision `FT` of `T`: Float32 uses the default pair `default32` and the given values as they
+# are; another precision uses the decimal pair `default` and converts the given values to `FT` before deriving the others.
+function _finalize_membrane(::Type{T}, f::NamedTuple, default32::NamedTuple, default::NamedTuple, name) where {T}
+    FT = something(_float_type(T), Float32)
+    FT === Float32 && return merge(f, resolve_membrane(f.C, f.gl, f.R, f.τm; default = default32, name))
+    cv(x) = x isa AbstractArray ? FT.(x) : FT(x)
+    return merge(f, resolve_membrane(cv(f.C), cv(f.gl), cv(f.R), cv(f.τm); default = map(cv, default), name))
+end
 
 """
     with_membrane(p; C, gl, R, τm)

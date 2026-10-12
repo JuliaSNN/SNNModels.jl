@@ -34,13 +34,13 @@ Inputs below `-10` are clamped to `-10`.
 end
 
 """
-    exp64(x::R) where {R<:Real}
+    exp64(x::AbstractFloat)
 
 Fast approximation of `exp(x)` as ``(1 + x/64)^{64}``, computed with six squarings.
 Inputs below `-10` are replaced by `-64`, so that the result is exactly `0`.
 
 # Returns
-- `Float32` approximation of `exp(x)`; accurate only for small `|x|`.
+- approximation of `exp(x)` in the type of `x` (`Float32` for an integer argument); accurate only for small `|x|`.
 
 # Example
 ```julia
@@ -48,9 +48,34 @@ using SpikingNeuralNetworks
 SNNModels.exp64(-1.0f0)   # 0.3650, exp(-1) = 0.3679
 ```
 """
-@inline function exp64(x::R) where {R<:Real}
-    x = ifelse(x < -10.0f0, -64.0f0, x)
-    x = 1.0f0 + x / 64.0f0
+@inline function exp64(x::T) where {T<:AbstractFloat}
+    x = ifelse(x < T(-10), T(-64), x)
+    x = one(T) + x / T(64)
+    x *= x
+    x *= x
+    x *= x
+    x *= x
+    x *= x
+    x *= x
+    return x
+end
+# other real arguments (integers, rationals) are computed in Float32
+@inline exp64(x::Real) = exp64(Float32(x))
+
+"""
+    exp256(x::AbstractFloat)
+
+Fast approximation of `exp(x)` as ``(1 + x/256)^{256}``, computed with eight squarings.
+Inputs below `-10` are replaced by `-256`, so that the result is exactly `0`.
+
+# Returns
+- approximation of `exp(x)` in the type of `x` (`Float32` or `Float64`).
+"""
+@inline function exp256(x::T) where {T<:AbstractFloat}
+    x = ifelse(x < T(-10), T(-256), x)
+    x = one(T) + x / T(256)
+    x *= x
+    x *= x
     x *= x
     x *= x
     x *= x
@@ -60,27 +85,29 @@ SNNModels.exp64(-1.0f0)   # 0.3650, exp(-1) = 0.3679
     return x
 end
 
-"""
-    exp256(x::Float32)
+# `Base.tanh` / `Base.cosh` of a `Float32` (same algorithm, same bits) with `exp` inlined, so that loops using them
+# vectorise; the `Base` functions call an out-of-line `exp`.
+@inline function _tanh_inl(x::Float32)
+    abs2x = abs(2x)
+    abs2x >= Base.Math.TANH_LARGE_X(Float32) && return copysign(one(Float32), x)
+    abs2x <= Base.Math.TANH_SMALL_X(Float32) && return x * Base.Math.tanh_kernel(x * x)
+    k = @inline exp(abs2x)
+    return copysign(1 - 2 / (k + 1), x)
+end
 
-Fast approximation of `exp(x)` as ``(1 + x/256)^{256}``, computed with eight squarings.
-Inputs below `-10` are replaced by `-256`, so that the result is exactly `0`.
+@inline _tanh_inl(x::AbstractFloat) = tanh(x)     # other precisions: Base
+@inline _cosh_inl(x::AbstractFloat) = cosh(x)
 
-# Returns
-- `Float32` approximation of `exp(x)`.
-"""
-@inline function exp256(x::Float32)
-    x = ifelse(x < -10.0f0, -256.0f0, x)
-    x = 1.0f0 + x / 256.0f0
-    x *= x
-    x *= x
-    x *= x
-    x *= x
-    x *= x
-    x *= x
-    x *= x
-    x *= x
-    return x
+@inline function _cosh_inl(x::Float32)
+    absx = abs(x)
+    if absx <= Base.Math.COSH_SMALL_X(Float32)
+        return Base.Math.cosh_kernel(x * x)
+    elseif absx >= Base.Math.H_LARGE_X(Float32)
+        E = @inline exp(0.5f0 * absx)
+        return 0.5f0 * E * E
+    end
+    E = @inline exp(absx)
+    return 0.5f0 * (E + 1 / E)
 end
 
 """
@@ -132,7 +159,18 @@ str_name(pre::String, k = nothing) = isnothing(k) ? "$pre" : "$(pre)_$(k)"
 
 
 """
-    compose(args...; name = randstring(10), silent = false, time = Time(), kwargs...)
+    sorted_ntuple(d::AbstractDict; by = identity)
+
+`NamedTuple` with the entries of `d` ordered by `sort(keys; by)`; `String` keys become `Symbol`s.
+Replaces `DrWatson.dict2ntuple(sort(d; by))`: OrderedCollections 2 removed `sort(::Dict)`.
+"""
+function sorted_ntuple(d::AbstractDict; by = identity)
+    ks = sort!(collect(keys(d)); by = by)
+    return NamedTuple{Tuple(Symbol.(ks))}(Tuple(d[k] for k in ks))
+end
+
+"""
+    compose(args...; name = randstring(10), silent = false, time = nothing, kwargs...)
 
 Assemble populations, connections and stimuli (or whole models) into one network model.
 
@@ -149,11 +187,12 @@ Returns the `NamedTuple` `(pop = ..., syn = ..., stim = ..., name = name, time =
   into without prefixing and the key `:name` is skipped.
 - `name`: model name (default: random 10-character string).
 - `silent = false`: if `false`, print the model summary with `print_model`.
-- `time = Time()`: the simulation clock of the new model. The clocks of merged models are
-  not reused: pass `time = model.time` to keep one.
+- `time = nothing`: the clock of the new model; by default a new `Time{FT}()` with `FT` the promotion of the `float_type`s
+  of the populations. The clocks of merged models are not reused: pass `time = model.time` to keep one.
 
 Components are classified by type (`AbstractPopulation`, `AbstractConnection`,
-`AbstractStimulus` or `AbstractStimulusGroup`); duplicated keys raise an `AssertionError`.
+`AbstractStimulus` or `AbstractStimulusGroup`); a duplicated key is an `AssertionError` (to replace a synapse of an
+existing model use [`change_plasticity`](@ref)).
 `pop` and `syn` are sorted by key, `stim` by the stimuli `name`.
 
 # Example
@@ -169,7 +208,7 @@ keys(model2.pop)   # (:E, :I, :extra_A)
 sim!(model, 100ms)
 ```
 """
-function compose(args...; name = randstring(10), silent = false, time = Time(), kwargs...)
+function compose(args...; name = randstring(10), silent = false, time = nothing, kwargs...)
     pop = Dict{Symbol,Any}()
     syn = Dict{Symbol,Any}()
     stim = Dict{Symbol,Any}()
@@ -183,9 +222,10 @@ function compose(args...; name = randstring(10), silent = false, time = Time(), 
         v isa Time && continue
         extract_items(k, v, pop = pop, syn = syn, stim = stim, time = time)
     end
-    pop = DrWatson.dict2ntuple(sort(pop, by = x -> x))
-    syn = DrWatson.dict2ntuple(sort(syn, by = x -> x))
-    stim = DrWatson.dict2ntuple(sort(stim, by = x -> stim[x].name))
+    pop = sorted_ntuple(pop)
+    syn = sorted_ntuple(syn)
+    stim = sorted_ntuple(stim, by = x -> stim[x].name)
+    time = isnothing(time) ? Time{_model_float(values(pop))}() : time
     model = (pop = pop, syn = syn, stim = stim, name = name, time = time)
     if !silent
         print_model(model)
@@ -313,6 +353,15 @@ function print_model(model, get_keys = false)
     @info "================"
 end
 
+# Message of the duplicate-key assertion of `extract_items` (`root`: the `compose` keyword that delivered `key`, empty if positional).
+function _dup_msg(kind, key, root)
+    where = isempty(String(root)) ? "a positional argument of `compose`" : "the container `$(root)` given to `compose`"
+    hint = kind == "synapse" ?
+        " To replace a synapse of a model (e.g. with another plasticity rule), do not pass `compose(; model..., $(key) = new)` " *
+        "(`model` already holds `$(key)`); use `change_plasticity(model, :$(key); LTP, STP)`." : ""
+    return "Duplicate $(kind) key `$(key)`: a $(kind) with this name was already collected before $(where).$(hint)"
+end
+
 """
     extract_items(root::Symbol, container; pop::Dict{Symbol,Any}, syn::Dict{Symbol,Any}, stim::Dict{Symbol,Any}, time::Time)
 
@@ -342,7 +391,7 @@ function extract_items(
     pop::Dict{Symbol,Any},
     syn::Dict{Symbol,Any},
     stim::Dict{Symbol,Any},
-    time::Time,
+    time,
 )
     function special_key(k)
         k == :pop || k == :syn || k == :stim
@@ -350,13 +399,13 @@ function extract_items(
 
     v = container
     if typeof(v) <: AbstractPopulation
-        @assert !haskey(pop, root) "Population $(root) already exists"
+        @assert !haskey(pop, root) _dup_msg("population", root, root)
         push!(pop, root => v)
     elseif typeof(v) <: AbstractConnection
-        @assert !haskey(syn, root) "Receptors $(root) already exists"
+        @assert !haskey(syn, root) _dup_msg("synapse", root, root)
         push!(syn, root => v)
     elseif typeof(v) <: AbstractStimulus || typeof(v) <: AbstractStimulusGroup
-        @assert !haskey(stim, root) "Stimulus $(root) already exists"
+        @assert !haskey(stim, root) _dup_msg("stimulus", root, root)
         push!(stim, root => v)
     elseif typeof(v) <: Time
         # update_time!(time, v)
@@ -373,13 +422,13 @@ function extract_items(
                 new_key = Symbol(string(root) * "_" * string(k))
             end
             if typeof(v) <: AbstractPopulation
-                @assert !haskey(pop, new_key) "Population $(new_key) already exists"
+                @assert !haskey(pop, new_key) _dup_msg("population", new_key, root)
                 push!(pop, new_key => v)
             elseif typeof(v) <: AbstractConnection
-                @assert !haskey(syn, new_key) "Receptors $(new_key) already exists"
+                @assert !haskey(syn, new_key) _dup_msg("synapse", new_key, root)
                 push!(syn, new_key => v)
             elseif typeof(v) <: AbstractStimulus || typeof(v) <: AbstractStimulusGroup
-                @assert !haskey(stim, new_key) "Stimulus $(new_key) already exists"
+                @assert !haskey(stim, new_key) _dup_msg("stimulus", new_key, root)
                 push!(stim, new_key => v)
             else
                 extract_items(new_key, v; pop, syn, stim, time)
@@ -432,6 +481,50 @@ function remove_element(model, key::Vector)
 end
 
 """
+    change_plasticity(model, syn_name::Symbol; LTP = nothing, STP = nothing)
+
+A new model in which the synapse `syn_name` is replaced by `with_plasticity(model.syn[syn_name]; LTP, STP)` (see
+[`with_plasticity`](@ref)): a rule left to `nothing` is kept, `NoLTP()` / `NoSTP()` switch that part off. Everything
+else in the result is the same object as in `model`, which is not modified. The rule types are type parameters of the
+synapse, so there is no in-place model-level variant.
+
+The new synapse shares `W`, the connectivity, the delay queue, the records and any kept rule state with the old one:
+simulate only the new model (or `deepcopy(model)` first). A `SynapseNormalization` or `AggregateScaling` in the model keeps
+acting on the old synapse.
+
+# Throws
+`ArgumentError` if `syn_name` is not a synapse of the model; the message lists the available names.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+E = SNN.IF(N = 100); E.I .= 300.0
+EE = SNN.SpikingSynapse(E, E, :ge; conn = (p = 0.2, μ = 0.5))
+model = SNN.compose(; E, EE, silent = true)
+model_p = SNN.change_plasticity(model, :EE; LTP = SNN.STDPGerstner())
+SNN.train!(; model = model_p, duration = 100ms)
+model_f = SNN.change_plasticity(model_p, :EE; LTP = SNN.NoLTP(), STP = SNN.NoSTP())   # weights frozen
+```
+"""
+function change_plasticity(model, syn_name::Symbol; LTP = nothing, STP = nothing)
+    if !haskey(model.syn, syn_name)
+        throw(ArgumentError("model has no synapse `:$(syn_name)`; available synapses: " *
+                            join(map(k -> ":" * String(k), keys(model.syn)), ", ")))
+    end
+    old = model.syn[syn_name]
+    old isa SpikingSynapse || throw(ArgumentError("`$(syn_name)` is a $(nameof(typeof(old))), not a SpikingSynapse; " *
+                                                  "only SpikingSynapse has switchable plasticity"))
+    new = if LTP isa NoLTP && STP isa NoSTP
+        without_plasticity(old)
+    else
+        with_plasticity(old; LTP, STP)
+    end
+    syn = merge(model.syn, NamedTuple{(syn_name,)}((new,)))
+    return merge(model, (; syn))
+end
+
+"""
     merge_models(args...; kwargs...)
 
 Deprecated alias of `compose` (emits a warning).
@@ -442,6 +535,7 @@ function merge_models(args...; kwargs...)
 end
 
 export compose,
+    change_plasticity,
     merge_models, # compose
     remove_element,
     print_model,
@@ -449,3 +543,7 @@ export compose,
     exp256,
     name,
     str_name
+
+
+# precision of a set of populations: the promotion of their float types (Float32 for none)
+_model_float(pops) = reduce(promote_type, (float_type(p) for p in pops); init = Float32)

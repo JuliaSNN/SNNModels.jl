@@ -82,19 +82,22 @@ end
         @test all(isfinite, syn.W)
     end
 
-    @testset "vSTDPParameter (Npre == Npost)" begin
-        model, syn = _driven_model(ltp = vSTDPParameter())
-        train!(model, 200ms)
-        @test all(isfinite, syn.W)
-    end
+    for Rule in (vSTDPParameter, vSTDPDenseParameter)
+        @testset "$Rule (Npre == Npost)" begin
+            model, syn = _driven_model(ltp = Rule())
+            train!(model, 200ms)
+            @test all(isfinite, syn.W)
+            @test all(isfinite, plasticity_value(syn, :W))
+        end
 
-    # Regression: vSTDPVariables.x was sized Npost; @turbo silenced the OOB.
-    # x is indexed by pre-neuron j → must be length Npre.
-    @testset "vSTDPParameter (Npre > Npost, x size regression)" begin
-        model, syn = _driven_model(Npre = 20, Npost = 5, ltp = vSTDPParameter())
-        @test length(syn.LTPVars.x) == 20  # Npre, not Npost
-        train!(model, 200ms)
-        @test all(isfinite, syn.W)
+        # Regression: the trace x was sized Npost; @turbo silenced the OOB.
+        # x is indexed by pre-neuron j → must be length Npre.
+        @testset "$Rule (Npre > Npost, x size regression)" begin
+            model, syn = _driven_model(Npre = 20, Npost = 5, ltp = Rule())
+            @test length(syn.LTPVars.x) == 20  # Npre, not Npost
+            train!(model, 200ms)
+            @test all(isfinite, syn.W)
+        end
     end
 
 end
@@ -119,21 +122,32 @@ end
 
 @testset "change_plasticity!" begin
     # Fix regression: param was undefined; LTP/STP kwargs must be forwarded.
-    @testset "swap LTPParam" begin
+    # The rule types are type parameters of SpikingSynapse: same type in place, other type via with_plasticity.
+    @testset "same-type LTPParam in place" begin
         model, syn = _driven_model(ltp = STDPGerstner())
-        @test syn.LTPParam isa STDPGerstner
-        change_plasticity!(syn; LTP = STDPConfavreux2025())
-        @test syn.LTPParam isa STDPConfavreux2025
+        change_plasticity!(syn; LTP = STDPGerstner(A_pre = 2f-4))
+        @test syn.LTPParam.A_pre == 2f-4
         @test syn.LTPVars isa STDPVariables
         @test length(syn.LTPVars.tpre) == length(syn.fireJ)  # Npre
         @test length(syn.LTPVars.tpost) == length(syn.fireI) # Npost
+        @test_throws ArgumentError change_plasticity!(syn; LTP = STDPConfavreux2025())
     end
 
-    @testset "swap STPParam" begin
+    @testset "with_plasticity swaps the rule type" begin
+        model, syn = _driven_model(ltp = STDPGerstner())
+        syn2 = with_plasticity(syn; LTP = STDPConfavreux2025())
+        @test syn2.LTPParam isa STDPConfavreux2025
+        @test syn2.LTPVars isa STDPVariables
+        @test syn2.W === syn.W && syn2.g === syn.g
+        @test syn.LTPParam isa STDPGerstner  # original untouched
+        @test length(syn2.LTPVars.tpre) == length(syn2.fireJ)
+    end
+
+    @testset "with_plasticity STP" begin
         model, syn = _driven_model(stp = MarkramSTPParameter())
         @test syn.STPParam isa MarkramSTPParameter
-        change_plasticity!(syn; STP = MarkramSTPParameterTimestep())
-        @test syn.STPParam isa MarkramSTPParameterTimestep
+        syn2 = with_plasticity(syn; STP = MarkramSTPParameterTimestep())
+        @test syn2.STPParam isa MarkramSTPParameterTimestep
     end
 end
 

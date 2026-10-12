@@ -37,4 +37,6 @@ PostSpike
     up::FT = 1ms
 end
 
+convert_precision(x::PostSpike, ::Type{T}) where {T<:AbstractFloat} = _convert_float_struct(x, T)
+
 export PostSpike

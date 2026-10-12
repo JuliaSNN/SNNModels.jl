@@ -1,0 +1,50 @@
+# SNNModels changelog
+
+## 2.0.0
+
+Major release with breaking changes in the types of synapses, populations and stimuli, in random streams and in how
+plasticity state is read. Packages that depend on SNNModels must move to 2: SNNUtils 1, SNNPlots 1,
+SpikingNeuralNetworks 2, CalciumSpike 1. Models saved with 1.9.1 or earlier are refused at load time. Every change, its
+consequences, the files it touches and its migration: `CHANGELOG_2.0.0.md`.
+
+### Semantics
+- Spikes move as index lists (`SpikeIndex`): scratch per connection, fed by `Identity` and the Poisson populations, and one
+  list per integrate-and-fire population, opened after `integrate!` and closed at the end of the step. Custom components
+  must not write `pop.fire` inside that window. A failed step is fatal: nothing closes the window after an exception
+  (debugging: `SNNModels._retire_all_spikes!(P)`).
+- Stimuli log the `Identity` neurons they write, so a stimulus-driven `Identity` updates sparsely (`release_input!`).
+- Delays use a ring buffer and are rounded up to whole steps (`ceil(delay / dt)`); exact at `dt` such as 0.1 ms, where
+  1.9.1 was often one step late. A common delay is stored once; without plasticity it delays the spike list, so `W` is
+  read at arrival.
+- Poisson stimuli and populations sample one random number per spike: same laws, different random streams.
+- Plasticity state is stored lazily: direct reads of traces return stored values; use `plasticity_value`,
+  `trace_values`, `sync_traces!`. Recorded `u`, `x` of the event Markram rules are now values at the sampling time.
+- `vSTDPParameter` is event-driven with deferred weights (read `plasticity_value(syn, :W)`); the 1.9.1 rule is
+  `vSTDPDenseParameter`. STDP weights differ from 1.9.1 by Float32 rounding.
+- Plasticity rules are type parameters: `with_plasticity`, `without_plasticity`, `change_plasticity` install a rule of
+  another type; `update_plasticity!` / `change_plasticity!` accept only the same type. `NoSTP()` resets the efficacy to 1.
+- Precision follows the population type (`VFT = Vector{Float64}`); `float_type`, `convert_precision`, `Time{FT}`.
+- `sim!` / `train!` flush subnormals to zero (`flush_subnormals = true`).
+- Fixes: `Tripod` / `BallAndStick` use `param.physiology`; short state vectors raise `DimensionMismatch`; an out-of-range
+  `indices[:fire]` is an `ArgumentError`; `compose` works with OrderedCollections 2.0.
+
+### Structs, functions and files
+- New type parameters and fields in `SpikingSynapse` (`J`, `index`, `ρ` empty until needed: `ensure_transpose!`,
+  `efficacy`, `materialize_efficacy!`), `SpikingSynapseDelayParameter`, `SpikeTimeStimulus`, `PoissonStimulus`,
+  `PoissonStimulusLayer`, `Identity`, the nine integrate-and-fire populations and the Poisson populations. Keyword
+  construction is unchanged.
+- Removed: `iSTDPTime` (could not run), the export of `convolve` (never defined), and files not loaded since 1.x
+  (Multipod, IF_CANAHP, AdExMultiTimescale, `variable_inputs.jl`, `CaRule.jl`, `dump.jl`).
+- New exports: `with_plasticity`, `without_plasticity`, `change_plasticity`, `plasticity_value`, `trace_values`,
+  `sync_traces!`, `vSTDPDenseParameter`, `vSTDPDenseVariables`, `float_type`, `convert_precision`, `release_input!`,
+  `check_loaded_model`, threading controls (`neurons_per_thread` and related, `foreach_chunk`, `ChunkPtr`).
+- `load_model`, `load_data`, `SNNload` refuse files written with an older layout (`check_loaded_model`).
+- 13 unused dependencies removed (Documenter among them); Polyester added.
+
+### Performance (results unchanged unless stated above)
+- Vectorised, branchless neuron and synapse loops, bit-identical to 1.9.1 in Float32: 1.3x to 9x per model.
+- Event-driven and lazy plasticity at O(spikes); event vSTDP 50x faster than the dense rule at 1e4 synapses.
+- Synapse arrays 29.2 to 9.2 bytes per synapse; no allocation per step; spike recording from the spike lists.
+- Opt-in thread parallelism of the population updates (`neurons_per_thread`, off by default, bit-identical).
+- Balanced E/I LIF network (K = 100, one core): 1.79 to 0.109 s per simulated second at N = 1e4, at the level of Auryn
+  and Brian2 (cpp_standalone) in this benchmark. Peak RSS of the Julia process is about 800 MB.

@@ -12,27 +12,60 @@ so a new model only needs to implement `integrate!`.
 abstract type AbstractPopulationParameter <: AbstractParameter end
 
 """
-    integrate!(p::AbstractPopulation, param::AbstractPopulationParameter, dt::Float32)
+    integrate!(p::AbstractPopulation, param::AbstractPopulationParameter, dt)
 
 Advance the state of population `p` by one time step `dt` (ms). Every population model
 implements a method of `integrate!` for its own parameter type; it is called once per step by
-`sim!` and `train!`, after the stimuli and before the connections. The fallback for an
-`AbstractPopulationParameter` without a specific method does nothing.
+`sim!` and `train!`, after the stimuli and before the connections. `dt` is converted to the precision of the
+population (`float_type(p)`). The fallback does nothing for a `Float32` step and throws an `ArgumentError` for
+another precision (a model without a `Float64` method).
 
 See the documentation of each population type for the equations and the integration scheme.
 """
-integrate!(p::AbstractPopulation, param::AbstractPopulationParameter, dt::Float32) = nothing
+integrate!(p::AbstractPopulation, param::AbstractPopulationParameter, dt::AbstractFloat) =
+    dt isa Float32 ? nothing : throw(ArgumentError(
+        "population $(nameof(typeof(p))) has no integrate! method for steps of type $(typeof(dt)) (its model is not implemented in $(typeof(dt)); " *
+        "populations with Float64 state: $(_FLOAT64_POPULATIONS))"))
+
+# populations that have a Float64 model (`VFT = Vector{Float64}`); the error messages list them
+const _FLOAT64_POPULATIONS = "Identity, IF, AdEx, ExtendedIF, HH, IZ, MorrisLecar, Rate, WilsonCowan, Tripod, BallAndStick, " *
+                             "Poisson, VariablePoisson, InhomogeneousPoisson"
+
+# Copy of a parametric parameter struct with its floating-point fields and type parameters converted to `T` (the methods of
+# `convert_precision` for synapse models and spike parameters); `x` itself when it is already `T` or has no float type parameter.
+function _convert_float_struct(x::S, ::Type{T}) where {S,T<:AbstractFloat}
+    ps = S.parameters
+    (isempty(ps) || !any(_is_float_param, ps) || _float_type(S) === T) && return x
+    newps = map(p -> _convert_param(p, T), ps)
+    vals = map(f -> _convert_value(getfield(x, f), T), fieldnames(S))
+    return Base.typename(S).wrapper{newps...}(vals...)
+end
+
+# float type of the state of a population type `T`: the element type of its field `field`, Float32 when not parameterised
+_state_float(::Type{T}, field::Symbol) where {T} = (V = fieldtype(T, field); V isa DataType && V <: AbstractArray ? eltype(V) : Float32)
+# One precision per population (`snn_kw_finalize`): each parameter object (`what => obj`) must have the float type `FT` of the
+# state; objects without a floating-point type parameter (`DeltaSynapse()`, `RateParameter()`) pass.
+function _check_precision(name, FT, objs::Pair...)
+    for (what, obj) in objs
+        T = _float_type(typeof(obj))
+        (T === nothing || T === FT) || throw(ArgumentError(
+            "$name mixes precisions: the state is $FT but `$what` is a $(typeof(obj)) ($T). " *
+            "Build all with the same floating-point type (`FT = $FT`, or `convert_precision(x, $FT)`); the defaults follow `VFT`, " *
+            "so `$name(N = ..., VFT = Vector{$FT})` alone gives a $FT population (see `float_type`)."))
+    end
+    return nothing
+end
 plasticity!(
     p::AbstractPopulation,
     param::AbstractPopulationParameter,
-    dt::Float32,
+    dt::AbstractFloat,
     T::Time,
 ) = nothing
 
 update_traces!(
     p::AbstractPopulation,
     param::AbstractPopulationParameter,
-    dt::Float32,
+    dt::AbstractFloat,
     T::Time,
 ) = nothing
 
@@ -45,6 +78,9 @@ populations. The only concrete subtype is `PostSpike`.
 """
 abstract type AbstractSpikeParameter end
 include("spike/postspike.jl")
+
+## Spike index lists, shared by populations and connections
+include("spike_index.jl")
 
 ## Neurons
 include("poisson.jl")
@@ -99,8 +135,6 @@ include("generalized_if/if.jl")
 include("generalized_if/adex.jl")
 include("generalized_if/membrane.jl")
 include("generalized_if/if_extended.jl")
-# include("generalized_if/if_CANAHP.jl")
-# include("adex/adex_multitimescale.jl")
 
 ## Heterogeneous recurrent
 include("hetrec.jl")
@@ -122,7 +156,26 @@ include("multicompartment/dendrite.jl")
 include("multicompartment/dendneuron_parameter.jl")
 include("multicompartment/tripod.jl")
 include("multicompartment/ballandstick.jl")
-# include("multicompartment/multipod.jl")
+
+## Spike lists owned by the integrate-and-fire family (see `spike_index`)
+# A population type not listed here falls back to a new list per connection (correct, slower).
+const _OWNED_LIST_POPULATIONS = Union{IF,AdEx,ExtendedIF,HetRec,Tripod,BallAndStick,HH,IZ,MorrisLecar}
+
+spike_index(p::_OWNED_LIST_POPULATIONS) = getfield(p, :spikes)
+
+function _publish_spikes!(p::_OWNED_LIST_POPULATIONS)
+    s = getfield(p, :spikes)
+    s.active = true
+    s.valid = false
+    return nothing
+end
+
+function _retire_spikes!(p::_OWNED_LIST_POPULATIONS)
+    s = getfield(p, :spikes)
+    s.active = false
+    s.valid = false
+    return nothing
+end
 
 ## Population constructor
 """

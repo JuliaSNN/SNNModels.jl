@@ -48,13 +48,13 @@ State variables of `DeltaSynapse`, created by `synaptic_variables(::DeltaSynapse
 DeltaSynapseVars
 @snn_kw struct DeltaSynapseVars{VFT = Vector{Float32}} <: AbstractSynapseVariable
     N::Int = 100
-    ge::VFT = zeros(Float32, N)
-    gi::VFT = zeros(Float32, N)
+    ge::VFT = zeros(eltype(VFT), N)
+    gi::VFT = zeros(eltype(VFT), N)
 end
 
 
-function synaptic_variables(synapse::DeltaSynapse, N::Int)
-    return DeltaSynapseVars(; N = N, ge = zeros(Float32, N), gi = zeros(Float32, N))
+function synaptic_variables(synapse::DeltaSynapse, N::Int, ::Type{FT}) where {FT<:AbstractFloat}
+    return DeltaSynapseVars(; N = N, VFT = Vector{FT})
 end
 
 @inline function update_synapses!(
@@ -62,7 +62,7 @@ end
     synapse::T,
     receptors::RECT,
     synvars::DeltaSynapseVars,
-    dt::Float32,
+    dt::AbstractFloat,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractDeltaParameter,RECT<:NamedTuple}
     @unpack N, ge, gi = synvars
     @unpack glu, gaba = receptors
@@ -70,8 +70,8 @@ end
         ge[i] += glu[i]
         gi[i] += gaba[i]
     end
-    fill!(glu, 0.0f0)
-    fill!(gaba, 0.0f0)
+    fill!(glu, zero(eltype(glu)))
+    fill!(gaba, zero(eltype(gaba)))
 end
 
 @inline function synaptic_current!(
@@ -83,8 +83,8 @@ end
     @unpack ge, gi = synvars
     @inbounds @simd for i ∈ 1:N
         syn_curr[i] = -(ge[i] - gi[i])
-        ge[i] = 0.0f0
-        gi[i] = 0.0f0
+        ge[i] = zero(eltype(ge))
+        gi[i] = zero(eltype(gi))
     end
 end
 

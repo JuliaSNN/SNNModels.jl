@@ -3,7 +3,6 @@ DendLength = Union{Float32,Tuple}
 abstract type AbstractDendriticTree end
 struct TripodNeuron <: AbstractDendriticTree end
 struct BallAndStickNeuron <: AbstractDendriticTree end
-struct Multipod <: AbstractDendriticTree end
 
 """
     DendNeuronParameter(; ds = [(200um, 400um), (200um, 400um)], physiology = human_dend,
@@ -19,7 +18,7 @@ carries the morphology only; the somatic parameters are in the population field 
 # Fields
 - `ds::DT = [(200um, 400um), (200um, 400um)]`: one entry per dendrite, either a length (cm)
   or a `(min, max)` range from which `create_dendrite` draws the length of each neuron.
-- `physiology::PT = human_dend`: cable properties (`Physiology`).
+- `physiology::PT = human_dend`: cable properties (`Physiology`: `Ri`, `Rd`, `Cd`), used by `Tripod` and `BallAndStick` to build their dendrites.
 - `geometry::GT = [(:s=>:d1), (:s=>:d2)]`: connectivity of the compartments. Stored for
   bookkeeping; `Tripod` and `BallAndStick` hard-code soma-dendrite coupling.
 - `type::NT`: `BallAndStickNeuron()` if `length(ds) == 1`, `TripodNeuron()` if
@@ -28,8 +27,7 @@ carries the morphology only; the somatic parameters are in the population field 
 Type parameters: `DT = Vector{DendLength}` (`DendLength = Union{Float32,Tuple}`),
 `GT = Vector{Pair{Symbol,Symbol}}`, `PT = Physiology{Float32}`, `NT<:AbstractDendriticTree`.
 
-Note that `create_dendrite` is called with its default diameter `d = 4um`; the diameter cannot
-be set through `DendNeuronParameter`.
+The dendrite diameter is the `create_dendrite` default, `d = 4um`.
 
 # Example
 ```julia

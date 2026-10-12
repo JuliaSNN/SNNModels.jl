@@ -90,7 +90,7 @@ Passive properties of one dendritic compartment for each of the `N` neurons of a
 population (`Tripod` has two, `d1` and `d2`; `BallAndStick` has one, `d`). Normally built with
 `create_dendrite(N, l)`.
 
-# Fields (all `Vector{Float32}` of length `N`, default `zeros(N)`)
+# Fields (vectors of type `VFT` and length `N`, default `zeros(N)`)
 - `N::Int32 = 100`: number of neurons.
 - `El::VFT`: leak reversal (resting) potential of the dendrite (mV), used by the
   `Tripod`/`BallAndStick` dendritic equations. `create_dendrite` sets it from its `El` keyword
@@ -122,7 +122,7 @@ Dendrite
 end
 
 """
-    create_dendrite(N::Int, l; El = -70.6mV, d = 4um, physiology = human_dend) -> Dendrite
+    create_dendrite(N::Int, l; El = -70.6mV, d = 4um, physiology = human_dend, FT = Float32) -> Dendrite
     create_dendrite(l; d = 4um, physiology = human_dend) -> NamedTuple
     create_dendrite(; l, kwargs...)
 
@@ -134,7 +134,12 @@ is drawn uniformly from `lmin:1um:lmax` (independently for each of the `N` neuro
 first form). Lengths above `500um` raise an error. For `l > 0` it returns
 `(gm = G_mem(Rd, d, l), gax = G_axial(Ri, d, l), C = C_mem(Cd, d, l), l, d)`; for `l <= 0` it
 returns a disconnected compartment `(gm = 1, gax = 0, C = 1, l = -1, d)`.
-The `N` form returns a `Dendrite` with these values per neuron and leak reversal `El`.
+The `N` form returns a `Dendrite{Vector{FT}}` with these values per neuron and leak reversal `El`.
+
+Precision: with `FT = Float32` the geometry is computed with the `Float32` unit constants. With `FT = Float64` it is
+computed from the decimal values the arguments denote (`5um`, stored as `0.00049999997f0`, is read as `0.0005`; the cable
+constants likewise in their units). A range is sampled with the same RNG draws as in `Float32`, so the same seed gives the
+same lengths in both precisions.
 
 # Example
 ```julia
@@ -144,10 +149,10 @@ SNN.create_dendrite(200um)                          # one dendrite, human physio
 SNN.create_dendrite(5, (150um, 400um); physiology = SNN.mouse_dend)
 ```
 """
-function create_dendrite(N::Int, l; El::Real = -70.6mV, kwargs...)
-    dendrites = Dendrite(N = N)
+function create_dendrite(N::Int, l; El::Real = -70.6mV, FT::Type{<:AbstractFloat} = Float32, kwargs...)
+    dendrites = Dendrite(N = N, VFT = Vector{FT})
     for i = 1:N
-        dendrite = create_dendrite(l; kwargs...)
+        dendrite = FT === Float32 ? create_dendrite(l; kwargs...) : _create_dendrite_decimal(l; kwargs...)
         dendrites.El[i] = El
         dendrites.l[i] = dendrite.l
         dendrites.d[i] = dendrite.d
@@ -179,6 +184,42 @@ function create_dendrite(l; d::Real = 4um, physiology = human_dend)
             d = d,
         )
     end
+end
+
+# The decimal value a Float32 quantity denotes. `_decimal(x, u)`: `x / u` (`u` a power of ten, e.g. `um`) snapped to a decimal
+# with at most 6 fractional digits within Float32 rounding, times `u` (`5um` -> 0.0005). Otherwise, and for `_decimal(x)`,
+# the shortest decimal that rounds to `x`.
+_decimal(x::Float32) = parse(Float64, string(x))
+_decimal(x::Real) = Float64(x)
+function _decimal(x::Float32, u::Float32)
+    ud = _decimal(u)
+    p = round(Int, log10(ud))
+    (ud === _exp10(1.0, p) && isfinite(x)) || return _decimal(x)
+    n = Float64(x) / Float64(u)
+    for m = 0:6
+        k = round(n * 10.0^m)
+        abs(n * 10.0^m - k) <= 4 * eps(Float32) * abs(n * 10.0^m) && return _exp10(k, p - m)
+    end
+    return _decimal(x)
+end
+_decimal(x::Real, u::Float32) = Float64(x)
+_exp10(k::Float64, e::Int) = e >= 0 ? k * 10.0^e : k / 10.0^(-e)    # exact powers of ten up to 1e22: one rounding
+# cable constants in Float64, each read in its unit (`Ri` in Ω cm, `Rd` in Ω cm², `Cd` in μF/cm²)
+_decimal_physiology(p::Physiology) =
+    Physiology(_decimal(p.Ri, Float32(Ω * cm)), _decimal(p.Rd, Float32(Ω * cm^2)), _decimal(p.Cd, Float32(μF / cm^2)))
+
+# `create_dendrite(l; d, physiology)` in Float64: a range is sampled from the same Float32 range as the Float32 method (same
+# RNG draws), then lengths and diameter are read as decimals of `um`.
+function _create_dendrite_decimal(l; d::Real = 4um, physiology = human_dend)
+    l = isa(l, Tuple) ? rand(l[1]:1um:l[2]) : l
+    l > 500um && error("Dendrite length must be less than 500um")    # checked on the given value, as in Float32
+    l = _decimal(l, um)
+    d = _decimal(d, um)
+    @unpack Ri, Rd, Cd = _decimal_physiology(physiology)
+    if l <= 0
+        return (gm = 1.0, gax = 0.0, C = 1.0, l = -1, d = d)
+    end
+    return (gm = G_mem(Rd = Rd, d = d, l = l), gax = G_axial(Ri = Ri, d = d, l = l), C = C_mem(Cd = Cd, d = d, l = l), l = l, d = d)
 end
 
 # Predefined dendritic length ranges, usable as `ds` in `TripodParameter`/`BallAndStickParameter`
