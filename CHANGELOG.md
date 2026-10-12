@@ -3,8 +3,8 @@
 ## 2.0.0
 
 Major release with breaking changes in the types of synapses, populations and stimuli, in random streams and in how
-plasticity state is read. Packages that depend on SNNModels must move to 2: SNNUtils 2, SNNPlots 2,
-SpikingNeuralNetworks 2, CalciumSpike 2. Models saved with 1.9.1 or earlier are refused at load time. Every change, its
+plasticity state is read. Packages that depend on SNNModels must move to 2: SNNUtils 1, SNNPlots 1,
+SpikingNeuralNetworks 2, CalciumSpike 1. Models saved with 1.9.1 or earlier are refused at load time. Every change, its
 consequences, the files it touches and its migration: `CHANGELOG_2.0.0.md`.
 
 ### Semantics

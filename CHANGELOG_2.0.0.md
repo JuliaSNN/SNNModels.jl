@@ -6,7 +6,7 @@ struct, function and file changes, Part 3 the changes that only affect speed and
 
 ## What to do when upgrading
 
-- Require SNNModels 2 in `[compat]`; use SNNUtils 2, SNNPlots 2, SpikingNeuralNetworks 2 and CalciumSpike 2.
+- Require SNNModels 2 in `[compat]`; use SNNUtils 1, SNNPlots 1, SpikingNeuralNetworks 2 and CalciumSpike 1.
 - Rebuild saved models from their configuration: files of 1.9.1 and earlier are refused at load (2.6).
 - Install a rule of another type with `with_plasticity`, `without_plasticity` or `change_plasticity`;
   `update_plasticity!` / `change_plasticity!` and field assignment accept only the current rule type (1.6).
