@@ -101,8 +101,7 @@ Long-term plasticity rules are passed to `SpikingSynapse` with the `LTPParam` ke
 The trace-based pair and triplet rules are event-driven with Auryn's ordering (pre spike: LTD
 from the postsynaptic trace over outgoing synapses; post spike: LTP from the presynaptic trace
 over incoming synapses; traces read before the current step's spikes). They agree with Brian2
-(2e-6) and Auryn (2e-7). Details: `src/connections/sparse_plasticity/STDP_kernels.jl` and
-`docs/stdp_rules_memo.md`.
+(2e-6) and Auryn (2e-7). Details: `src/connections/sparse_plasticity/STDP_kernels.jl`.
 
 ## Release notes: 1.8.4
 

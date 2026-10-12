@@ -322,9 +322,9 @@ end
         E = IF(N = 400)
         Q = Poisson(N = 1000, param = PoissonParameter(10Hz))
         net = (P = _Pv(E, Q), C = _Cv(), S = _Sv(Stimulus(PoissonFixed(rate = 1.5kHz), E, :ge)))
-        if monitored   # monitor_rate is a plain number of Hz: buffers pre-sized for 1000 Hz, no growth
-            monitor!(E, [ind === nothing ? :fire : (:fire, ind)]; monitor_rate = 1000)
-            monitor!(Q, [:fire]; monitor_rate = 1000)
+        if monitored   # buffers pre-sized for 1000 Hz, no growth
+            monitor!(E, [ind === nothing ? :fire : (:fire, ind)]; monitor_rate = 1000Hz)
+            monitor!(Q, [:fire]; monitor_rate = 1000Hz)
         end
         SNNModels._allocate_records!(net.P, net.C, net.S, _DT_RS, 3000f0)
         T = Time()
