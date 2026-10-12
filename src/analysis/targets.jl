@@ -147,23 +147,31 @@ function is_unimodal(kernel, ratio)
 end
 
 
-# Non-mutating tile fraction; spiketrain must be pre-sorted.
-function _tile_fraction(spiketrain::Vector{Float32}, Δt::Float32, istart::Float32, iend::Float32)
-    isempty(spiketrain) && return 0f0
-    width = Δt
-    @inbounds for n in 2:length(spiketrain)
-        spiketrain[n] < istart && continue
-        spiketrain[n] > iend   && continue
-        gap = spiketrain[n] - spiketrain[n-1]
-        width += gap < 2f0 * Δt ? gap : 2f0 * Δt
+# Spikes of a sorted train inside [t0, t1], as a view (no allocation).
+_restrict(st::AbstractVector{Float32}, t0::Float32, t1::Float32) =
+    @view st[searchsortedfirst(st, t0):searchsortedlast(st, t1)]
+
+# Fraction of [t0, t1] covered by the union of the windows [s-Δt, s+Δt], clipped to [t0, t1], of the
+# spikes s of a sorted train inside [t0, t1] (Cutts & Eglen 2014). Non-mutating, no allocation.
+function _tile_fraction(spiketrain::AbstractVector{Float32}, Δt::Float32, t0::Float32, t1::Float32)
+    st = _restrict(spiketrain, t0, t1)
+    isempty(st) && return 0f0
+    covered = 0f0
+    lo, hi = max(st[1] - Δt, t0), min(st[1] + Δt, t1)
+    @inbounds for n in 2:length(st)
+        a = max(st[n] - Δt, t0)
+        if a > hi   # disjoint window: close the current segment
+            covered += hi - lo
+            lo = a
+        end
+        hi = min(st[n] + Δt, t1)
     end
-    width += Δt
-    return width / (iend - istart + 2f0 * Δt)
+    return (covered + hi - lo) / (t1 - t0)
 end
 
 # Fraction of spikes in A with a coincident spike in B within Δt.
 # B must be pre-sorted; O(Nₐ log N_B) via binary search, zero allocations.
-function _coincident_fraction(A::Vector{Float32}, B::Vector{Float32}, Δt::Float32)
+function _coincident_fraction(A::AbstractVector{Float32}, B::AbstractVector{Float32}, Δt::Float32)
     isempty(A) && return 0f0
     nB    = length(B)
     count = 0
@@ -176,11 +184,18 @@ function _coincident_fraction(A::Vector{Float32}, B::Vector{Float32}, Δt::Float
     return Float32(count) / length(A)
 end
 
-function _sttc_pair(A::Vector{Float32}, B::Vector{Float32}, TA::Float32, TB::Float32, Δt::Float32)
+# One term of the STTC; 1 when P = T = 1 (0/0, Elephant convention).
+_sttc_term(P::Float32, T::Float32) = P * T == 1f0 ? 1f0 : (P - T) / (1f0 - P * T)
+
+# A and B sorted and restricted to the interval, TA and TB their tile fractions.
+function _sttc_pair(A::AbstractVector{Float32}, B::AbstractVector{Float32}, TA::Float32, TB::Float32, Δt::Float32)
+    (isempty(A) || isempty(B)) && return 0f0
     PA = _coincident_fraction(A, B, Δt)
     PB = _coincident_fraction(B, A, Δt)
-    return 0.5f0 * ((PA - TB) / (1f0 - PA * TB) + (PB - TA) / (1f0 - PB * TA))
+    return 0.5f0 * (_sttc_term(PA, TB) + _sttc_term(PB, TA))
 end
+
+_sorted(st::Vector{Float32}) = issorted(st) ? st : sort(st)
 
 @doc raw"""
     STTC(spiketrainA::Vector{Float32}, spiketrainB::Vector{Float32}, Δt::Float32, interval::AbstractVector)
@@ -189,10 +204,14 @@ Spike Time Tiling Coefficient between two spike trains,
 ```math
 \mathrm{STTC} = \frac{1}{2}\left(\frac{P_A - T_B}{1 - P_A T_B} + \frac{P_B - T_A}{1 - P_B T_A}\right),
 ```
-where ``P_A`` is the fraction of spikes of A with a spike of B within ``\pm\Delta t``, and
-``T_A`` is the fraction of the recording `[interval[1], interval[end]]` covered by the windows
-``\pm\Delta t`` around the spikes of A (computed from the spikes inside the interval, the total
-duration being extended by ``2\Delta t``). The inputs are not modified.
+computed on the spikes inside `[t0, t1] = [interval[1], interval[end]]`. ``P_A`` is the fraction
+of spikes of A with a spike of B within ``\pm\Delta t``; ``T_A`` is the length of the union of the
+windows ``[s - \Delta t, s + \Delta t]`` around the spikes of A, clipped to `[t0, t1]`, divided by
+`t1 - t0`. A term with ``P T = 1`` (0/0) is 1, as in Elephant; the result is 0 if either train has
+no spike in the interval. The inputs are not modified.
+
+The coefficient saturates when ``\Delta t`` times the firing rate is about 1 or more (``T \to 1``):
+choose ``\Delta t`` much shorter than the inter-spike interval.
 
 # References
 Cutts, C. S., & Eglen, S. J. (2014). Detecting pairwise correlations in spike trains: an
@@ -208,13 +227,10 @@ SNN.STTC(a, b, 5.0f0, 0:1:400)
 ```
 """
 function STTC(spiketrainA::Vector{Float32}, spiketrainB::Vector{Float32}, Δt::Float32, interval::AbstractVector)
-    istart = Float32(interval[1])
-    iend   = Float32(interval[end])
-    A = sort(spiketrainA)
-    B = sort(spiketrainB)
-    TA = _tile_fraction(A, Δt, istart, iend)
-    TB = _tile_fraction(B, Δt, istart, iend)
-    _sttc_pair(A, B, TA, TB, Δt)
+    t0, t1 = Float32(interval[1]), Float32(interval[end])
+    A = _restrict(_sorted(spiketrainA), t0, t1)
+    B = _restrict(_sorted(spiketrainB), t0, t1)
+    _sttc_pair(A, B, _tile_fraction(A, Δt, t0, t1), _tile_fraction(B, Δt, t0, t1), Δt)
 end
 
 """
@@ -224,21 +240,8 @@ Fraction ``T_A`` of `interval` covered by the windows ``±Δt`` around the spike
 `spiketrainA` (the tiling term of `STTC`). Sorts `spiketrainA` in place.
 """
 function tile_interval(spiketrainA::Vector{Float32}, Δt::Float32, interval::StepRangeLen{Float32})
-    width = Δt
     sort!(spiketrainA)
-    @inbounds for n in eachindex(spiketrainA)
-        n == 1 && continue
-        spiketrainA[n] < interval[1] && continue
-        spiketrainA[n] > interval[end] && continue
-
-        if spiketrainA[n] - spiketrainA[n-1] < 2Δt
-            width += spiketrainA[n] - spiketrainA[n-1]
-        else
-            width += 2Δt
-        end
-    end
-    width = width + Δt
-    width / (interval[end] - interval[1] + 2Δt)
+    _tile_fraction(spiketrainA, Δt, Float32(interval[1]), Float32(interval[end]))
 end
 
 """
@@ -247,7 +250,7 @@ end
     STTC(pop::AbstractPopulation, ΔT::Real, interval::AbstractVector)
 
 Symmetric matrix of the pairwise `STTC` values of a set of spike trains (diagonal = 1, pairs with
-an empty train = 0), computed with threads over rows.
+a train without spikes in the interval = 0), computed with threads over rows.
 
 # Arguments
 - `spiketrains`: A vector of vectors containing the spike times of each neuron.
@@ -270,7 +273,7 @@ function STTC(spiketrains::Vector{Vector{Float32}}, Δt, interval = nothing)
         iend   = Float32(interval[end])
     end
 
-    sorted = [sort(st) for st in spiketrains]
+    sorted = [_restrict(_sorted(st), istart, iend) for st in spiketrains]
     T = [_tile_fraction(st, Δt, istart, iend) for st in sorted]
 
     sttc_matrix = zeros(Float32, n, n)
@@ -278,11 +281,7 @@ function STTC(spiketrains::Vector{Vector{Float32}}, Δt, interval = nothing)
 
     Threads.@threads for i in 1:n
         @inbounds for j in (i+1):n
-            v = if length(sorted[i]) == 0 || length(sorted[j]) == 0
-                0f0
-            else
-                _sttc_pair(sorted[i], sorted[j], T[i], T[j], Δt)
-            end
+            v = _sttc_pair(sorted[i], sorted[j], T[i], T[j], Δt)
             sttc_matrix[i, j] = v
             sttc_matrix[j, i] = v
         end
