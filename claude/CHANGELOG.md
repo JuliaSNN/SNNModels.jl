@@ -22,7 +22,7 @@ populations are built with `Float64` state (see "Precision from the population t
 - The pair-STDP `train!` step with `Identity` populations driven by `SpikeTimeStimulus` allocates 0 B (was 336 B). Allocation per `train!`
   step measured in the independent review (bytes, 1.9.1 to 1.10): delayed `IF` network 17000 to 240; STP event 272 to 240;
   `vSTDPParameter` 848 to 240; balanced `sim!` 596 to 384; `AdEx` 0 to 0; `Tripod` 560 to 560 (unchanged: per-step allocations remain
-  in the network step, 240 B with a `PoissonStimulus`).
+  in the network step, 240 B with a `PoissonStimulus`; removed later, see "No allocation per `sim!`/`train!` step").
 - Sparse Poisson stimuli (`PoissonStimulus`, `PoissonStimulusLayer` with `PoissonLayer` and `PoissonLayerHet`): the
   spikes are sampled without one random number per input neuron and step, and the stimuli use the sparse hand-off
   of `SpikeTimeStimulus`. Microbenchmarks (`julia -t 1`, median of 3, `dt = 0.1`, us per `train!` step, whole network):
@@ -138,8 +138,8 @@ populations are built with `Float64` state (see "Precision from the population t
       seed-to-seed spread); the failure analysis is in `pre110_fixes/README.md` ("J2 failure analysis"). With bit identity the per-case
       tolerances and nulls of that comparison (BallAndStick kick case at 2.2e-4 mV, the kick-case nulls) no longer apply.
     - `HetRec` is unchanged (273 ns per neuron and step at N = 1000: a gather over about `N overlap Nd` weights per neuron, 0.27 ns per weight, and
-      the dense `rand!` is a small part). `IF_CANAHP`, `AdExMultiTimescale` and `Multipod` are not included in the module (commented out in `populations.jl`)
-      and were not touched. The `@fastmath` synapse stages of `SingleExpSynapse` and `DeltaSynapse` are already vectorised by LLVM (checked in the IR).
+      the dense `rand!` is a small part). `IF_CANAHP`, `AdExMultiTimescale` and `Multipod` were not included in the module and were not touched
+      (their files were deleted before the release, a99c647). The `@fastmath` synapse stages of `SingleExpSynapse` and `DeltaSynapse` are already vectorised by LLVM (checked in the IR).
     - Poisson populations (`Poisson` with one rate or one rate per neuron, `InhomogeneousPoisson`, `VariablePoisson`): sparse sampling with a fed spike list
       (see Behaviour notes). ns per neuron and step, N = 1000 / 10000: `Poisson` at 50 Hz 0.26 -> 0.14 and 0.19 -> 0.09 (1.9-2.1x), at 1 Hz 0.26 -> 0.03 and 0.19 -> 0.006
       (10x and 32x), heterogeneous rates 0.26 -> 0.28 and 0.22 -> 0.22 at 50 Hz (no gain: 7-10 candidates per step cost as much as the vectorised
@@ -237,8 +237,8 @@ Each item gives the migration.
   on a synapse built without LTP). Direct assignment `c.LTPParam = rule` of another type is a `MethodError`
   (cannot `convert`).
   Migration: build the synapse with the rule (`LTPParam = ...`), or `c2 = with_plasticity(c; LTP = rule)` and
-  replace `c` by `c2` when the model is composed (`compose(; ..., EE = c2, ...)`); `c2` shares all arrays with `c`,
-  so do not keep both in one model. Same-type changes (new parameters) still work with `update_plasticity!`.
+  replace `c` by `c2` when the model is composed (`compose(; ..., EE = c2, ...)`, or `change_plasticity`); `c2` shares `W`,
+  the connectivity, `param` and `records` with `c` (see "Switching plasticity on and off"), so do not keep both in one model. Same-type changes (new parameters) still work with `update_plasticity!`.
   `update_plasticity!(c; LTP, STP)` checks LTP before STP and writes LTP before checking STP: if the STP rule has
   another type, the LTP change has already been applied.
 - `SpikeTimeStimulus.param` is a type parameter (`PT <: SpikeTimeStimulusParameter`) and the struct has a new type
@@ -261,11 +261,12 @@ Each item gives the migration.
   `dt = 0.125` ms arrive 7 steps (0.875 ms) after the spike. The steps are computed at the first `forward!` and
   recomputed when `dt` or `delaytime` changes (`_remap_synapse_state!` invalidates them); if the buffer must be
   resized, queued increments are dropped. The delay is counted in calls of `forward!` of the connection.
-  Memory is `Npost x (max delay / dt + 1)` Float32 per delayed connection (1000 targets, 5 ms, `dt = 0.125`: 160 kB).
+  Memory is `Npost x (max delay / dt + 1)` values of the synapse precision per delayed connection (Float32: 1000 targets, 5 ms,
+  `dt = 0.125`: 160 kB; no buffer on the spike-list path of constant delays without plasticity).
   Migration: code that read `spike_time`/`spike_w` has no equivalent; read `buffer`. After editing
   `param.delaytime` in place, set `param.dt[1] = NaN32` so that the steps are recomputed (only the reordering of
-  synapses by `_remap_synapse_state!` does it for you). Results at `dt = 0.125` are bit-identical to 1.9.1; at other
-  `dt` see "Behaviour notes".
+  synapses by `_remap_synapse_state!` does it for you). Results at `dt = 0.125` are bit-identical to 1.9.1 on the buffer path
+  (constant delays without plasticity: see "Behaviour notes"); at other `dt` see "Behaviour notes".
 - `Identity` has new fields `spikes`, `inbox`, `nwriters`, `ndrivers`, `tracked`; `synaptic_target` for an
   `Identity` increments `nwriters`; `SpikeIndex` has a field `fed`. Migration: keyword construction is unchanged.
   Do not write `g`, `fire` or `h` of an `Identity` that is driven by a `SpikeTimeStimulus` by hand; if a connection
@@ -324,14 +325,14 @@ Each item gives the migration.
   `presynaptic`, `presynaptic_idxs`, `SynapseNormalization`, `AggregateScaling` or `SNNModels.ensure_transpose!(syn)` needs
   them. Code that reads `syn.J`/`syn.index` of a synapse without such a rule must call `SNNModels.ensure_transpose!(syn)` first
   (done in SNNUtils `average_weight`, `weights_indices`, `update_weight!` and SNNPlots `mutual_EI_connections`; their
-  `[compat]` still says SNNModels 1.9, to be raised to 1.10 at the release). (3) A delay common to all synapses
+  `[compat]` requires SNNModels 2). (3) A delay common to all synapses
   (`delay_dist = Dirac(d)`, or any draw that gives equal values) is stored once: `syn.param.delaytime` and
   `syn.param.delaysteps` have length 1; code that indexes them per synapse must check the length.
 - Saved models and this change. Loading and saving compatibility with older models is NOT guaranteed: model files written by
   this version contain empty `ρ`/`J`/`index` and length-1 delays, and must not be opened with any older SNNModels (1.9.1 refuses
   them at load, but the earlier 1.10 development commits do not and read out of bounds under `@inbounds`). Files written by the
-  earlier 1.10 development commits (full arrays; the struct layout is unchanged) are read and run by this version, but this is
-  not guaranteed for future versions. Breaking the reading of old files was accepted for this change but was not needed.
+  earlier 1.10 development commits (full arrays; the struct layout is unchanged) were read and run by this version; since
+  "One spike list per population" changed the layout of the populations they are refused by `load_model`. Breaking the reading of old files was accepted for this change but was not needed.
 - One spike list per population (see that section). `SpikeIndex` gains a sixth field `owned::Bool`, and the nine
   integrate-and-fire population types (`IF`, `AdEx`, `ExtendedIF`, `HetRec`, `Tripod`, `BallAndStick`, `HH`, `IZ`,
   `MorrisLecar`) gain a field `spikes::SpikeIndex` after `fire`. Positional constructors of these structs change arity;
@@ -340,7 +341,8 @@ Each item gives the migration.
   refused by `load_model`/`load_data` (`check_loaded_model`). This is the same policy as for 1.9.1 files; 1.10 is unreleased.
 
 ### New API
-- `with_plasticity(c::SpikingSynapse; LTP, STP)`: synapse that shares all arrays with `c` and has the new rule
+- `with_plasticity(c::SpikingSynapse; LTP, STP)`: synapse that shares `W`, the connectivity, `param` and `records` with `c`
+  (the lazy arrays only as described in "Switching plasticity on and off") and has the new rule
 - `change_plasticity(model, syn_name; LTP, STP)` (exported): a new model with one named synapse replaced by `with_plasticity(model.syn[syn_name]; LTP, STP)`; everything else is shared with `model`. The old and the new synapse share `W`, `colptr` and `I` and must be treated as desynchronised from the start. An unknown name raises an `ArgumentError` that lists the synapses. `compose(; model..., EE = new)` collides on the duplicate key (the error now names the key and says to use `change_plasticity`).
   with fresh state (exported).
 - Lazy trace decay (no option): a trace is stored as `x` and one `Float64` scale per trace type
@@ -396,7 +398,7 @@ Each item gives the migration.
   `STDPMexicanHat`, `iSTDPRate`, `vSTDPDenseParameter` (then called `vSTDPParameter`), Markram STP (`rho`, `u`, `x`), a synapse with delays plus
   STDP with the dense decay, the `SNNPlots.stdp_kernel` construction. The suite of SNNModels (29719 tests: 10382 with
   `test/syn/lazy_traces.jl` rewritten, the audit measured 10278 before, plus `test/stim/poisson_sparse.jl` with 19201 and the tests of the concurrent plasticity work) passes; SNNUtils, SNNPlots and
-  SpikingNeuralNetworks suites and doc examples were not rerun after the change to always-lazy traces.
+  SpikingNeuralNetworks suites were not rerun at that point (they were later, see "Synapse memory footprint").
 - Poisson stimuli: seeded results change (breaking behaviour). `PoissonStimulus`, `PoissonLayer` and `PoissonLayerHet`
   consume the global random number stream differently (geometric skipping and thinning instead of one draw per neuron and
   step), so a run with the same `Random.seed!` no longer reproduces 1.9 spike for spike, nor does any network that contains
@@ -490,7 +492,7 @@ potential), per-step evaluation of that state. State after this change:
 | `ActivityDependentTurnover` | Euler traces of spikes, read once per period | A | dense |
 | `AggregateScaling` | rate trace `y` (A); `WT` driven by `y` at every step; rescale every `τ/dt` steps | C (per neuron) | dense, O(N) per step |
 | `FLSynapse`, `FLSparseSynapse`, `PINning*`, `RateSynapse` | rate-based, error-driven RLS / rate updates at every step | C | dense |
-| `iSTDPTime`, `CaRule.jl` | no `plasticity!` method / file not included | - | not usable |
+| `iSTDPTime`, `CaRule.jl` | no `plasticity!` method / file not included | - | removed in 2.0.0 |
 
 vSTDP weight term, exact event-driven form (implemented as `vSTDPParameter`, see "Event-driven vSTDP"). With `g_i(n) = [v_i(n) - θ_LTD]_+ [V_i(n) - θ_LTP]_+`
 (a function of the postsynaptic neuron only), `q = 1 - dt/τx` and `x_j(n) = q x_j(n-1) + s_j(n)/τx`, the LTP weight is
@@ -621,8 +623,8 @@ no global flag, no separate precision argument.
   iSTDP, vSTDP both rules, Markram STP event, Het, Timestep), delays, `SpikeTimeStimulus`, `PoissonStimulus`, `PoissonStimulusLayer`, `Identity`,
   `AggregateScaling`, `SynapseNormalization`, clock, `sim!`/`train!`, records. Stage 2 (done): `IF` with `DoubleExpSynapse`; then (J3, below) every
   population model and every population synapse model. Not converted (refuse Float64 at construction or when stepped): `HetRec`, `Turnover`, the
-  rate/FORCE connections (`RateSynapse`, `SpikeRateSynapse`, `FL*`, `PINning*`), `CurrentStimulus`, `BalancedStimulus`, `VariableInputs`;
-  `IF_CANAHP`, `AdExMultiTimescale` and `Multipod` are not included in the module.
+  rate/FORCE connections (`RateSynapse`, `SpikeRateSynapse`, `FL*`, `PINning*`), `CurrentStimulus`, `BalancedStimulus`;
+  `VariableInputs`, `IF_CANAHP`, `AdExMultiTimescale` and `Multipod` were not included in the module (files deleted before the release).
 - Tests: `test/syn/precision.jl` (229): the same small network in Float32 and Float64 (STDPGerstner pair, triplet, event vSTDP, dense vSTDP, STP event, Poisson
   stimulus, `SpikeTimeStimulus` onto `Identity`, `PoissonStimulusLayer`, delay synapse, normalization, aggregate scaling) with the eltypes of every state
   array, the clock, `@inferred` on a step of each kind of component, an analytic pair-STDP check in Float64 (1e-12), mixed precision and refusals.
@@ -646,7 +648,7 @@ no global flag, no separate precision argument.
   are generic in the float type; `_pow4` has a `Float64` method; `HH`/`IZ`/`MorrisLecar` write their literals as `T(0.32)` (`=== 0.32f0`
   in Float32, checked for every literal). `Tripod.Vspike` stays a `Float32` field, compared after promotion; the dendritic geometry of a
   Float64 population is computed in Float64 from decimal values (see "Float64 parameter values" below). Still Float32 only (refused): `HetRec`, the rate/FORCE connections, `CurrentStimulus`, `BalancedStimulus`,
-  `VariableInputs`, `Turnover`.
+  `Turnover` (`VariableInputs`: file deleted before the release).
   - Float32 is bit-identical: SHA1 of the whole state trajectory (N = 257, 2000 steps, seeded synaptic drive) of 32 cases (every population
     model, the two Poisson regimes, heterogeneous AdEx, `Tripod` with `SingleExpSynapse`, `IF` and `AdEx` with each of the eight synapse
     models) equal before J3 (e265921) and after each of the four J3 commits (`pre110_fixes/out/j3_identity.csv`); all `*_update_loop.jl` and
@@ -849,7 +851,7 @@ short-term rule, 8 B/syn for `J`/`index` with a rule that needs them, 8 B/syn fo
   restored after the run and after an exception. Full suite `-t 1`: 74620 / 74620 (with OrderedCollections 1.8.2, see below).
 - Found while testing: a fresh resolve of the test environment picks OrderedCollections 2.0.2, which no longer has
   `sort(::Dict; by)`; `compose` then throws (`utils/util.jl:212-214`, 86 errored tests in `record_test.jl` and others). The
-  known limitation below is now real; not fixed here (outside job 2). The suite was run with OrderedCollections pinned to 1.8.2
+  known limitation below is now real; not fixed here (outside job 2; fixed in the next section). The suite was run with OrderedCollections pinned to 1.8.2
   in a scratch copy of the test environment.
 
 ### `compose` without `sort(::Dict)` (branch dev-diag, pre-1.10 diagnostics, job 3 task 0)
@@ -900,7 +902,7 @@ short-term rule, 8 B/syn for `J`/`index` with a rule that needs them, 8 B/syn fo
   its `param` read from the boxed vector element (some populations hold an abstractly typed `param`; a call dispatched on it
   from inside a method specialized on the population would box the population again, 176 B for an `IF`) and returns
   `nothing`, so no argument or result is boxed and everything inside the barrier is statically dispatched. The public
-  per-step methods `sim!(P, C, S, dt, T)` / `train!(P, C, S, dt, T)` remain (16 B each: the `Ref`). The firing-rate `Dict`
+  per-step methods `sim!(P, C, S, dt, T)` / `train!(P, C, S, dt, T)` remain (16 B each: the `Ref`; 0 B since 7cb36e7 when the three vectors are concretely typed, see "Known limitations"). The firing-rate `Dict`
   is only built with `pbar = true`. Order of operations and arithmetic unchanged.
 - Measured (`perf/pre110_diag/job4_alloc.csv`, `job4_alloc.jl`; pinned idle core, `-t 1`, `@allocated` after warm-up,
   model form, 1/10/100/1000 steps, least-squares slope and constant; before = 7c3d4ad): `IF` E/I with `CurrentSynapse` (2
@@ -1003,7 +1005,7 @@ recording overhead rec1/rec0 (`:fire` of E and I / nothing recorded); Auryn, Bri
   fed list (`Poisson` family, `Identity`, `PoissonStimulusLayer`), `fire` flags set by hand (not by the population's own
   update) are no longer recorded while `fed` is set; the connections reading those populations already ignored them.
 - Not fixed here (pre-existing on 48c60eb): `test/Project.toml` lacks `SHA`, which `test/threading_synapses.jl` uses, so that
-  file fails in a fresh test environment.
+  file fails in a fresh test environment (fixed on `dev` by ee48a1f, which adds `SHA`).
 
 ### One spike list per population (integrate-and-fire family)
 Branch `dev-poplist`, commits 94b1415..78165d3, manifest `~/.claude/code-manifests/snnmodels-poplist.md`.
@@ -1131,15 +1133,16 @@ Files:
   (b25eb27: 17.9), pair 1e4 20.0 vs 20.3 (24.8), event vSTDP 1e4 35.5 vs 37.7 (39.1); `final_v2/out/step_fix_check.txt`.
 - A record closed by a switch (rule variable the new rule does not have) is not reopened by a later switch; re-monitoring the
   same key needs `clear_records!`/`clear_monitor!` first. `records` is shared, so the source synapse stops sampling it too.
-- `compose` cannot replace a component by name (`compose(; model..., EE = new)` fails with a misleading "Receptors EE already
-  exists"); recipe: `compose(; pop = model.pop, syn = merge(model.syn, (; EE = new)), stim = model.stim, time = model.time)`, or a
-  `Vector{AbstractConnection}`. `iSTDPTime` has no `plasticity!` kernel (a synapse built with it errors under `train!`).
+- `compose` cannot replace a component by name (`compose(; model..., EE = new)` fails with a duplicate-key error that points to
+  `change_plasticity`); use `change_plasticity(model, :EE; LTP, STP)`, or `compose(; pop = model.pop, syn = merge(model.syn,
+  (; EE = new)), stim = model.stim, time = model.time)`, or a `Vector{AbstractConnection}`.
 - `iSTDPPotential` and the dense vSTDP are not converted (the event-driven vSTDP keeps the postsynaptic filters per step, O(Npost)): their postsynaptic filters follow the membrane potential at every step
   (class C, see "Lazy classification of the plasticity rules"); `SpikeRateSynapse` keeps its dense scans. The clock-driven
   `MarkramSTPParameterTimestep` (lazy-able with the Euler factor per elapsed step, but that needs a dt-aware elapsed step
   count and it is the dense reference of the event rule) and the traces of `ActivityDependentTurnover` (read once per
   turnover period) are lazy-able and not converted.
-- The sparse hand-off needs every writer of an `Identity` to be a `SpikeTimeStimulus` (any other writer, such as a connection or
+- The sparse hand-off needs every writer of an `Identity` to be a stimulus that logs its writes (`SpikeTimeStimulus`,
+  `PoissonStimulus` with a built-in parameter, `PoissonStimulusLayer`) (any other writer, such as a connection or
   a stimulus without a log, makes the population use the dense update; results are the same, only slower). Cases that still scan `fire` once per connection and step: the Poisson family in the dense regime (`fed = false`) and an
   `Identity` that is not driven by list-aware stimuli. The integrate-and-fire family scans once per step (see "One spike list
   per population").
@@ -1158,15 +1161,11 @@ Files:
 - JLD2 upgrade (typemap `Upgrade`) so that models saved with 1.9.1 load.
 - Parallel plasticity (partition by postsynaptic neuron for the post pass, by presynaptic neuron for the pre pass).
 - Integer clock (`wip-clock`).
-- `SpikingSynapse` docstring: it still describes `pre_spikes`/`post_spikes` as scratch lists (spiking_synapse.jl:158). To be
-  updated after the dev-chplast merge, which edits that file. The population-owned list itself is done (see "One spike list
-  per population"); it is built by one flag scan per step, not in the threshold loop.
 - Optional: owned lists for the Poisson family in the dense regime and for an undriven `Identity`. These still scan once per
   connection.
-- Documentation pages of SpikingNeuralNetworks that still describe `change_plasticity!`/`update_plasticity!` as
-  replacing a rule of any type (`docs/src/plasticity.md`, `docs/src/catalogue/connections.md`) and the delay queue entry
-  of `claude/performance.md` ("Remaining known performance issues"); release notes entry (with the breaking-changes
-  table, as for 1.9.0) when 1.10 is released; Project.toml is still 1.9.1.
+- The delay queue entry of `claude/performance.md` ("Remaining known performance issues"). (Done: the SpikingNeuralNetworks
+  docs of `change_plasticity!`/`update_plasticity!`, the `SpikingSynapse` docstring of `pre_spikes`/`post_spikes`, the release
+  notes in `CHANGELOG.md` and `CHANGELOG_2.0.0.md`, Project.toml at 2.0.0.)
 
 ## 1.9.1: recording buffers across chunks
 - `_extend_fire!` and `_extend_dense!` (called when a new `sim!`/`train!` chunk needs more room)
