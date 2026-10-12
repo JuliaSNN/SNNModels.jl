@@ -42,10 +42,7 @@ Algorithm (per step, `tpre`, `tpost` are Euler-integrated traces that jump by 1 
 
 Unlike the event-driven pair rules (`STDPGerstner` etc.), traces are Euler-integrated (per-step factor
 `1 - dt/τy`) and a spike is added to its trace before the postsynaptic pass of the same step reads `tpre`, so
-a pre and a post spike in the same step do interact. The Euler decay is applied lazily: one scalar per trace
-type is multiplied per step, no pass over the neurons (see `iSTDPVariables`: the stored traces are not the
-values), so the step cost grows with the number of spikes only. The weights agree with the dense Euler
-implementation to Float32 rounding.
+a pre and a post spike in the same step do interact. The decay is lazy (see `iSTDPVariables`).
 
 Plasticity is applied only when the network is run with `train!`; `sim!` never calls it.
 
@@ -134,11 +131,9 @@ traces, `last_spike` (unused by the update), the `active` flag and `initialized`
 `LTPVars` as the variable set, e.g. `monitor!(syn, [:tpost], :LTPVars)`.
 
 !!! warning "iSTDPRate: the stored traces are not the trace values"
-    The traces of `iSTDPRate` are decayed lazily (Euler factor `1 - dt/τy` per step on the scalars `scale`,
-    no pass over the neurons): the value of `tpre[k]` is `tpre[k] * scale[1]`, of `tpost[k]`
-    `tpost[k] * scale[2]`. Read them with `trace_values(syn, :tpre)`, `sync_traces!(syn)` first, or the
-    recorder (which stores values). `iSTDPPotential` keeps its dense traces (`scale` stays 1): `tpost` follows
-    the membrane potential, which drives it at every step.
+    As for `STDPVariables`: the value of `tpre`, `tpost` is the stored vector times `scale[1]`, `scale[2]`.
+    Read values with [`trace_values`](@ref) or call [`sync_traces!`](@ref) first. `iSTDPPotential` keeps
+    dense traces (`scale` stays 1).
 """
 iSTDPVariables
 
@@ -191,7 +186,7 @@ One step of the inhibitory STDP of Vogels et al. (2011) with target rate `param.
 - `dt::AbstractFloat`: time step (ms); `T::Time`: simulation clock (unused).
 
 # Algorithm
-- The traces are decayed by the Euler factor `1 - dt/τy` (lazily, on a scalar); a spike adds 1.
+- The traces are decayed by the Euler factor `1 - dt/τy` (lazily); a spike adds 1.
 - Presynaptic spike (reads `tpost` of the previous step): walk the outgoing synapses (`colptr`) and add `η (tpost[i] - 2 r τy)`.
 - Postsynaptic spike `i` (reads `tpre` of this step, spikes included): walk the incoming synapses `k = rowptr[i]:rowptr[i+1]-1`, map to the
   CSC position `s = index[k]` and add `η tpre[J[s]]`. Weights are clamped to `[Wmin, Wmax]`.

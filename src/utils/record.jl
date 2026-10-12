@@ -4,7 +4,7 @@ import Interpolations: scale, interpolate, BSpline, Linear, NoInterp
     get_time(model::NamedTuple)
 
 Current simulation time in ms (`T.t[1]`, or `model.time.t[1]` for a model built with
-`compose`), in the precision of the clock (`Float32` unless the model is `Float64`, see `float_type`).
+`compose`), in the precision of the clock.
 """
 get_time(T::Time) = T.t[1]
 
@@ -41,7 +41,7 @@ get_dt(T::Time) = T.dt
 """
     get_interval(T::Time)
 
-Time points `dt:dt:get_time(T)` (ms) of the steps simulated so far, as a `Float32` range.
+Time points `dt:dt:get_time(T)` (ms) of the steps simulated so far, in the precision of the clock.
 """
 get_interval(T::Time{FT}) where {FT} = FT(T.dt):FT(T.dt):get_time(T)
 
@@ -206,22 +206,9 @@ function _grow_dense!(records, meta, key::Symbol)
 end
 
 # ── Dense fire write: from the list of the neurons that fired ───────────────
-"""
-    _recording_spike_index(obj)
-
-`SpikeIndex` that `obj` owns, read by the `:fire` recorder instead of a scan of `obj.fire` into the
-recorder's scratch list: a list the owner feeds itself, read while its `fed` flag is set, or the list owned by
-a population of the integrate-and-fire family (`spike_index`), read while its window is open (`active`, between
-`integrate!` and the end of the step: the recorder may be the consumer that scans `fire` for the step, the
-connections then reuse the list). `nothing` (the default) for every other component, whose spikes are recorded
-from a word scan of `fire`.
-
-Contract: a type returns its `SpikeIndex` only if, whenever `fed == true` (or `owned && active`) at the time
-`record!` runs, `idx[1:n]` is (or `spike_list!` builds) the complete, ascending list (no duplicates) of the
-`true` entries of `fire`. Never return a list that can be unsorted or contain repeats (e.g. the `spiking` log
-of `SpikeTimeStimulus`). The types listed here are exactly those with a non-generic `spike_index` method
-(checked by the test suite).
-"""
+# `SpikeIndex` the `:fire` recorder reads instead of scanning `obj.fire` (`nothing`: scan). Contract: whenever the list is
+# `fed` (or `owned` and `active`) when `record!` runs, it is the complete ascending list of the `true` entries of `fire`
+# (never return a list that can be unsorted or repeated, e.g. the `spiking` log of `SpikeTimeStimulus`).
 _recording_spike_index(::Any) = nothing
 _recording_spike_index(
     p::Union{Poisson,VariablePoisson,InhomogeneousPoisson,Identity,PoissonStimulusLayer},
@@ -232,16 +219,8 @@ _recording_spike_index(p::_OWNED_LIST_POPULATIONS) = getfield(p, :spikes)
 _has_step_list(::Nothing) = false
 _has_step_list(s::SpikeIndex) = s.fed || (s.owned && s.active)
 
-"""
-    _fire_step_list(src, fire, meta)
-
-Ascending `Int32` indices of the neurons that fired this step, as a view: the owner's fed list if
-`src` is a `SpikeIndex` with `fed == true`; the population's owned list if `owned` and its window is
-open (`spike_list!`: scanned once per step, by the first consumer); otherwise a word scan of `fire`
-(`_flags_to_list!`) into the recorder's own scratch list `meta[:fire_scratch]` (window closed:
-`record_zero!`, direct `record!` calls; and lists that are not owned, which are never written by the
-recorder).
-"""
+# Ascending indices of the neurons that fired this step: the fed list, the owned list while its window is open, else a
+# scan of `fire` into the recorder's scratch list `meta[:fire_scratch]`.
 @inline _fire_step_list(::Nothing, fire::AbstractVector{Bool}, meta) = _scan_fire!(fire, meta)
 
 @inline function _fire_step_list(s::SpikeIndex, fire::AbstractVector{Bool}, meta)
@@ -268,11 +247,9 @@ end
 """
     _fire_mask!(meta, ind, N, owner = nothing)
 
-Membership mask (`Vector{Bool}` of length `N`) of the recorded subset `ind`, and whether `ind` is
-strictly increasing. Cached in `meta` and rebuilt only when `ind` is a different vector
-(`meta[:fire_mask_src] !== ind`) or `N` changed; `_allocate_fire!` drops the cache so every
-`sim!`/`train!` call rebuilds it (in-place changes of the index vector between the steps of a
-manual loop are not supported). Throws `ArgumentError` if an index is outside `1:N`.
+Membership mask (length `N`) of the recorded subset `ind`, and whether `ind` is strictly increasing. Cached in `meta`
+until `ind` is another vector or `N` changes; rebuilt at every `sim!`/`train!` call (in-place edits of `ind` within a
+manual loop are not seen). Throws `ArgumentError` if an index is outside `1:N`.
 """
 function _fire_mask!(meta, ind::Vector{Int}, N::Int, owner = nothing)
     mask = get(meta, :fire_mask, nothing)
@@ -301,11 +278,8 @@ _owner_name(obj) = hasproperty(obj, :name) ? "$(getproperty(obj, :name)) ($(name
     record_fire_dense!(obj, fire, records, meta, T, indices)
 
 Append the spikes of this step of `obj` (time `Float32(get_time(T))`, neuron id) to the COO buffers
-`records[:fire][:times_buf]`, `[:neurons_buf]`, in ascending neuron order. The ids come from the
-list of the neurons that fired (`_fire_step_list`: the owner's fed or owned `SpikeIndex`, or a word
-scan of `fire`), so the cost follows the number of spikes; the buffer grows at most once per step.
-With `indices[:fire]` only the listed neurons are recorded (membership mask); an unsorted or
-repeated index list, or a short one on a population without a list of the step, is visited in its own order.
+`records[:fire][:times_buf]`, `[:neurons_buf]`, in ascending neuron order (from `_fire_step_list`). With
+`indices[:fire]` only the listed neurons are recorded; an unsorted or repeated index list is visited in its own order.
 """
 function record_fire_dense!(
     obj,
@@ -432,8 +406,7 @@ end
 @inline function get_model_field(obj, key::Symbol, var_map::Dict{Symbol,Tuple{Symbol,Symbol}}, T::Time)
     if haskey(var_map, key)
         parent, sub = var_map[key]
-        # variables of a plasticity rule (`monitor!(obj, keys, :LTPVars)`) are recorded as values, not as
-        # stored: lazily decayed traces and event-updated STP variables are read through `plasticity_value`
+        # variables of a plasticity rule are recorded as values at time T (see `monitor!`)
         return plasticity_value(obj, parent, sub, T)
     elseif key === :W && obj isa AbstractSparseSynapse
         # weights of rules that defer their update (vSTDPParameter) are read through the accessor
@@ -611,8 +584,7 @@ Record all monitored variables of `obj` at the current time `T`. Dispatches to
 the dense or legacy path per `meta[:mode][key]`. Called every dt inside the sim loop.
 """
 @inline function record!(obj, T::Time)
-    # most objects are not monitored: the inlined emptiness test is the whole cost of an
-    # unmonitored object (no call, no hashed lookup, no allocation; hot path, every dt)
+    # inlined fast exit for unmonitored objects (hot path, every dt)
     isempty(getfield(obj, :records)) && return nothing
     return _record!(obj, T)
 end
@@ -743,19 +715,14 @@ here.
 - `keys`: field names of `obj` (e.g. `:v`, `:w`, `:W`, `:ρ`, `:fire`). A tuple
   `(sym, indices)` records only the listed elements of a vector field.
 - `sr = 1000Hz`: sampling rate. The sampling period is `max(1, round(1 / (sr * dt)))` steps,
-  so `sr` larger than `1/dt` records every step. Ignored for `:fire`. (Up to SNNModels 1.8.4
-  the period was rounded down, and Float32 rounding made, e.g., `sr = 10Hz` sample every
-  799 steps, 99.875 ms, instead of every 100 ms at `dt = 0.125ms`.)
+  so `sr` larger than `1/dt` records every step. Ignored for `:fire`.
 - `variables = :none`: name of a nested field holding the variables, e.g. `:STPVars` or
   `:LTPVars` of a `SpikingSynapse`, or `:synvars`. The key `sym` is then read from
   `obj.<variables>.<sym>` and stored as `Symbol(variables, "_", sym)`, e.g. `:STPVars_u`.
   The positional form `monitor!(obj, keys, :STPVars)` is equivalent. Variables of a plasticity
-  rule are recorded as VALUES, read through `plasticity_value` at each sampling step: the lazily decayed
-  STDP traces (`:tpre`, `:tpost`, `:r1`, `:r2`, `:o1`, `:o2`) and the event-updated `:u`, `:x` of the
-  event-driven Markram rules are recorded at their value at the sampling time, not as stored. Recording
-  never changes the state, so a monitored and an unmonitored run give identical weights. (Reading
-  `syn.LTPVars.tpre` or `syn.STPVars.u` directly returns the stored values.) A lazily stored variable
-  without a `plasticity_value` method makes `monitor!` throw an `ArgumentError`.
+  rule are recorded at their value at the sampling time, read through `plasticity_value` (lazily decayed
+  traces are not stored at that value; reading the field directly returns the stored value). Recording never
+  changes the state. A lazily stored variable without a `plasticity_value` method is an `ArgumentError`.
 - `monitor_time`: capacity hint in ms used to size the buffers (default: the duration of the
   `sim!` call, at least 1 s). Recording beyond the capacity is still correct: the buffer is
   doubled with a one-time warning.
@@ -778,7 +745,7 @@ Already-monitored keys and missing fields are skipped silently (with a warning i
 
 With `(:fire, indices)` only the spikes of the listed neurons are recorded (with their
 original neuron indices, so `spiketimes` still returns one entry per neuron of the
-population). (Up to SNNModels 1.8.4 the indices were ignored.) An index outside `1:N` throws an
+population). An index outside `1:N` throws an
 `ArgumentError` at the first step of the next `sim!`/`train!`.
 
 # Example
@@ -838,8 +805,7 @@ function monitor!(
             if hasfield(typeof(obj), sym)
                 # the efficacy of a SpikingSynapse without short-term rule is not stored: store it (ones) so that it can be recorded
                 (sym === :ρ && obj isa SpikingSynapse) && materialize_efficacy!(obj)
-                # the weights of a synapse are read through the accessor, as the recorder will: throws now (not mid-run)
-                # for a rule that defers the weight update and defines no accessor
+                # read through the accessor, as the recorder will: throws now rather than mid-run
                 sample = (sym === :W && obj isa AbstractSparseSynapse) ? plasticity_value(obj, :W) : getfield(obj, sym)
                 typ = typeof(sample)
                 key = sym
@@ -850,8 +816,7 @@ function monitor!(
         else
             if hasproperty(obj, variables)
                 if hasproperty(getfield(obj, variables), sym)
-                    # read through the accessor, as the recorder will: throws now (not mid-run) for a lazily
-                    # stored variable that has no `plasticity_value` method
+                    # read through the accessor, as the recorder will: throws now rather than mid-run
                     sample = plasticity_value(obj, variables, sym, 0.0f0)
                     typ = typeof(sample)
                     key = Symbol(variables, "_", sym)

@@ -61,12 +61,8 @@ abstract type AbstractReceptor end
     target::Symbol = :none
 end
 
-# Predefined receptors and NMDA blocks (`receptor_types.jl`) are built by `_predefined` from decimal keyword values. The
-# Float32 object is the one used by default (the same object as before 1.10); `convert_precision` to another precision
-# rebuilds a predefined object from its keywords (`_from_definition`), so that a Float64 copy carries the decimal values
-# (`τr = 0.26`, not `0.25999999046325684`) and its derived fields (`gsyn`, `α`, `τr⁻`, `τd⁻`) are computed in Float64. A receptor
-# that is not predefined (equal, `===`, to none of them) is converted value by value and keeps its Float32 rounding.
-# Internal registry (not API): filled at load time by `_predefined` only.
+# Registry of the predefined receptors and NMDA blocks (`receptor_types.jl`) with their decimal keywords, filled at load time:
+# `convert_precision` rebuilds a predefined object (`===`) from its keywords (`_from_definition`) instead of converting values.
 const _PREDEFINED = Pair{Any,NamedTuple}[]
 function _predefined(::Type{O}; kw...) where {O}
     obj = O(; kw...)
@@ -305,22 +301,19 @@ multiplying the current of every receptor with `nmda != 0` is
 ```math
 B(V) = \frac{1}{1 + \frac{[\mathrm{Mg}]}{b}\, e^{k V}}
 ```
-(see `nmda_gating`), the Jahr and Stevens form; the default values are those given in the
-code comments for Eyal et al. (2018).
+(see `nmda_gating`), the Jahr and Stevens form, with the values of Eyal et al. (2018).
 
 # Fields
 - `b::T = 3.36`: (mM).
 - `k::T = -0.077`: voltage sensitivity (1/mV).
 - `mg::T = 1.0`: extracellular magnesium concentration (mM).
 
-`T` defaults to `Float32`; the defaults are the decimal values in every precision (`NMDAVoltageDependency(T = Float64).b === 3.36`).
-Predefined instances: `SomaNMDA` (defaults) and `EyalNMDA`
-(identical values).
+`T` defaults to `Float32`. Predefined instances: `SomaNMDA` and `EyalNMDA` (both with the defaults).
 
 # References
 Jahr C. E., Stevens C. F. (1990), J. Neurosci. (functional form of the block).
 Eyal G. et al. (2018), Human cortical pyramidal neurons: from spines to spikes via models,
-Front. Cell. Neurosci. 12, doi:10.3389/fncel.2018.00181 (cited in the code as "Eyal 2018").
+Front. Cell. Neurosci. 12, doi:10.3389/fncel.2018.00181.
 
 # Example
 ```julia
@@ -330,7 +323,7 @@ SNN.nmda_gating(-70.0f0, SNN.NMDAVoltageDependency())
 """
 NMDAVoltageDependency
 
-# defaults: the decimal values of `nmda_b`, `nmda_k`, `Mg_mM` (identical in Float32, exact in Float64)
+# defaults: the decimal values of `nmda_b`, `nmda_k`, `Mg_mM`
 @snn_kw struct NMDAVoltageDependency{T = Float32}
     b::T = 3.36
     k::T = -0.077

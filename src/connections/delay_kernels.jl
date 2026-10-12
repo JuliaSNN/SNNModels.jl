@@ -1,10 +1,7 @@
-# Constant-delay kernels of the delayed `forward!`: the delay is stored once for all synapses (`delaysteps` of length 1, see
-# `SpikingSynapse`), so `forward!` passes it as an integer and `_forward_delay!` dispatches here. The arrival column `col` (0-based
-# ring slot) is the same for every event of the step, so the scatter needs neither the per-synapse delay nor the slot wrap.
-# Invariants (bit-identical to the general loop): the increment is `_wρ(W, ρ, s)` (`W[s] * ρ[s]`, or `W[s]` without stored
-# efficacy) at emission, summed in the column in emission order (spike list, then CSC order); no `@fastmath` (no FMA contraction of
-# `buffer + W * ρ`); the threaded kernel touches only the rows `rng` of the buffer and of `g`. `ivdep` is valid because the rows
-# `I[s]` of one CSC column are distinct (the vectorised scatter has no conflicting lanes); measured 16 % faster than `@simd` alone.
+# Kernels for a delay common to all synapses (`delaysteps` of length 1): every event of a step lands in the same ring column.
+# Bit-identical to the per-synapse loop: increments summed in emission order, no `@fastmath` (it would contract
+# `buffer + W * ρ` into an FMA); a threaded chunk touches only its rows `rng`. `ivdep` is valid because the rows `I[s]`
+# of one CSC column are distinct.
 
 # common delay in steps (`-1`: per-synapse delays, empty connection, or not yet computed by `_delay_steps!`)
 _dconst(param::SpikingSynapseDelayParameter) = length(param.delaysteps) == 1 ? Int(param.delaysteps[1]) : -1
@@ -51,11 +48,9 @@ end
     return nothing
 end
 
-# Constant delay without plasticity (NoLTP, NoSTP): the spike list is delayed instead of the increments. `param.spike_ring` keeps the
-# lists of the last `d + 1` steps (`d = _dconst(param)`) (slot `pos` = this step, as the buffer columns; capacity kept, no allocation after warm-up) and
-# the list emitted `d` steps ago is scattered into `g` directly: one touch of the target array, no arrival pass over the `Npost`
-# targets. Not bit-identical to the buffer: the increments of one step reach `g[i]` one by one (`g + w1 + w2`, not `g + (w1 + w2)`)
-# and `W` is read at arrival (a weight changed in between by the user or by metaplasticity is delivered with its new value).
+# Spike-list path (common delay `d`, NoLTP, NoSTP): `param.spike_ring` keeps the spike lists of the last `d + 1` steps (slot
+# `pos` = this step) and the list emitted `d` steps ago is scattered into `g` directly, with `W` read at arrival. Not
+# bit-identical to the buffer path (increments added one by one; a weight changed in flight is delivered with its new value).
 @inline _use_spike_ring(c::SpikingSynapse) = c.LTPParam isa NoLTP && c.STPParam isa NoSTP && _dconst(c.param) >= 0
 
 function _forward_spike_ring!(c::SpikingSynapse, param::SpikingSynapseDelayParameter, Npost::Int)
@@ -68,8 +63,7 @@ function _forward_spike_ring!(c::SpikingSynapse, param::SpikingSynapseDelayParam
             ring[k] = Int32[]
         end
     end
-    # increments still in flight in the buffer (plasticity switched off with `without_plasticity`): delivered on their arrival step
-    # (`pos` is common to the buffer columns and the ring slots), then the buffer is released
+    # increments still in the buffer after a switch from the buffer path: delivered on their arrival step, then the buffer is released
     buf = param.buffer
     if size(buf, 1) > 0 && param.drain[1] == 0     # fresh from the buffer path: the d columns ahead hold increments
         if nslots > 1
@@ -113,11 +107,8 @@ function _ring_deliver!(g, W, ρ, I, colptr, ptr, arr, Npost)
     return nothing
 end
 
-# Buffer path: allocate the `Npost` rows of the buffer (`_delay_steps!` only sets the number of columns) and drop the spike lists of
-# the spike-list path (plasticity switched on with `with_plasticity`): the two paths never hold spikes in flight at the same time.
-# The spikes in flight of the spike-list path (emitted `a = 1..d` steps ago, arriving in `d - a` steps) are moved into the buffer column of
-# their arrival with the weight `W` they have now (the one the spike-list path reads at arrival); the buffer content still pending from a
-# previous drain stays where it is (`pos` is common to the buffer columns and the ring slots).
+# Buffer path: allocate the `Npost` rows of the buffer and move the spikes in flight of the spike-list path into the buffer
+# column of their arrival, with the current `W`; then drop the spike lists. `pos` is common to buffer columns and ring slots.
 @inline function _delay_buffer!(c::SpikingSynapse, param::SpikingSynapseDelayParameter, Npost::Int)
     size(param.buffer, 1) == Npost || (param.buffer = zeros(eltype(param.buffer), Npost, size(param.buffer, 2)))
     param.drain[1] = 0

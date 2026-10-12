@@ -14,8 +14,8 @@ Simulate a network with plasticity for `duration` (ms) with time step `dt` (ms).
 2. for every stimulus: `stimulate!`, `record!`;
 3. for every population: `update_traces!`, `integrate!`, `plasticity!`, `record!`;
 4. for every connection: `update_traces!`, `forward!`, `plasticity!`, `record!`.
-The list of the neurons that fired in a population (`spike_index`) is built once per step and shared by its connections
-and recorder from `integrate!` to the end of the step.
+The spike list of a population (`spike_index`) is built once per step and shared by its connections and recorder.
+A step that throws is a fatal error: discard the run.
 
 `sim!` runs the same sequence without `update_traces!` and `plasticity!`, so weights and STP
 variables only change under `train!` (long-term STDP/iSTDP/vSTDP rules, short-term
@@ -25,7 +25,7 @@ plasticity, metaplasticity components).
 - `model`: a NamedTuple built with `compose`; its populations, connections and stimuli
   (stimulus groups are unpacked) are simulated and `model.time` is advanced.
 - `args...`: extra components (or vectors of them) added to those of `model`.
-- `dt = 0.125ms`: time step (converted to `Float32`).
+- `dt = 0.125ms`: time step (converted to the float type of `time`; each component gets it in its own precision).
 - `duration = 10ms` (vector and keyword forms) or `1s` (positional model form): simulated time; the loop
   runs over `0:dt:(duration - dt)`, i.e. `round(duration / dt)` steps.
 - `time = Time()`: clock of the vector form.
@@ -33,14 +33,10 @@ plasticity, metaplasticity components).
   `perturbation!(; P, C, S, t, dt, start_time)`.
 - `pbar = false`: show a progress bar with the running firing rates of the populations that
   record `:fire`.
-- `neurons_per_thread = nothing`: chunk size of the threaded population updates for the duration of the run (`nothing`: keep
-  the current setting, default 0: threading off; a positive value such as 512 turns it on, `0` or `Inf` off). See [`neurons_per_thread`](@ref) and [`foreach_chunk`](@ref).
-- `flush_subnormals = true`: run with the flush-to-zero floating-point mode (`set_zero_subnormals(true)` on the stepping thread and,
-  when threaded, on the worker threads; restored afterwards). Results that would be subnormal (below `floatmin`, 1.2e-38 in
-  Float32) are 0, so decaying variables of silent synapses and quiet populations stop at a tiny normal value instead of
-  staying subnormal, which avoids the slow subnormal arithmetic (up to 60x per step); spikes and states above `floatmin` are
-  unchanged. `false` keeps IEEE gradual underflow.
-  See `SNNModels.with_flush_subnormals`.
+- `neurons_per_thread = nothing`: chunk size of the threaded updates for this run (`nothing` keeps the current
+  setting; `0` or `Inf` turns threading off). See [`neurons_per_thread`](@ref).
+- `flush_subnormals = true`: run with subnormal results flushed to zero (on all threads, restored afterwards), which
+  avoids slow subnormal arithmetic in decaying variables; `false` keeps IEEE gradual underflow. See `SNNModels.with_flush_subnormals`.
 
 Recording buffers are sized before the loop from `duration` (see `monitor!`). If the model
 time is 0, a first sample of every record is taken before the first step.
@@ -78,10 +74,8 @@ function train!(
     return _run!(_train_step!, P, C, S, dt, dts, duration, time, perturbation!, pbar, neurons_per_thread, flush_subnormals)
 end
 
-# Loop of `sim!` / `train!` (keyword forms). `dt` is wrapped once per call in a `Ref` (`dtr`): the per-component step
-# functions are called with dynamic dispatch (the vectors hold abstract types) and an unboxed `Float32` argument or
-# return value of a dynamic call is boxed, 16 B per component and step. A `Ref` is already on the heap, so the step
-# allocates nothing (1.10: was 16 B per stimulus, population and connection per step).
+# Loop of `sim!` / `train!` (keyword forms). `dt` goes in a `Ref` (`dtr`): the per-component calls are dynamically
+# dispatched and a float argument of a dynamic call would be boxed (allocated) per component and step.
 function _run!(step!::F, P, C, S, dt::AbstractFloat, dts, duration, time::Time, perturbation!, pbar, neurons_per_thread,
                flush_subnormals::Bool) where {F}
     _allocate_records!(P, C, S, Float32(dt), Float32(duration))
@@ -188,20 +182,16 @@ function train!(
     return nothing
 end
 
-# The step argument of the five-argument `sim!`/`train!`. With concretely typed vectors every call of the step is statically
-# dispatched, so `dt` is passed as is (no allocation); with abstractly typed vectors the calls are dynamic and an unboxed
-# `dt` would be boxed once per component, so it goes in a `Ref` (see `_run!`). `_dtval` reads either.
+# Step argument of the five-argument `sim!`/`train!`: `dt` itself for concretely typed vectors (static dispatch), else a
+# `Ref` (see `_run!`). `_dtval` reads either.
 @inline _dtarg(dt, ::Val{true}) = dt
 @inline _dtarg(dt, ::Val{false}) = Ref(dt)
 @inline _dtval(d::Base.RefValue) = d[]
 @inline _dtval(d::AbstractFloat) = d
 
-# One `train!` step. `_dtval(dtr)` is the model `dt`; every component gets it in its own precision (float_type): a Float32
-# population in a Float64 model runs in Float32. The work of a component sits behind one dynamically dispatched function
-# barrier that takes the component, its `param` (as read from the boxed element of the vector: some populations hold
-# an abstractly typed `param`, and a call dispatched on it from inside a method specialized on the population would
-# box the population again) and the `Ref` of `dt` (see `_run!`), and returns `nothing`: no argument or return value is
-# boxed, and everything inside the barrier is statically dispatched.
+# One `train!` step; every component gets `dt` in its own precision. Each component runs behind one dynamically dispatched
+# function barrier taking the component, its `param` (read here: some populations have an abstractly typed `param`) and
+# `dtr`, returning `nothing`, so nothing is boxed and the body is statically dispatched.
 function _train_step!(P::Vector, C::Vector, S::Vector, dtr::Union{Base.RefValue{<:AbstractFloat},AbstractFloat}, T::Time)
     record_zero!(P, C, S, T)
     update_time!(T, _dtval(dtr))
@@ -279,8 +269,8 @@ Each step runs:
 2. for every stimulus: `stimulate!(s, s.param, T, dt)`, `record!`;
 3. for every population: `integrate!(p, p.param, dt)`, `record!`;
 4. for every connection: `forward!(c, c.param, dt, T)`, `record!`.
-The list of the neurons that fired in a population (`spike_index`) is built once per step and shared by its connections
-and recorder from `integrate!` to the end of the step.
+The spike list of a population (`spike_index`) is built once per step and shared by its connections and recorder.
+A step that throws is a fatal error: discard the run.
 
 No plasticity is applied: `sim!` never calls `update_traces!` or `plasticity!`, so weights
 and short-term plasticity variables stay constant even if a synapse carries an `LTPParam`
@@ -290,7 +280,7 @@ or `STPParam`. Use [`train!`](@ref) for plastic networks.
 - `model`: a NamedTuple built with `compose`; its populations, connections and stimuli
   (stimulus groups are unpacked) are simulated and `model.time` is advanced.
 - `args...`: extra components (or vectors of them) added to those of `model`.
-- `dt = 0.125` ms: time step (converted to `Float32`).
+- `dt = 0.125` ms: time step (converted to the float type of `time`; each component gets it in its own precision).
 - `duration = 10` ms (vector and keyword forms) or `1s` (positional model form): the loop runs over
   `0:dt:(duration - dt)`.
 - `time = Time()`: clock of the vector form.
@@ -298,14 +288,10 @@ or `STPParam`. Use [`train!`](@ref) for plastic networks.
   `perturbation!(; P, C, S, t, dt, start_time)`.
 - `pbar = false`: show a progress bar with the running firing rates of the populations that
   record `:fire`.
-- `neurons_per_thread = nothing`: chunk size of the threaded population updates for the duration of the run (`nothing`: keep
-  the current setting, default 0: threading off; a positive value such as 512 turns it on, `0` or `Inf` off). See [`neurons_per_thread`](@ref) and [`foreach_chunk`](@ref).
-- `flush_subnormals = true`: run with the flush-to-zero floating-point mode (`set_zero_subnormals(true)` on the stepping thread and,
-  when threaded, on the worker threads; restored afterwards). Results that would be subnormal (below `floatmin`, 1.2e-38 in
-  Float32) are 0, so decaying variables of silent synapses and quiet populations stop at a tiny normal value instead of
-  staying subnormal, which avoids the slow subnormal arithmetic (up to 60x per step); spikes and states above `floatmin` are
-  unchanged. `false` keeps IEEE gradual underflow.
-  See `SNNModels.with_flush_subnormals`.
+- `neurons_per_thread = nothing`: chunk size of the threaded updates for this run (`nothing` keeps the current
+  setting; `0` or `Inf` turns threading off). See [`neurons_per_thread`](@ref).
+- `flush_subnormals = true`: run with subnormal results flushed to zero (on all threads, restored afterwards), which
+  avoids slow subnormal arithmetic in decaying variables; `false` keeps IEEE gradual underflow. See `SNNModels.with_flush_subnormals`.
 
 Recording buffers are sized before the loop (see `monitor!`). If the model time is 0, a first
 sample of every record is taken before the first step. Simulations can be continued by

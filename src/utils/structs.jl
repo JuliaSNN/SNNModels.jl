@@ -90,8 +90,7 @@ Time(; kwargs...) = Time{Float32}(; kwargs...)
     Time{FT}(time::Number; dt = 0.125)
 
 Create a clock set at `time` (ms), with time step `dt` and step counter
-`tt = round(time / dt)` (`Float32` unless `FT` is given). (Up to SNNModels 1.8.4 `dt` was fixed to 0.125 ms and a `time` that
-was not a multiple of it threw an `InexactError`.)
+`tt = round(time / dt)` (`Float32` unless `FT` is given).
 
 # Example
 ```julia
@@ -105,24 +104,20 @@ function Time{FT}(time::Number; dt::Real = 0.125) where {FT<:AbstractFloat}
 end
 Time(time::Number; dt::Real = 0.125f0) = Time{Float32}(time; dt)
 
-"""
-    float_type(x)
-
-Floating-point element type of a model object: `Float32` or `Float64`. The precision of a model is chosen once, on
-its populations (a population built with `Vector{Float64}` state, for example `Identity(N = 10, VFT = Vector{Float64})`), and every
-connection and stimulus built on a population takes the type of the arrays it writes into (the target `g` of
-the population): `float_type(c) = eltype(c.W)` for a sparse synapse, `eltype(g)` for a stimulus. The state of the
-plasticity rules, the delay buffers, the caches and the clock follow. For a type it is the first type parameter that
-is a floating-point type or a vector of one (`Identity{Vector{Float64},Int32}` gives `Float64`), `Float32` if there is none.
-For a network (a `NamedTuple` as returned by `compose`) it is the promotion of the types of the populations.
-"""
-# Default of a parameter field whose value is written with the Float32 unit constants and is not the decimal value in Float32:
-# the Float32 default keeps the value `x32` it has always had (bit-identical), another precision gets the decimal value `x`.
-# Example: `HHParameter`'s `Cm = 1uF * cm^(-2) * 20000um^2` is 199.99998f0 in Float32 and 200.0 in Float64.
+# Default of a parameter field computed from the Float32 unit constants: Float32 keeps that value `x32` (e.g. `HHParameter`'s
+# `Cm` is 199.99998f0), another precision gets the decimal value `x` (200.0).
 _unit_default(::Type{Float32}, x32, x) = x32
 _unit_default(::Type{FT}, x32, x) where {FT} = x
 
 # generated: the answer is a constant of the type, so a call with a known type costs nothing in the step loop
+"""
+    float_type(x)
+
+Floating-point element type (`Float32` or `Float64`) of a model object or type. The precision is chosen on the
+populations (e.g. `Identity(N = 10, VFT = Vector{Float64})`); connections and stimuli take the type of the variable they
+write into, and plasticity state, delay buffers and the clock follow. For a type: its first type parameter that is a
+float or a vector of floats, else `Float32`. For a network built with `compose`: the promotion over its populations.
+"""
 @generated float_type(::Type{T}) where {T} = (R = something(_float_type(T), Float32); :($R))
 float_type(x) = float_type(typeof(x))
 _float_type(::Type{T}) where {T<:AbstractFloat} = T

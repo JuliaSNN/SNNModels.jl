@@ -12,24 +12,19 @@ struct SpikingSynapseParameter <: AbstractSpikingSynapseParameter end
     SpikingSynapseDelayParameter(; delaytime)
 
 Parameter of a `SpikingSynapse` with per-synapse transmission delays (not exported; built by
-the `SpikingSynapse` constructor when `delay_dist` is given). The delayed increments are kept in
-a ring buffer indexed by arrival step: at the first `forward!` (and whenever `dt` or the delays
-change) every delay is rounded up to a whole number of steps, `ceil(delay / dt)`, the first step
-whose time is not before the arrival time (so 0.8 ms at `dt = 0.125` ms arrives 7 steps later).
-A delay stored once (common to all synapses) is delivered through one ring column per step; without LTP and STP the spike lists
-are delayed instead (`spike_ring`, `W` read at arrival, the buffer has 0 rows); switching path carries the spikes in flight over (ring to buffer column, buffer drained for `d` steps)
-(`delay_kernels.jl`).
+the `SpikingSynapse` constructor when `delay_dist` is given). Each delay is rounded up to whole
+steps, `ceil(delay / dt)`, at the first `forward!` and whenever `dt` changes; the increments
+``W_{ij}\,\rho_{ij}`` (evaluated at emission) wait in a ring buffer indexed by arrival step. A delay
+common to all synapses without LTP and STP delays the spike lists instead (`delay_kernels.jl`).
 
 # Fields
-- `delaytime::Vector{FT}`: delay of each synapse (ms), in the CSC order of `W`; a single value when all synapses have the
-  same delay (e.g. `delay_dist = Dirac(d)`), which then applies to every synapse.
-- `delaysteps::Vector{Int32}`: delay of each synapse (or the common delay) in steps of the `dt` of the last `forward!`.
-- `buffer::Matrix{FT}`: `Npost x (max(delaysteps) + 1)` increments ``W_{ij}\,\rho_{ij}``
-  (evaluated at emission time) per target and arrival step, a ring indexed from `pos`.
+- `delaytime::Vector{FT}`: delay of each synapse (ms) in the CSC order of `W`, or one value common to all synapses.
+- `delaysteps::Vector{Int32}`: the same in steps of the `dt` of the last `forward!`.
+- `buffer::Matrix{FT}`: `Npost x (max(delaysteps) + 1)` ring of pending increments, indexed from `pos`.
 - `dt::Vector{FT}`: the step `delaysteps` was computed for (`NaN` before the first `forward!`).
 - `pos::Vector{Int}`: ring slot (0-based) of the current step.
-- `spike_ring::Vector{Vector{Int32}}`: without plasticity and with a delay of `d` steps stored once, the spike lists of the last `d + 1` steps (delayed instead of the increments).
-- `drain::Vector{Int}`: steps left to deliver increments still in the buffer after a switch from the buffer path to the spike-list path.
+- `spike_ring::Vector{Vector{Int32}}`: spike lists of the last `d + 1` steps (spike-list path only).
+- `drain::Vector{Int}`: steps left to deliver the buffer after a switch to the spike-list path.
 """
 SpikingSynapseDelayParameter
 
@@ -50,7 +45,7 @@ function _delay_steps!(param::SpikingSynapseDelayParameter, dt::AbstractFloat, N
     (param.dt[1] == dt && length(delaysteps) == length(delaytime)) && return nothing
     resize!(delaysteps, length(delaytime))
     for s in eachindex(delaytime)
-        # 1f-4 steps of tolerance for the rounding error of the quotient (0.75 ms / 0.125 ms is 6 steps)
+        # 1e-4 steps of tolerance for the rounding error of the quotient
         delaysteps[s] = max(0, ceil(Int32, delaytime[s] / dt - oftype(dt, 1e-4)))
     end
     nslots = Int(isempty(delaysteps) ? 0 : maximum(delaysteps)) + 1
@@ -114,9 +109,8 @@ short-term efficacy (1 without STP). The units of ``W`` are the units of the tar
 (e.g. nS for conductances, pA for current synapses); ``W`` is added once per spike, the
 postsynaptic model then integrates the target.
 
-With `delay_dist`, every synapse has a fixed delay ``d_{ij}`` (ms) and the increment is put in
-a queue of the postsynaptic neuron with arrival time ``t + d_{ij}``; at every step all queued
-increments with arrival time ``\le t`` are added to ``g_i``.
+With `delay_dist`, every synapse has a fixed delay ``d_{ij}`` (ms), rounded up to whole steps; the
+increment computed at emission is added to ``g_i`` at the arrival step (see `SpikingSynapseDelayParameter`).
 
 # Arguments
 - `pre`, `post`: populations (`AbstractPopulation`).
@@ -138,17 +132,15 @@ increments with arrival time ``\le t`` are added to ``g_i``.
 rule types are `LTPParameter` and `STPParameter`.
 
 # Fields
-- `rowptr`, `colptr`, `I`, `J`, `index`, `W`: double sparse storage, as returned by `dsparse`
+- `rowptr`, `colptr`, `I`, `J`, `index`, `W`: double sparse storage as returned by `dsparse`
   (CSC column pointers `colptr`, postsynaptic index `I` and presynaptic index `J` of every
   synapse, row pointers `rowptr` of the transposed matrix and the map `index` from row-major
-  to CSC position); `W::Vector{FT}` holds the weights in CSC order (`FT` = precision of the synapse).
-  `J` and `index` are empty unless something reads them: a plasticity rule that walks the inputs of a
-  neuron (`needs_transpose`), `presynaptic`, `presynaptic_idxs`, `SynapseNormalization`, `AggregateScaling`;
-  call `SNNModels.ensure_transpose!(c)` before reading them in user code (since 1.10). `with_plasticity`/`without_plasticity`
-  hand `J`, `index` and `ρ` over only to a synapse whose rules need them.
-- `ρ::Vector{FT}`: short-term efficacy per synapse (initialised to 1), stored only with a short-term rule
-  (`STPParam`); otherwise empty (ρ = 1). Read it with `SNNModels.efficacy(c)`; call
-  `SNNModels.materialize_efficacy!(c)` before writing to it (since 1.10).
+  to CSC position); `W::Vector{FT}` holds the weights in CSC order.
+  `J` and `index` are built only when something reads them (a rule that `needs_transpose`, `presynaptic`,
+  `presynaptic_idxs`, `SynapseNormalization`, `AggregateScaling`); otherwise empty. Call
+  `SNNModels.ensure_transpose!(c)` before reading them in user code.
+- `ρ::Vector{FT}`: short-term efficacy per synapse, stored only with a short-term rule; otherwise empty (ρ = 1).
+  Read it with `SNNModels.efficacy(c)`; call `SNNModels.materialize_efficacy!(c)` before writing to it.
 - `fireI`, `fireJ`: references to `post.fire` and `pre.fire`.
 - `g`, `v_post`: references to the target variable and to the membrane potential of the
   target compartment.
@@ -156,38 +148,26 @@ rule types are `LTPParameter` and `STPParameter`.
 - `LTPParam`, `STPParam`, `LTPVars`, `STPVars`: plasticity rules and their state.
 - `targets::Dict`: ids of `pre`/`post`, target symbol, connection type.
 - `records::Dict`: recorded variables.
-- `chunkptr::ChunkPtr`: cache of the sub-row pointers of the threaded `forward!`/plasticity (see Threading).
-- `pre_spikes`, `post_spikes`: `SpikeIndex` scratch lists of the neurons that fired in the current step,
-  built from `fireJ`/`fireI` once per step and shared by `forward!` and the event-driven rules. If `pre` (or
-  `post`) keeps its own list up to date (`Identity` driven by `SpikeTimeStimulus`), the synapse shares it and never
-  scans the flags.
+- `pre_spikes`, `post_spikes`: `SpikeIndex` lists of the neurons of `pre`/`post` that fired in the current step,
+  shared by `forward!` and the event-driven rules (the population's own list when it keeps one).
+- `chunkptr::ChunkPtr`: cached sub-row pointers of the threaded kernels.
 
 # Threading
-With `neurons_per_thread > 0` (see `set_neurons_per_thread!`) and more than one Julia thread, `forward!` (with and without delays), the pair, triplet,
-weight-dependent, structured and inhibitory event-driven STDP rules and the event-driven STP efficacy update are partitioned by postsynaptic range, with the
-same chunks as the postsynaptic population: chunk `c` adds to `g[post chunk c]` (and the delay buffer rows of that range) and updates the weights of the
-synapses that end there, using the sub-row pointers `chunkptr` (built on first use, 4 (nchunks + 1) bytes per presynaptic neuron, invalidated by
-`update_sparse_matrix!`). Every target receives its additions in the order of the serial loop, so the results are bit-identical for any chunking and any
-number of threads. Synapses with less work than `SNNModels.SYN_MIN_OPS[]` operations per step run on the calling thread. The voltage-based vSTDP and
-`iSTDPPotential` plasticity stays serial.
+With `neurons_per_thread > 0` (see `set_neurons_per_thread!`) and more than one thread, `forward!` and the
+event-driven STDP, iSTDP and STP updates are partitioned by postsynaptic range, with the chunks of the
+postsynaptic population. Each target receives its additions in serial order, so results are bit-identical
+for any number of threads. Synapses with fewer than `SNNModels.SYN_MIN_OPS[]` operations per step run serially;
+vSTDP and `iSTDPPotential` are always serial.
 
 # Notes
-- Precision. The synapse has the floating-point type of the variable it writes into, i.e. of the target
-  population (`float_type(post)`: `Float32` by default, `Float64` for a population built with
-  `VFT = Vector{Float64}`). All synaptic data (`W`, `ρ`, delays, delay queues, the state of the plasticity
-  rules) have that type whatever the element type of `conn` or of `delay_dist`; conversion happens in the
-  constructor. The rules `LTPParam`, `STPParam` are converted to it too (`convert_precision`; build a rule with
-  `FT = Float64` to have `Float64` values: a `Float32` rule keeps its `Float32` values). The presynaptic
-  population may have any precision. If the population mixes precisions (its target variable and membrane
-  potential differ), the constructor throws an `ArgumentError`.
-- Weights of a rule that defers their update (the event-driven `vSTDPParameter`) are not stored in `W`
-  between materialisations: read them with `plasticity_value(syn, :W)` (see `sync_traces!`).
+- Precision: the synapse has the floating-point type `FT` of the target population (`float_type(post)`). `W`, `ρ`,
+  delays and the plasticity rules and state are converted to it (`convert_precision`; a `Float32` rule keeps
+  `Float32` values). A target population whose target variable and membrane potential differ in precision is an
+  `ArgumentError`.
+- Weights of the event-driven `vSTDPParameter` are updated lazily: read them with `plasticity_value(syn, :W)`.
 - If `pre == post`, autapses are removed structurally (no stored zero-weight self synapses
   that plasticity could grow). With `rule = :Fixed` this lowers the in-degree by one for the
   neurons that had drawn themselves.
-- `conn` as a `NamedTuple` is built by `sparse_matrix`, which since SNNModels 1.8.2 uses a
-  different random stream than before: seeded networks do not reproduce earlier realisations
-  (same statistics).
 
 # Example
 ```julia
@@ -236,8 +216,7 @@ function SpikingSynapse(
     )
     @views g, v_post = synaptic_target(targets, post, sym, comp)
 
-    # the precision of the synapse is that of the variable it writes into (the target population): weights,
-    # efficacy, delays, plasticity state and rules follow it
+    # the precision of the synapse is that of the variable it writes into
     FT = _synapse_float_type(post, g, v_post)
 
     # set the synaptic weight matrix
@@ -265,8 +244,7 @@ function SpikingSynapse(
     else
         # delays have the precision of the synapse whatever the element type of `delay_dist`
         delaytime = FT.(rand(delay_dist, length(W)))
-        # a delay common to all synapses (e.g. `Dirac`) is stored once (same draw, so the random stream is unchanged)
-        # (a new vector: `resize!` would keep the memory of the full one)
+        # a delay common to all synapses is stored once (a new vector: `resize!` would keep the memory)
         length(delaytime) > 1 && allequal(delaytime) && (delaytime = delaytime[1:1])
         param = SpikingSynapseDelayParameter(; delaytime, VFT = Vector{FT}, MFT = Matrix{FT})
     end
@@ -293,8 +271,8 @@ end
     has_transpose(c::SpikingSynapse)
     ensure_transpose!(c::SpikingSynapse)
 
-Whether the transposed index arrays `c.J`, `c.index` are present; build them in place if not (see
-`ensure_transpose!(::AbstractConnection)`). Serial; called only outside the threaded kernels.
+Whether the transposed index arrays `c.J`, `c.index` are present; build them in place if not.
+Not thread-safe: call outside the threaded kernels.
 """
 has_transpose(c::SpikingSynapse) = length(c.index) == length(c.W) && length(c.J) == length(c.W)
 
@@ -303,10 +281,8 @@ needs_transpose(c::SpikingSynapse) = needs_transpose(c.LTPParam) || needs_transp
 needs_transpose(c::AbstractConnection) = true
 _has_rules(c::SpikingSynapse) = !(c.LTPParam isa NoLTP && c.STPParam isa NoSTP)
 
-# step guard of the rules (serial, before any threaded kernel): a synapse loaded from a file, built with the keyword
-# constructor or whose arrays were emptied gets `J`/`index` before a rule reads them, and `ρ` before a short-term rule
-# writes it (`train!` calls `update_traces!` first, so this runs before the Markram kernels). `NoSTP` is a type parameter:
-# the ρ branch compiles away for a synapse without a short-term rule.
+# Serial step guard of the rules: build `J`/`index` and `ρ` if a rule needs them and they are missing (e.g. a synapse
+# loaded from a file or built with the keyword constructor). Must run before any threaded kernel.
 _ensure_rule_arrays!(c) = c
 function _ensure_rule_arrays!(c::SpikingSynapse)
     needs_transpose(c) && !has_transpose(c) && ensure_transpose!(c)
@@ -326,10 +302,9 @@ end
     efficacy(c::SpikingSynapse)
     materialize_efficacy!(c::SpikingSynapse)
 
-The short-term efficacy `ρ` is stored only for a synapse with a short-term rule (`STPParam`); otherwise `c.ρ` is empty and
-ρ = 1 for every synapse. `efficacy(c)` returns the efficacy of every synapse: `c.ρ` itself when it is stored, else a new
-vector of ones (writing to it has no effect). `materialize_efficacy!(c)` stores it (ones) if it is not stored and returns
-`c.ρ`: after it, writes to `c.ρ` are used by `forward!` (as in SNNModels up to 1.9).
+`c.ρ` is stored only with a short-term rule; otherwise it is empty and ρ = 1. `efficacy(c)` returns `c.ρ` when
+stored, else a new vector of ones (writes to it have no effect). `materialize_efficacy!(c)` stores ones if needed and
+returns `c.ρ`, whose values `forward!` then uses.
 """
 efficacy(c::SpikingSynapse) = length(c.ρ) == length(c.W) ? c.ρ : ones(eltype(c.W), length(c.W))
 
@@ -346,15 +321,6 @@ Replace the long-term (`LTP`) and/or short-term (`STP`) plasticity rule of `c` b
 same type (e.g. other parameters) and re-create the corresponding state with `plasticityvariables`.
 Arguments left to `nothing` are not changed. A rule of another type is an `ArgumentError`: the
 rule types are type parameters of `SpikingSynapse`, use [`with_plasticity`](@ref) instead.
-
-# Example
-```julia
-using SpikingNeuralNetworks
-SNN.@load_units
-E = SNN.IF(N = 50)
-EE = SNN.SpikingSynapse(E, E, :ge; conn = (p = 0.2, μ = 2.0), LTPParam = SNN.STDPGerstner())
-SNN.SNNModels.update_plasticity!(EE; LTP = SNN.STDPGerstner(A_pre = 2e-4))
-```
 """
 function update_plasticity!(c::SpikingSynapse; LTP = nothing, STP = nothing)
     Npre, Npost = length(c.fireJ), length(c.fireI)
@@ -388,42 +354,29 @@ _plasticity_type_error(kind) = ArgumentError(
     without_plasticity(c::SpikingSynapse)
 
 New `SpikingSynapse` with the connectivity, weights and delays of `c` and the long-term rule `LTP` and/or the short-term
-rule `STP`. A rule left to `nothing` is kept, with its state; `NoLTP()` / `NoSTP()` switch that part off;
-`without_plasticity(c)` switches both off. The rule types are type parameters of `SpikingSynapse`, so this is how a rule of
-another type is installed (`update_plasticity!` and `change_plasticity!` only accept a rule of the same type as the current
-one); the caller replaces `c` by the result in its model. `c` itself is not modified.
+rule `STP`, converted to the precision of `c`, with fresh state. A rule left to `nothing` is kept with its state;
+`NoLTP()` / `NoSTP()` switch that part off; `without_plasticity(c)` switches both off. This is how a rule of another type
+is installed (`update_plasticity!` and `change_plasticity!` accept only the current type); the caller replaces `c` by the
+result in its model. `c` is not modified.
 
-# Switching on
-A rule of any type, converted to the precision of the synapse, with fresh state (`plasticityvariables`). The arrays the new
-rules need are created in the new synapse: the transposed index `J`/`index` (+8 B/syn) for a rule that `needs_transpose`
-(pair, triplet, weight-dependent, structured and inhibitory STDP), the efficacy `ρ` (+4 B/syn, ones) for a short-term rule.
-They are shared with `c` when `c` already has them; the vectors of `c` are never resized or refilled.
-
-# Switching off
-The deferred weight updates of the old rule are written back first (`sync_weights!`, event-driven vSTDP); the new synapse
-holds the frozen weights `W`, no `J`/`index`, no `ρ` and `NoVariables` state: it has the type, the memory (about 9 B/syn with
-a delay common to all synapses) and the per-step work of a synapse built without plasticity, and gives the same run. With
-`STP = NoSTP()` the efficacy is 1 again, also when the old short-term rule had moved it (to freeze `ρ` at its current
-values instead, keep the rule and call `set_STP!(c, false)`). The final values of the old rule stay readable on `c`, e.g.
-`plasticity_value(c, :LTPVars, :tpre, T)`.
+Switching on builds the arrays the new rules need (`J`/`index` for a rule that `needs_transpose`, `ρ` for a short-term
+rule), reusing those of `c` when present. Switching off first writes back deferred weight updates (`sync_weights!`); the
+result has the type, memory and per-step work of a synapse built without plasticity. With `STP = NoSTP()` the efficacy
+is 1 again (to freeze `ρ` instead, keep the rule and call `set_STP!(c, false)`).
 
 # What is shared
-`W`, the connectivity (`I`, `colptr`, `rowptr`), `g`, `v_post`, `fireI`, `fireJ`, `param` (delays and delay queue),
-`records`, `id`, `name`, the spike lists and the chunk cache are the same objects in `c` and in the result, as is a kept
-rule with its state: simulating one changes the state seen by the other, so use only one of the two in a model (or
-`deepcopy(c)` first). `c` stays a valid synapse with its own rules. The arrays the result does not take over are freed when
-nothing references `c` any more; a `SynapseNormalization` or `AggregateScaling` built on `c` keeps using `c` and its
-`J`/`index`, one built on the result builds them there.
+`W`, the connectivity, `g`, `v_post`, `fireI`, `fireJ`, `param` (delays and delay queue), `records`, `id`, `name`, the spike
+lists, the chunk cache and any kept rule with its state are the same objects in `c` and in the result: use only one of the
+two in a model, or `deepcopy(c)` first. A `SynapseNormalization` or `AggregateScaling` built on `c` keeps using `c`.
 
 # Records
-`:W`, `:ρ` (a recorded `ρ` is kept, as ones after a switch-off) and the population records continue across the switch.
-The record of a rule variable continues if the new rule has that variable (e.g. `:tpre` from `STDPGerstner` to
-`STDPWeightDependent`); otherwise it stops at the switch and stays readable (`getvariable`, `record`); since `records`
-is shared, `c` stops sampling it too. A stopped record is not reopened by a later switch (`clear_records!` first).
+`:W`, `:ρ` and the population records continue across the switch. A rule variable continues if the new rule has it
+(e.g. `:tpre` from `STDPGerstner` to `STDPWeightDependent`); otherwise its record stops (for `c` too, `records` is
+shared) and stays readable. A stopped record is not reopened by a later switch.
 
 # Replacing the synapse in a model
 `model = compose(; pop = model.pop, syn = merge(model.syn, (; EE = EE2)), stim = model.stim, time = model.time)`, or
-assign into a `Vector{AbstractConnection}` (a concretely typed vector cannot hold a synapse with other rule types).
+assign into a `Vector{AbstractConnection}`.
 
 # Example
 ```julia
@@ -431,10 +384,10 @@ using SpikingNeuralNetworks
 SNN.@load_units
 E = SNN.IF(N = 100); E.I .= 300.0
 EE = SNN.SpikingSynapse(E, E, :ge; conn = (p = 0.2, μ = 0.5))
-EE = SNN.with_plasticity(EE; LTP = SNN.STDPGerstner())    # J/index built (+8 B/syn)
+EE = SNN.with_plasticity(EE; LTP = SNN.STDPGerstner())
 model = SNN.compose(; E, EE)
 SNN.train!(; model, duration = 100ms)
-EE = SNN.without_plasticity(model.syn.EE)                  # W frozen, back to a never-plastic synapse
+EE = SNN.without_plasticity(model.syn.EE)                  # W frozen
 model = SNN.compose(; pop = model.pop, syn = (; EE), time = model.time)
 SNN.sim!(; model, duration = 100ms)
 ```
@@ -483,9 +436,7 @@ end
 # whether `key` is being sampled by the recorder of `c`
 _records_key(c, key::Symbol) = haskey(c.records, :data) && key in c.records[:data]
 
-# Records of the variables of a replaced rule (`group` = :LTPVars or :STPVars): a key whose field the new state has goes on
-# being sampled; any other key is closed (removed from `records[:data]`): its samples, times and `var_map` entry stay
-# readable, no further sample is taken. `records` is shared with the source synapse, which stops sampling it too.
+# Stop sampling the recorded variables of `group` (:LTPVars or :STPVars) that the new rule state lacks; their samples stay readable.
 function _close_rule_records!(new::SpikingSynapse, group::Symbol)
     records = new.records
     (haskey(records, :data) && haskey(records, :meta)) || return new
@@ -547,8 +498,8 @@ end
     end
 end
 
-# increment of synapse `s`: W ρ, or W when the efficacy is not stored (ρ = 1; W * 1 == W exactly, same additions).
-# `_wρ_fast` keeps the @fastmath product of the undelayed kernels (same instructions as the inlined `W[s] * ρ[s]` before).
+# increment of synapse `s`: W ρ, or W when the efficacy is not stored (ρ = 1). `_wρ_fast` is the @fastmath variant of the
+# undelayed kernels; the delayed kernels avoid @fastmath (see delay_kernels.jl).
 @inline _wρ(W, ρ::AbstractVector, s) = @inbounds W[s] * ρ[s]
 @inline _wρ(W, ::Nothing, s) = @inbounds W[s]
 @inline _wρ_fast(W, ρ::AbstractVector, s) = @inbounds @fastmath W[s] * ρ[s]
@@ -569,12 +520,8 @@ release_spikes!(c::SpikingSynapse) = (_disarm!(c.pre_spikes); _disarm!(c.post_sp
 @doc raw"""
     forward!(c::SpikingSynapse, param::SpikingSynapseDelayParameter, dt, T)
 
-Delayed transmission. For each presynaptic spike, add the increment ``W_{ij}\rho_{ij}`` to the
-ring buffer of target ``i`` at the arrival step (`delaysteps[s]` steps after the current one,
-delays rounded up to whole steps, see `SpikingSynapseDelayParameter`); then add to `c.g[i]` the
-increments that arrive in the current step and clear them.
-With a delay of `d` steps stored once the arrival column is computed once per step; without LTP and STP the spike list emitted
-`d` steps ago is scattered into `c.g` instead (`W` read at arrival).
+Delayed transmission: add each increment ``W_{ij}\rho_{ij}`` to the ring buffer of target ``i`` at its arrival step,
+then add the arrivals of the current step to `c.g` (see `SpikingSynapseDelayParameter`).
 """
 function forward!(c::SpikingSynapse, param::SpikingSynapseDelayParameter, dt::AbstractFloat, T::Time)
     @unpack colptr, I, W, g = c

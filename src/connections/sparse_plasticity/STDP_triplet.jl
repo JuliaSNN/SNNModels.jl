@@ -30,8 +30,8 @@ Weights are in the same units as `W`; rescale the amplitudes to the weight scale
 
 Fields: `A2_plus`, `A3_plus`, `A2_minus`, `A3_minus` (amplitudes, all used with the signs
 shown above), `τ_plus`, `τ_minus`, `τ_x`, `τ_y` (trace time constants, ms), `Wmax = 30pF`,
-`Wmin = 0pF`. State: `STDPTripletVariables` (lazily decayed traces, see `STDPGerstner`). Event-driven with
-the ordering of `STDP_kernels.jl` (same-step pre/post spikes do not interact), serial, applied only under `train!`.
+`Wmin = 0pF`. State: `STDPTripletVariables`. Event-driven with the ordering of `STDP_kernels.jl`
+(same-step pre/post spikes do not interact), applied only under `train!`.
 
 # Example
 ```julia
@@ -70,10 +70,8 @@ Npost); last spike times `last_pre`, `last_post` (informational); `initialized` 
 `active` (the rule runs only if `any(active)`).
 
 !!! warning "The stored traces are not the trace values"
-    The traces are stored lazily, as for `STDPVariables`: the value of `r1[k]` is `r1[k] * scale[1]`, of
-    `r2[k]` `r2[k] * scale[2]`, of `o1[k]` `o1[k] * scale[3]`, of `o2[k]` `o2[k] * scale[4]`. Direct field
-    access (`syn.LTPVars.r1`) returns the stored values; read the values with [`trace_values`](@ref) or call
-    [`sync_traces!`](@ref) first. `monitor!` records values.
+    As for `STDPVariables`: the value of `r1`, `r2`, `o1`, `o2` is the stored vector times `scale[1:4]`.
+    Read values with [`trace_values`](@ref) or call [`sync_traces!`](@ref) first.
 
 `decay` caches `dt`, the time constants and their decay factors. Created by
 `plasticityvariables(::STDPTriplet, Npre, Npost)`.

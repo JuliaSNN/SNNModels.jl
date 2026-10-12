@@ -10,7 +10,7 @@ increasing order. The direct constructors do not sort; prefer [`SpikeTimeParamet
 which sorts the spikes by time and converts the times to `Float32`.
 
 # Fields
-- `spiketimes::Vector{Float32} = []`: spike times (ms), sorted.
+- `spiketimes::VFT = []`: spike times (ms), sorted (`VFT = Vector{Float32}` by default).
 - `neurons::Vector{Int} = []`: index of the input neuron of each spike (same length).
 
 # Related functions
@@ -39,10 +39,8 @@ Build a [`SpikeTimeStimulusParameter`](@ref).
   time and converts the times to `Float32`.
 - `SpikeTimeParameter(st::Spiketimes)` (and `Vector{Vector{Float64}}`): flattens one vector of
   spike times per input neuron (`st[i]` are the times of neuron `i`) and sorts by time.
-- The keyword form `SpikeTimeParameter(; neurons, spiketimes)` passes the vectors to the
-  struct unchanged: it does NOT sort, so the spike times must already be sorted, and it keeps their type: pass
-  `Float64` times (sorted) to have them exactly in a `Float64` network (the stimulus converts the parameter to the
-  precision of its target population, `float_type`; the other forms round the times to `Float32` first).
+- The keyword form `SpikeTimeParameter(; neurons, spiketimes)` passes the vectors unchanged: it does NOT
+  sort, and it keeps their element type (use it for exact `Float64` times; the other forms round to `Float32`).
 
 # Example
 ```julia
@@ -107,15 +105,14 @@ the first step whose end time is ``\ge t_k``; the timing resolution is `dt`.
 - `N::Int`: number of input neurons; `name = "SpikeTime"`; `id`
 - `param::SpikeTimeStimulusParameter`
 - `rowptr`, `colptr`, `I`, `J`, `index`, `W`: sparse connectivity from `dsparse`.
-- `g::Vector{Float32}`: target variable of `post` (shared).
-- `next_spike::Vector{Float32}`: time of the next spike (`Inf` when exhausted).
+- `g::VFT`: target variable of `post` (shared); `VFT` follows the precision of `post`, as do `W` and `param`.
+- `next_spike::VFT`: time of the next spike (`Inf` when exhausted).
 - `next_index::Vector{Int}`: index of the next spike in `param` (`-1` when exhausted).
 - `fire::Vector{Bool}`: input neurons that fired in the last step (recordable with
   `monitor!(stim, :fire)`).
 - `records::Dict`, `targets::Dict`
-- `spiking`: the input neurons flagged in `fire` (so that the next step clears only those flags).
-- `inbox`: the log of the neurons of `post` written in the current step (`TouchList`) if `post` has a
-  sparse update (`Identity`), `nothing` otherwise.
+- `spiking`: the input neurons flagged in `fire`, cleared at the next step.
+- `inbox`: log of the neurons of `post` written (see `attach_driver!`), or `nothing`.
 
 To reuse the stimulus with new spikes call `update_spikes!` or `shift_spikes!`, which also
 rewind `next_index`/`next_spike`.
@@ -170,7 +167,7 @@ function SpikeTimeStimulus(
     targets = Dict(:pre => :SpikeTimeStim, :post => post.id)
     g, _ = synaptic_target(targets, post, sym, comp)
 
-    # the stimulus has the precision of the variable it writes into (see `float_type`): weights and spike times follow
+    # the stimulus has the precision of the variable it writes into (see `float_type`)
     FT = eltype(g)
     param = convert_precision(param, FT)
     w = sparse_matrix(N, post.N, conn, FT)
@@ -247,12 +244,8 @@ end
 Clear the flags of `s.fire` set in the previous step, then deliver every pending spike with time
 `<= get_time(time)`: mark its input neuron in `s.fire`, add the weights of its outgoing
 connections to `s.g`, and advance `next_index`/`next_spike` (set to `-1`/`Inf` after the last
-spike). `dt` is unused.
-
-The flags are cleared where they were set (`s.spiking`), not by a pass over all `N` inputs. If
-the target population has a sparse update (`Identity`, see `attach_driver!`), every neuron whose
-input is incremented is also logged in `s.inbox`, so the population does not have to scan its
-input.
+spike). `dt` is unused. Every neuron of `post` whose input is incremented is logged in `s.inbox`
+(see `attach_driver!`).
 """
 function stimulate!(
     s::SpikeTimeStimulus,

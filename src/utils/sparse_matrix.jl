@@ -305,12 +305,11 @@ end
     sparse_matrix(Npre, Npost; p | ρ, μ = 1, σ = 0, dist = :Normal, rule = :Fixed, γ, kmin)
 
 Random connectivity matrix of size `Npost x Npre` (rows: postsynaptic, columns:
-presynaptic) as a `SparseMatrixCSC{FT,Int}` (`FT = Float32` unless the keyword `FT` is given; a connection constructor passes the precision of its target population), built directly in CSC form in
-O(nnz + Npre + Npost) time and memory: no dense `Npost x Npre` array is ever allocated.
+presynaptic) as a `SparseMatrixCSC{FT,Int}` (keyword `FT = Float32`), built directly in CSC form in
+O(nnz + Npre + Npost) time and memory.
 
 Exactly one of `p` and `ρ` (connection probability / density, in [0, 1]) must be given.
-Unknown keywords are ignored with a warning (up to SNNModels 1.8.4 they were ignored silently,
-so a typo such as `sigma` went unnoticed); `w` is not used (pass a matrix as `conn` instead).
+Unknown keywords are ignored with a warning; `w` is not used (pass a matrix as `conn` instead).
 
 # Connectivity rules (`rule`)
 - `:Fixed` / `:FixedIn` (default): every postsynaptic neuron receives exactly
@@ -327,8 +326,7 @@ One draw per connection from `dist(|μ|, σ)`, where `dist` is a two-parameter `
 type or its `Symbol` (default `:Normal`; for `:LogNormal`, `μ` and `σ` are
 the parameters of the logarithm), with Float32 parameters. Draws `<= 0` are not synapses and
 are removed, so with `σ > 0` the realised degrees can be lower than `K`; a negative `μ` flips
-the sign of all weights afterwards (with a warning). This is the same treatment as the
-previous dense generator. Weights are in the units of the target variable (e.g. nS).
+the sign of all weights afterwards (with a warning). Weights are in the units of the target variable (e.g. nS).
 
 Autapses are not removed here; `SpikingSynapse` removes them when `pre == post`.
 
@@ -340,11 +338,8 @@ w = SNN.SNNModels.sparse_matrix(100, 40; p = 0.1, μ = 2.0, σ = 0.5, rule = :Be
 size(w)   # (40, 100): Npost x Npre
 ```
 
-# Reproducibility
-The random stream differs from the dense generator used before SNNModels 1.8.2, so seeded
-networks do not reproduce the old realisations; the statistics (degree distributions,
-weight moments, sparsity) are the same. The old generator is still available as the
-non-exported `SNNModels.sparse_matrix_dense_legacy`.
+The dense generator of SNNModels before 1.8.2 (another random stream, same statistics) is available as
+`SNNModels.sparse_matrix_dense_legacy`.
 """
 function sparse_matrix(
     Npre,
@@ -594,12 +589,12 @@ _float_sparse(w::AbstractMatrix, ::Type{FT}) where {FT} = SparseMatrixCSC{FT,Int
 
 
 """
-    sparse_matrix(Npre, Npost, conn::NamedTuple)
-    sparse_matrix(Npre, Npost, conn::AbstractMatrix)
+    sparse_matrix(Npre, Npost, conn::NamedTuple, FT = Float32)
+    sparse_matrix(Npre, Npost, conn::AbstractMatrix, FT = Float32)
 
 Connectivity of a connection constructor: a `NamedTuple` is splatted into the keyword form
 of `sparse_matrix`; a matrix (dense or sparse, any element type, size `Npost x Npre`,
-asserted) is converted to `SparseMatrixCSC{Float32,Int}` as is (stored zeros of a sparse
+asserted) is converted to `SparseMatrixCSC{FT,Int}` as is (stored zeros of a sparse
 input are kept, explicit zeros of a dense input are dropped).
 """
 sparse_matrix(Npre, Npost, conn::NamedTuple, ::Type{FT} = Float32) where {FT<:AbstractFloat} = sparse_matrix(Npre, Npost; conn..., FT)
@@ -628,12 +623,6 @@ delay; in the second form every stored synapse keeps its values (its CSC positio
 The plasticity variables are per neuron and are not affected. For a `SpikingSynapse`, an efficacy
 `ρ` that is not stored stays not stored, `J`/`index` are rebuilt only if they were present or a
 rule needs them, and equal delays are stored once.
-
-!!! note "Changed after SNNModels 1.8.4"
-    Up to 1.8.4 `ρ` and the delays were neither resized nor reordered (out-of-bounds reads in
-    `forward!` after `connect!` created a synapse, and a mismatch between `W` and `ρ` after a
-    turnover), and the second form inferred the matrix size from the largest stored indices
-    (the matrix shrank if the last neurons had no synapse).
 """
 function update_sparse_matrix!(c::S, W::SparseMatrixCSC) where {S<:AbstractConnection}
     sync_weights!(c)   # per-synapse deferred state (vSTDPParameter snapshots) is not reordered: materialise it first
@@ -767,8 +756,7 @@ function dsparse(A)
     rowptr, colptr, I, J, index, V # Returns the modified rowptr, colptr, I, J, index, and V arrays.
 end
 
-# Int32 storage of a SpikingSynapse built without the temporaries of `dsparse` (no `sparse(A')`, no Int64 index arrays).
-# `_csc_int32(w)`: the CSC arrays of `w` as (colptr::Vector{Int32}, I::Vector{Int32}, W = nonzeros(w)) (`W` aliases `w`).
+# Int32 storage of a SpikingSynapse without the temporaries of `dsparse`: (colptr, I, W = nonzeros(w)) (`W` aliases `w`).
 _csc_int32(w::SparseMatrixCSC) = (Vector{Int32}(w.colptr),Vector{Int32}(rowvals(w)), nonzeros(w))
 
 # row pointers (`rowptr` of `dsparse`) of an `Npost x Npre` matrix with row indices `I`: one counting pass
@@ -810,12 +798,8 @@ end
     ensure_transpose!(c::AbstractConnection)
     has_transpose(c::AbstractConnection)
 
-`SpikingSynapse` keeps the transposed index arrays `J` (presynaptic neuron of every synapse) and `index` (row-major to CSC
-position, see `dsparse`) only when something reads them: a plasticity rule that walks the inputs of a postsynaptic neuron
-(`needs_transpose`), `presynaptic`, `presynaptic_idxs`, `SynapseNormalization`, `AggregateScaling`. Otherwise both are
-empty. `ensure_transpose!` builds them in place (Int32, identical to the arrays of `dsparse`) if they are missing and
-returns `c`; `has_transpose` tells whether they are present. Other connection types always have them (no-op / `true`).
-Call it before reading `c.J` or `c.index` in user code.
+Build the transposed index arrays `c.J`, `c.index` if missing (only a `SpikingSynapse` can lack them, see its
+docstring) and return `c`; `has_transpose` tells whether they are present. Call it before reading them in user code.
 """
 ensure_transpose!(c::AbstractConnection) = c
 has_transpose(c::AbstractConnection) = true

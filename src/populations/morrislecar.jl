@@ -68,8 +68,7 @@ Population of Morris-Lecar neurons (instantaneous calcium activation, slow potas
 activation ``w``) with conductance-based exponential synapses `ge`, `gi`.
 Connections target `ge` or `gi`: `SpikingSynapse(pre, post, :ge; conn)` (`:glu` is mapped to
 `:ge`, `:gaba` to `:gi`); a presynaptic spike of weight ``w`` (nS) increments the conductance by
-``w``. (Up to SNNModels 1.8.4 there was no `synaptic_target` method and this raised a
-`MethodError`.)
+``w``.
 
 # Equations
 ```math
@@ -89,22 +88,20 @@ Forward Euler, sequential per neuron: ``v`` is advanced with the intrinsic and e
 currents (old ``w``), then ``w`` with the new ``v``, then the synaptic term
 `dt / Cm * (ge * (Ee - v) + gi * (Ei - v))` is added, then `ge`, `gi` decay.
 A spike is flagged in the step in which ``v`` crosses 20 mV upwards (one flag per action
-potential); there is no reset. (Up to SNNModels 1.8.4 `fire` was the level test `v > 20mV`.)
+potential); there is no reset.
 
 # Fields
 - `name::String = "MorrisLecar"`, `id::String = randstring(12)`,
   `param::MorrisLecarParameter = MorrisLecarParameter()`, `N::Int32 = 100`.
-- `VFT = Vector{Float32}`: type of the state vectors; `VFT = Vector{Float64}` gives a `Float64` population (the parameters
-  follow; see `float_type`).
+- `VFT = Vector{Float32}`: type of the state vectors; `Vector{Float64}` gives a `Float64` population (see `float_type`).
 - `v = -52.14 .+ zeros(N)` (mV), `w = 0.2 .+ zeros(N)`.
 - `ge`, `gi`: synaptic conductances (nS), zeros.
 - `fire::Vector{Bool}`; `I`: external current (pA); `records::Dict`.
-- `spikes::SpikeIndex`: ascending list of the neurons that fired in the step, owned by the population and shared by its
-  connections and recorder (see `spike_index`).
+- `spikes::SpikeIndex`: neurons that fired in the step (see `spike_index`).
 
 # References
 Morris C., Lecar H. (1981). Voltage oscillations in the barnacle giant muscle fiber.
-Biophys. J. 35:193-213 (linked in the code). Parameters from the NEST ode-toolbox test
+Biophys. J. 35:193-213. Parameters from the NEST ode-toolbox test
 `morris_lecar.json`.
 
 # Example
@@ -120,13 +117,13 @@ SNN.sim!([E]; duration = 200ms, dt = 0.05ms)
 MorrisLecar
 
 function integrate!(p::MorrisLecar, param::MorrisLecarParameter, dt_::AbstractFloat)
-    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
+    dt = _step_dt(p, dt_)   # in the precision of the population
     @unpack N, v, w, ge, gi, fire, I = p
     @unpack Cm, τe, τi = param
     @unpack Ee, Ei = param
     _check_state_lengths(N, v, w, ge, gi, fire, I)
     T = eltype(v)
-    # `MorrisLecar_dv` and `MorrisLecar_dw` use the inlined `tanh` / `cosh` (`_tanh_inl`, `_cosh_inl`: the bits of `Base`), so the loop vectorises
+    # the inlined `tanh` / `cosh` of `MorrisLecar_dv`/`_dw` (same bits as `Base`) let the loop vectorise
     @inbounds @simd for i = 1:N
         v_old = v[i]
         v[i] += dt / Cm * MorrisLecar_dv(v[i], w[i], I[i], param)
@@ -158,7 +155,7 @@ end
 end
 
 
-# w-nullcline helper: the w-nullcline is `w = w_inf(v)` (returned `-w_inf(v)` up to 1.8.4).
+# w-nullcline helper: `w = w_inf(v)`.
 function MorrisLecar_w_nullcline(v::T, param::MorrisLecarParameter) where {T<:AbstractFloat}
     @unpack Cm, El, EK, ECa, gl, gK, gCa, τe, τi, V1, V2, V3, V4, ϕ = param
     n_ss = 0.5*(1+tanh((v-V3)/V4))

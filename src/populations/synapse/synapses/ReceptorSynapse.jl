@@ -78,10 +78,8 @@ function synaptic_receptors(synapse::ReceptorSynapse, N::Int, ::Type{FT}) where 
     return (glu = zeros(FT, N), gaba = zeros(FT, N))
 end
 
-# Copy in the precision `T`: every receptor converted to `Receptor{T}`, the NMDA block to `NMDAVoltageDependency{T}` (the object
-# itself when it is already `T`, so the Float32 defaults `TripodSomaSynapse`, `TripodDendSynapse` are used as they are). A
-# predefined receptor or NMDA block (`_predefined`, receptor_types.jl) is rebuilt from its decimal definition in `T`; any
-# other one is converted value by value.
+# Copy in precision `T` (the object itself when already `T`); predefined receptors and NMDA blocks are rebuilt from their
+# decimal definition (see `_PREDEFINED`).
 _convert_receptors(syn::AbstractVector{<:Receptor}, ::Type{T}) where {T} = Receptor{T}[convert_precision(r, T) for r in syn]
 function convert_precision(r::Receptor{S}, ::Type{T}) where {S,T<:AbstractFloat}
     S === T && return r
@@ -371,8 +369,7 @@ end
     @unpack syn, NMDA = synapse
     @unpack mg, b, k = NMDA
     mgb = mg / b    # loop invariant
-    # Receptor by receptor, so every neuron accumulates in the same order as the scalar loop of SNNModels <= 1.9 (bit-identical).
-    # The voltage-dependent factor is only evaluated for the NMDA receptors (the multiplication by 1 of the others is exact).
+    # Receptor by receptor, so every neuron accumulates in receptor order; the NMDA factor is evaluated only for NMDA receptors.
     for n in eachindex(syn)
         @unpack gsyn, E_rev, nmda = syn[n]
         if nmda == zero(nmda)

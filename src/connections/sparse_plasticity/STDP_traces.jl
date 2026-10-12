@@ -22,22 +22,17 @@ potentiation for pre-before-post, `A_post < 0` gives depression for
 post-before-pre (classical Hebbian STDP, the default). Any sign combination is
 allowed (e.g. anti-Hebbian with `A_pre < 0 < A_post`).
 
-Fields (all `Float32`; time in ms, weights in the units of `W`, e.g. pF):
+Fields (type `FT`, `Float32` by default; time in ms, weights in the units of `W`, e.g. pF):
 - `A_post = -1e-4`: weight change per unit `x_post` at a presynaptic spike (post-before-pre); `< 0` is LTD.
 - `A_pre = 1e-4`: weight change per unit `x_pre` at a postsynaptic spike (pre-before-post); `> 0` is LTP.
 - `τpre = 20ms`, `τpost = 20ms`: trace time constants.
 - `Wmax = 30pF`, `Wmin = 0pF`: weight bounds (use `Inf`/`-Inf` to disable).
 Algorithm: event-driven, Auryn ordering (see `STDP_kernels.jl`). Per step: (1) pre spikes walk
 their outgoing synapses, (2) post spikes walk their incoming synapses, (3) the traces of the
-neurons that fired are incremented by 1, (4) the traces decay by `exp(-dt/τ)`, lazily: one scalar per
-trace type is multiplied, no pass over the neurons (see `STDPVariables`; the stored `tpre`, `tpost` are
-NOT the trace values, read them with `trace_values` or after `sync_traces!`). The step cost does not grow
-with the number of neurons, only with the number of spikes. The traces are not rounded step by step, so the
-weights differ from those of SNNModels 1.9.1 (dense Float32 decay) by a few Float32 rounding steps (about
-1e-7 of a weight of order 1; 5e-7 in the 40x amplitude `pair_bounds` validation run).
+neurons that fired are incremented by 1, (4) the traces decay by `exp(-dt/τ)`, lazily (see
+`STDPVariables`: the stored `tpre`, `tpost` are not the trace values).
 Same-step pre and post spikes do not interact; earlier history does. Only touched weights
-are clamped (all weights once at the first step). Serial, no threading. Matches Brian2
-(relative weight difference 2e-6) and Auryn (2e-7) and the analytic kernel above.
+are clamped (all weights once at the first step).
 
 Plasticity runs only under `train!`; `sim!` leaves the weights untouched.
 
@@ -137,12 +132,9 @@ Fields: `A = 10e-2pA / mV` (= 0.1, amplitude), `τ = 20ms` (trace time constant)
 `Wmax = 30pF`, `Wmin = 0pF`. State: `STDPVariables`. Reference not given in the code.
 
 Pre spikes walk their outgoing synapses and post spikes their incoming ones (event-driven);
-only touched weights are clamped. The traces keep their Euler integration (per-step factor
-`1 - dt/τ`, not `exp(-dt/τ)`), with the spike added before the weight update, but are stored
-lazily like those of `STDPGerstner` (one scale per trace type, no pass over the neurons; read them with
-`trace_values`): the weights agree with the dense Euler implementation to Float32 rounding. Same-step pre and post spikes interact (the traces already contain them). When a
-neuron pair fires in the same step the synapse is updated by both passes. Applied only under
-`train!`.
+only touched weights are clamped. The traces are Euler-integrated (per-step factor `1 - dt/τ`)
+and stored lazily like those of `STDPGerstner`; the spikes of the step are added before the
+weight update, so same-step pre and post spikes interact. Applied only under `train!`.
 
 # Example
 ```julia
@@ -173,24 +165,18 @@ end
 Per-neuron state of the pair-based STDP rules.
 
 !!! warning "The stored traces are not the trace values"
-    For the event-driven rules (`STDPGerstner`, `STDPConfavreux2025`, `STDPWeightDependent`) the
-    traces are decayed lazily: the trace of neuron `k` is `tpre[k] * scale[1]` (`tpost[k] * scale[2]`),
-    where `scale` is decayed once per step instead of every trace (see `STDP_kernels.jl`). Reading
-    `syn.LTPVars.tpre` directly returns the STORED values, which differ from the traces by the
-    factor `scale` (between `1e-6` and 1). Read the values with [`trace_values`](@ref) (state
-    unchanged), or call [`sync_traces!`](@ref) first (`scale` becomes 1). `monitor!`, `getvariable`,
-    and `plasticity_value` already return values.
+    The traces decay lazily (see `STDP_kernels.jl`): the trace of neuron `k` is `tpre[k] * scale[1]`
+    (`tpost[k] * scale[2]`). Read values with [`trace_values`](@ref), or call [`sync_traces!`](@ref)
+    first; `monitor!`, `getvariable` and `plasticity_value` already return values.
 
-- `tpre`, `tpost`: stored presynaptic / postsynaptic traces (value = stored `* scale`). For
-  `STDPMexicanHat` they are the Euler-integrated traces of that rule (lazy with the factor `1 - dt/τ`).
+- `tpre`, `tpost`: stored presynaptic / postsynaptic traces.
 - `last_pre`, `last_post`: time of the last spike (informational, not used in updates).
 - `initialized`: set after the one-off clamp of all weights on the first step.
 - `active`: the rule runs only if `any(active)` (see `set_LTP!`).
-- `scale`: the factors of the stored `tpre`, `tpost` (`Float64`), in `[1e-6, 1]`.
-- `decay`: cache of `dt`, `τpre`, `τpost` and the decay factors `exp(-dt/τ)` computed from them.
+- `scale`: factors of the stored `tpre`, `tpost` (`Float64`, in `[1e-6, 1]`).
+- `decay`: cache of `dt`, `τpre`, `τpost` and their one-step decay factors.
 
-Created by `plasticityvariables(::STDPParameter, Npre, Npost)`. Record the traces with
-`monitor!(syn, [:tpre, :tpost], :LTPVars)` (the recorder stores the values, see the recording page).
+Created by `plasticityvariables(::STDPParameter, Npre, Npost)`.
 """
 STDPVariables
 
@@ -216,20 +202,14 @@ end
     sync_traces!(vars)
     sync_traces!(c::AbstractSparseSynapse)
 
-Make the stored traces of the event-driven STDP rules hold their current values: multiply them by
-their `scale` and reset it to 1 (`tpre`, `tpost` of `STDPVariables`; `r1`, `r2`, `o1`, `o2` of
-`STDPTripletVariables`). The current value is the one after the decay of the last step that
-`plasticity!` ran. Afterwards `syn.LTPVars.tpre` etc. can be read directly. `sync_traces!(syn)` also materialises the synaptic weights of a rule that defers their update
-(`vSTDPParameter`, the event-driven vSTDP: `:W` in `lazy_variables`), so that `syn.W` holds the current weights; it is the entry point for
-every reader of `syn.W` (the library's `copy_model`, `save_model` and `compose`-level readers call it). A no-op for variables
-without lazy traces (`NoVariables`, `iSTDPPotential`, ...). Returns its argument.
+Make the lazily stored traces of the long-term rule hold their values (multiply by `scale`, reset it
+to 1), so that `syn.LTPVars.tpre` etc. can be read directly. `sync_traces!(syn)` also writes deferred
+weight updates into `syn.W` (`vSTDPParameter`). A no-op for variables without lazy traces. Returns its
+argument.
 
-The simulation does not need this call: the rules rescale on their own, and changing `dt` or a time
-constant syncs first. A sync rounds the traces once (relative error about 1e-7), so calling it at
-every step is possible but changes the trajectory at that level (weights of a run that syncs are not
-bit-identical to a run that does not); [`trace_values`](@ref) reads without changing the state.
-Lazily stored short-term variables (`u`, `x` of the event-driven Markram rules) are not rescaled by
-this function: they need the time, use [`plasticity_value`](@ref).
+The simulation does not need it. A sync rounds the traces once, so a run that syncs is not bit-identical
+to one that does not; [`trace_values`](@ref) reads without changing the state. The event-driven Markram
+`u`, `x` are not synced: read them with [`plasticity_value`](@ref).
 
 # Example
 ```julia
@@ -256,12 +236,8 @@ end
     trace_values(vars, key::Symbol)
     trace_values(c::AbstractSparseSynapse, key::Symbol)   # key = :W: the synaptic weights
 
-Current values of the trace `key` (`:tpre`, `:tpost` for `STDPVariables`; `:r1`, `:r2`, `:o1`,
-`:o2` for `STDPTripletVariables`; any other field of `vars` as it is). For a lazily decaying
-trace this is a new vector (stored trace times its `scale`) and the state is not modified; for the
-other fields it is the field itself. Direct field access (`syn.LTPVars.tpre`) returns the stored
-values, not the traces (see `STDPVariables`). The recorder (`monitor!(syn, [:tpre], :LTPVars)`)
-reads through [`plasticity_value`](@ref), which calls this function for the STDP traces.
+Values of the trace `key` of the long-term rule (`key = :W`: the weights, as `plasticity_value(c, :W)`). For a
+lazily decaying trace a new vector, state unchanged; any other field is returned as it is.
 """
 trace_values(v, key::Symbol) = getfield(v, key)
 trace_values(c::AbstractSparseSynapse, key::Symbol) = key === :W ? current_weights(c) : trace_values(c.LTPVars, key)
@@ -278,14 +254,8 @@ current_value(v::STDPVariables, param, key::Symbol, t::Real) = trace_values(v, k
 
 ##
 
-"""
-    _pair_stdp!(c, variables, f_pre, f_post, τpre, τpost, Wmin, Wmax, dt, T)
-
-Event-driven pair STDP step shared by the trace rules (see STDP_kernels.jl for the
-ordering convention): pre-spike pass with `f_pre(w, x_post)`, post-spike pass with
-`f_post(w, x_pre)` (`x` is the value of the trace read, before this step's spikes are added),
-then trace increment by 1 and exact decay (through `variables.scale`).
-"""
+# Event-driven pair STDP step shared by the trace rules (ordering in STDP_kernels.jl): pre pass with `f_pre(w, x_post)`,
+# post pass with `f_post(w, x_pre)`, then trace increment and decay.
 @inline function _pair_stdp!(c, variables::STDPVariables, f_pre::F1, f_post::F2,
                              τpre, τpost, Wmin, Wmax, dt::AbstractFloat, T::Time) where {F1,F2}
     @unpack rowptr, colptr, I, J, index, W = c
@@ -344,11 +314,7 @@ function MexicanHat(x::AbstractFloat)
     return isnan(r) ? zero(r) : r
 end
 
-# STDPMexicanHat uses the default STDPVariables. Its traces are Euler-integrated (x <- x (1 - dt/τ), then +1 for
-# the spikes of the step, BEFORE the weight update, so the update reads traces that contain this step's spikes). They
-# are stored lazily like the other pair rules, with the Euler factor `1 - dt/τ` as the per-step factor of the scale
-# (the same recursion, no pass over the neurons). Pre spikes walk their outgoing synapses and post spikes their
-# incoming ones (index lists); only touched synapses are clamped, after both passes.
+# STDPMexicanHat: Euler decay and spike increment BEFORE the weight update; touched synapses clamped after both passes.
 function plasticity!(
     c::PT,
     param::STDPMexicanHat,

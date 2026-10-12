@@ -81,8 +81,8 @@ function update_synapses!(
     update_synapses!(p, synapse, receptors, synvars, dt, 1:Int(synvars.N))
 end
 
-# Chunk method: the neurons `rng` only; clears the spike buffers of the same neurons. `@noinline` and a separate clearing loop keep the `@fastmath`
-# loop compiled as in SNNModels <= 1.9 (inlined, or with the stores in the loop, LLVM generates different last-bit results for some N).
+# Chunk method: the neurons `rng` only; clears the spike buffers of the same neurons. `@noinline` and a separate clearing
+# loop: as in `CurrentSynapse`.
 @noinline function update_synapses!(
     p::P,
     synapse::T,

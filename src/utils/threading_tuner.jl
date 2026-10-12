@@ -4,16 +4,11 @@ using Statistics: median
     set_optimal_neurons_per_thread!(model; candidates = [128, 256, 512, 1024, 2048, Inf], steps = 200,
                                     repeats = 5, dt = 0.125f0, set = true, verbose = true)
 
-Time a short `sim!` of a copy of `model` (`modelcopy`: the model itself is not touched) for every candidate
-`neurons_per_thread` with the threads that are available, report the median time per step for each, and (with `set = true`)
-make the fastest the current setting (`set_neurons_per_thread!`). `Inf` means threading off. Returns a vector of
-named tuples `(neurons_per_thread, nchunks, us_per_step, speedup)`, `nchunks` being the largest number of chunks of any
-population, `speedup` relative to threading off. The setting is global: if the populations of a model differ strongly in cost,
-tune a model that contains the dominant population type. With one Julia thread nothing is measured and threading stays off.
-
-The optimum depends on the machine, on the number of threads and on the model; record it with the results
-(`Threads.nthreads()`, the table). Short runs measure the firing activity at the start of the run, which can differ from the
-stationary one; run the model to its stationary state first, or increase `steps`.
+Time a short `sim!` of a copy of `model` (`modelcopy`; `model` is not touched) for every candidate `neurons_per_thread`
+(`Inf` = threading off) and, with `set = true`, make the fastest the current setting. Returns a vector of named tuples
+`(neurons_per_thread, nchunks, us_per_step, speedup)` (`nchunks`: the largest over the populations; `speedup` relative to
+threading off). With one Julia thread nothing is measured and threading stays off. The optimum depends on the machine,
+the thread count and the model; short runs measure the initial, not the stationary, activity.
 """
 function set_optimal_neurons_per_thread!(model; candidates = [128, 256, 512, 1024, 2048, Inf], steps = 200,
                                          repeats = 5, dt = 0.125f0, set = true, verbose = true)

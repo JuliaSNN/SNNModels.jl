@@ -1,19 +1,14 @@
 # Chunked thread parallelism of the population updates.
 #
-# Policy (one place): a population of N neurons is a sequence of nbatch = cld(N, 128) batches of 128 neurons (the last
-# one may be partial, the arrays are not padded). A chunk is a whole number of batches, so chunk boundaries are multiples
-# of 128 neurons (512 bytes of Float32 state = 8 cache lines: no false sharing at the boundaries). The setting is the
-# number of batches per chunk `bpc` (user-facing as `neurons_per_thread`, rounded to whole batches; default 0 = threading off)
-#     nchunks = clamp(cld(nbatch, bpc), 1, MAX_CHUNKS);   when more than MAX_CHUNKS would result, bpc is raised to cld(nbatch, MAX_CHUNKS).
-# The number of chunks depends on N and the setting only, never on the number of
-# threads: the chunks are handed to the persistent Polyester workers (`@batch`) and executed on whatever
-# threads exist. A per-neuron update has no reduction over neurons, so the result is bit-identical for
-# every `neurons_per_thread` and every thread count. With one Julia thread, with `neurons_per_thread = 0` or
-# `Inf` (threading off) or with a single chunk the plain serial loop runs and `@batch` is never called.
+# A population of N neurons is split in batches of BATCH = 128 neurons (512 bytes of Float32: no false sharing at chunk
+# boundaries); a chunk is `bpc` batches (`neurons_per_thread / 128`, 0 = threading off), with at most MAX_CHUNKS chunks.
+# The chunking depends on N and the setting only, never on the number of threads, and per-neuron updates have no
+# reduction, so results are bit-identical for every setting and thread count. With one thread, threading off or a
+# single chunk, the plain serial loop runs and `@batch` is never called.
 using Polyester: @batch
 
 const MAX_CHUNKS = 8
-const BATCH = 128                           # neurons per batch (also the future RNG block)
+const BATCH = 128                           # neurons per batch
 const _BPC = Ref{Int}(0)                    # batches per chunk; 0 = threading off (default)
 
 # neurons_per_thread -> batches per chunk (0 = off)
@@ -27,10 +22,9 @@ _bpc_value(::Nothing) = _BPC[]
     neurons_per_thread() -> Int
     set_neurons_per_thread!(n)
 
-Neurons per chunk of the threaded population updates, a whole number of 128-neuron batches (default 0: threading is off;
-`set_neurons_per_thread!(500)` rounds to 512 and turns it on; `0` or `Inf` switches it off, returned as 0).
-A population of `N` neurons is split in `clamp(cld(cld(N, 128), batches), 1, 8)` chunks; see `foreach_chunk`.
-`sim!` and `train!` take it as the keyword `neurons_per_thread` for the duration of the run.
+Neurons per chunk of the threaded updates, rounded to whole 128-neuron batches (default 0: threading off;
+`set_neurons_per_thread!(500)` sets 512; `0` or `Inf` switches it off). At most 8 chunks per population; see `foreach_chunk`.
+`sim!` and `train!` accept it as a keyword for the duration of the run.
 """
 neurons_per_thread() = _BPC[] * BATCH
 function set_neurons_per_thread!(n)
@@ -103,11 +97,8 @@ end
 """
     foreach_chunk_c(f, N, bpc = batches per chunk setting)
 
-Like `foreach_chunk`, but `f(c, range)` also gets the chunk index `c` (1-based, `c <= nchunks`), for loops that need per-chunk
-scratch memory or per-chunk tables (`_chunk_scratch_stride`, the sub-row pointers of the synapses). On the serial path
-`f(1, 1:N)` is called once. Chunk `c` is always the same `@batch` iteration for the same `N` and setting, so the worker that writes the
-postsynaptic range of chunk `c` in `forward!` is the one that reads it in the population update (see README: Polyester gives iteration `c` of a loop of
-`nchunks <= nthreads` iterations to the same worker as long as the same workers are free).
+Like `foreach_chunk`, but `f(c, range)` also gets the chunk index `c` (1-based), for per-chunk scratch memory or tables.
+On the serial path `f(1, 1:N)` is called once.
 """
 @inline function foreach_chunk_c(f::F, N::Integer, bpc::Integer = _BPC[]) where {F}
     nc = nchunks(N, bpc)
@@ -122,7 +113,7 @@ postsynaptic range of chunk `c` in `forward!` is the one that reads it in the po
     return nothing
 end
 
-# floats between the scratch slots of two chunks: 32 Float32 = 128 bytes, so that no cache line is shared between the slots whatever the alignment of the array
+# floats between the scratch slots of two chunks: 128 bytes, so no cache line is shared whatever the alignment
 const SCRATCH_STRIDE = 32
 
 """
@@ -151,21 +142,17 @@ end
 # ---------------------------------------------------------------------------------------------------------------------------------
 # Spiking synapses: partition by postsynaptic range
 #
-# The chunks of a synapse are the chunks of its POSTSYNAPTIC population (`nchunks(Npost, bpc)`, `chunk_range(Npost, bpc, c)`): the
-# worker that adds to `g[post range of chunk c]` (and to the delay-buffer rows of that range, and updates the weights of the synapses
-# that end there) is chunk `c` of the same `@batch` loop that updates the neurons of that range. Entries of the CSC storage (by
-# presynaptic neuron j, `colptr`) are sorted by postsynaptic index, so the entries of column j whose post lies in chunk c are
-# the contiguous range `ptr[c, j] : ptr[c+1, j] - 1` of the table `ChunkPtr.ptr` (`(nc+1) x Npre`, `Int32`).
-# The spike list is built once before the fork (shared, read-only); every chunk loops over the spikes in the same order and touches
-# only its own sub-rows, so each target receives its additions in the order of the serial loop: bit-identical for any chunking.
+# The chunks of a synapse are those of its postsynaptic population: chunk `c` adds to `g[chunk_range(Npost, bpc, c)]` (and the
+# delay-buffer rows and weights of the synapses ending there). The CSC entries of a column are sorted by postsynaptic index, so
+# those of chunk `c` are the contiguous range `ptr[c, j] : ptr[c+1, j] - 1` (`ChunkPtr`). The spike list is built before the
+# fork; every chunk visits the spikes in the same order, so each target gets its additions in serial order (bit-identical).
 """
     ChunkPtr()
 
-Cache of the sub-row pointers of a sparse synapse (`SpikingSynapse.chunkptr`) for one postsynaptic partition: `ptr[c, j] : ptr[c+1, j] - 1`
-are the entries of presynaptic column `j` whose postsynaptic neuron lies in chunk `c` (needs the entries of every column sorted by
-postsynaptic index, as `dsparse` makes them). Built on first use (`chunk_ptr!`), rebuilt when the structure (`colptr`, `I`), the
-number of postsynaptic neurons or the chunking change, invalidated by `update_sparse_matrix!` (rewiring, turnover). `builds` counts the
-(re)builds, `buildtime` is the seconds of the last one; the memory is `4 (nchunks + 1) Npre` bytes.
+Cache of the sub-row pointers of a sparse synapse (`SpikingSynapse.chunkptr`): `ptr[c, j] : ptr[c+1, j] - 1` are the entries
+of presynaptic column `j` whose postsynaptic neuron lies in chunk `c`. Built on first use (`chunk_ptr!`), rebuilt when
+`colptr`, `I`, `Npost` or the chunking change; `invalidate_chunk_ptr!` forces a rebuild (`update_sparse_matrix!` calls it).
+`builds` counts the (re)builds, `buildtime` is the duration (s) of the last one.
 """
 mutable struct ChunkPtr
     ptr::Matrix{Int32}
@@ -218,8 +205,8 @@ end
 """
     chunk_ptr!(cp::ChunkPtr, colptr, I, Npost, bpc) -> Matrix{Int32}
 
-The sub-row pointer table for the chunking of `Npost` postsynaptic neurons with `bpc` batches per chunk; (re)built if needed.
-Serial: call it before the fork. Check `cp.sorted` (a connection with unsorted columns must run serially).
+The sub-row pointer table for `Npost` postsynaptic neurons and `bpc` batches per chunk, (re)built if needed.
+Not thread-safe: call before the fork. If `cp.sorted` is false (unsorted columns) the connection must run serially.
 """
 function chunk_ptr!(cp::ChunkPtr, colptr, I, Npost::Int, bpc::Int)
     nc = nchunks(Npost, bpc)
@@ -233,10 +220,8 @@ function chunk_ptr!(cp::ChunkPtr, colptr, I, Npost::Int, bpc::Int)
     return cp.ptr
 end
 
-# Synaptic operations (spikes x fan-out, plus a quarter of the targets for the arrival pass of a delayed synapse) below which a synapse is
-# processed on the calling thread whatever the chunking: the result is the same either way. Measured crossover of the forward! kernel alone
-# (balanced network fan-out 100, 4 to 8 threads, `exp_scan.jl`): about 5000 operations per step; the fork plus the coherence traffic cost about
-# 2 us per step and synapse. `SYN_MIN_OPS[] = 0` forces the fork (tests), `typemax(Int)` keeps all synapses serial.
+# Synaptic operations per step (spikes x fan-out, plus `ops0` from the caller) below which a synapse runs on the calling
+# thread, where the fork costs more than it saves; same result either way. `0` forces the fork, `typemax(Int)` keeps all serial.
 const SYN_MIN_OPS = Ref(8000)
 
 @inline function _spike_ops(spikes, ptr_)

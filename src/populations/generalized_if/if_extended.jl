@@ -48,8 +48,7 @@ inhibition. Unlike `IF` and `AdEx`, it has no `synapse` field: the conductances 
 population and decay exponentially. Connections
 target one of the conductances: `SpikingSynapse(pre, post, sym; conn)` with `sym` in `:g_Exc`,
 `:g_PV`, `:g_SST`; `:ge`/`:glu` are mapped to `:g_Exc` and `:gi`/`:gaba` to `:g_PV`. A spike of
-weight ``w`` (nS) increments the conductance by ``w``. (Up to SNNModels 1.8.4 there was no
-`synaptic_target` method and this raised a `MethodError`.)
+weight ``w`` (nS) increments the conductance by ``w``.
 
 # Equations
 ```math
@@ -72,13 +71,12 @@ one forward-Euler step of ``v``, threshold test, reset to `Vr` and `tabs = round
 - `id::String = randstring(12)`, `name::String = "ExtendedIF"`.
 - `param::ExtendedIFParameter = ExtendedIFParameter()`.
 - `N::Int32 = 100`.
-- `v::VFT`: membrane potential (mV), uniform in `[Vr, Vt]`. `VFT = Vector{Float32}` by default; `VFT = Vector{Float64}` gives a `Float64` population (the parameters follow; see `float_type`).
+- `v::VFT`: membrane potential (mV), uniform in `[Vr, Vt]`. `VFT = Vector{Float64}` gives a `Float64` population (see `float_type`).
 - `g_Exc`, `g_PV`, `g_SST`: conductances (nS), zeros.
 - `tabs`: refractory counters (steps, stored in the float type of the state), zeros.
 - `w`: unused by the dynamics, zeros.
 - `fire::Vector{Bool}`; `I`: external current (pA); `records::Dict`.
-- `spikes::SpikeIndex`: ascending list of the neurons that fired in the step, owned by the population and shared by its
-  connections and recorder (see `spike_index`).
+- `spikes::SpikeIndex`: neurons that fired in the step (see `spike_index`).
 - `Δv`, `Δv_temp`: unused buffers.
 
 # Example
@@ -117,13 +115,12 @@ ExtendedIF
 end
 
 function integrate!(p::ExtendedIF, param::ExtendedIFParameter, dt_::AbstractFloat)
-    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
+    dt = _step_dt(p, dt_)   # in the precision of the population
     update_synapses!(p, param, dt)
     update_neuron!(p, param, dt)
 end
 
-# Branchless and vectorised (`@inbounds @simd`), bit-identical to the branching loop of SNNModels <= 1.9: the membrane update is
-# evaluated for every neuron and discarded (`ifelse`) for the refractory ones; `round(Int, τabs / dt)` is hoisted.
+# Branchless: the membrane update is evaluated for every neuron and discarded with `ifelse` for the refractory ones.
 function update_neuron!(p::ExtendedIF, param::ExtendedIFParameter, dt::AbstractFloat)
     @unpack N, v, g_Exc, g_PV, g_SST, w, I, tabs, fire = p
     @unpack El, E_i, E_e, gl, α, Vt, Vr, τabs, Cm = param

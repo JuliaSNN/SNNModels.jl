@@ -36,21 +36,16 @@ P(\text{spike}) &= 1 - e^{-\nu_i dt}
 \end{aligned}
 ```
 with ``\tau_{rate}`` = `rate_timescale`; ``\rho_i`` (field `r`) is initialised to ``r_0``.
-The noise uses `randcache_β` (one uniform number per neuron and step). The spikes are sampled sparsely: every neuron
-fires with probability ``1 - e^{-\nu_i dt}`` independently, but the candidates are generated with the largest probability of the
-step by geometric skipping and thinned (see `Poisson`), so the spike draws cost one random number per spike instead of one per
-neuron (above a per-step probability of 3 % every neuron is tested with one vectorised uniform draw, as in SNNModels 1.9). The sequence of
-random numbers differs from SNNModels 1.9 (global RNG, `Random.seed!`).
+The noise uses `randcache_β` (one uniform number per neuron and step). The spikes are sampled
+sparsely, as in `Poisson`.
 
 # Fields
 - `id`, `param`, `name = "InhomogeneousPoisson"`, `N::Int32 = 100`, `fire::Vector{Bool}`.
-- `r::VFT`: rate offsets ``\rho_i``; `noise::VFT`: ``\eta_i``. `VFT = Vector{Float32}` by default; `VFT = Vector{Float64}` with
+- `r::VFT`: rate offsets ``\rho_i``; `noise::VFT`: ``\eta_i``. `VFT = Vector{Float64}` with
   `param = InhomogeneousPoissonParam(FT = Float64)` gives a `Float64` population (see `float_type`).
 - `pspike::VFT`: spike probability ``1 - e^{-\nu_i dt}`` of each neuron in the last step.
-- `spikes::SpikeIndex`: the ascending list of the neurons that fired in the last step (fed by `integrate!`).
+- `spikes::SpikeIndex`: neurons that fired in the last step, filled by `integrate!` (see `spike_index`).
 - `randcache_β`; `records::Dict`; `targets::Dict` (unused).
-
-Reference not given in the code.
 
 # Example
 ```julia
@@ -84,7 +79,7 @@ function Population(p::InhomogeneousPoissonParam; kwargs...)
 end
 
 function integrate!(p::InhomogeneousPoisson, param::InhomogeneousPoissonParam, dt_::AbstractFloat)
-    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
+    dt = _step_dt(p, dt_)   # in the precision of the population
     @unpack N, randcache_β, fire, spikes, pspike = p
     ## Inhomogeneous Poisson process
     @unpack r0, β, τ, rate_timescale = param
@@ -95,7 +90,7 @@ function integrate!(p::InhomogeneousPoisson, param::InhomogeneousPoissonParam, d
     FT = eltype(pspike)
     cc = one(FT) - dt / τ
     pmax = zero(FT)
-    # rate of every neuron, vectorised: noise and rate offset as in SNNModels 1.9, and the spike probability of the step
+    # rate and spike probability of every neuron, vectorised
     @inbounds @simd for i = 1:N
         re = randcache_β[i] - FT(0.5)
         ni = (noise[i] - re) * cc + re
@@ -108,7 +103,7 @@ function integrate!(p::InhomogeneousPoisson, param::InhomogeneousPoissonParam, d
         pspike[i] = pi_
         pmax = max(pmax, pi_)
     end
-    # sparse sampling of the spikes (see `Poisson`); the uniform cache is free again after the noise update
+    # sparse sampling of the spikes (see `Poisson`); `randcache_β` is reused as scratch
     if pmax >= _POP_DENSE_SPIKE_P
         _pop_dense!(j -> @inbounds(pspike[j]), fire, spikes, randcache_β, Int(N))
     else

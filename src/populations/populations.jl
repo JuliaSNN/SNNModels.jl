@@ -16,13 +16,9 @@ abstract type AbstractPopulationParameter <: AbstractParameter end
 
 Advance the state of population `p` by one time step `dt` (ms). Every population model
 implements a method of `integrate!` for its own parameter type; it is called once per step by
-`sim!` and `train!`, after the stimuli and before the connections. The fallback for an
-`AbstractPopulationParameter` without a specific method does nothing for a `Float32` step and throws an `ArgumentError` for
-another precision (a `Float64` population whose model has no `Float64` method, see `float_type`). `sim!` gives `dt` in the
-precision of the population (`float_type(p)`), so a model of populations of different precisions runs each in its own; every
-model that has a `Float64` method also converts a `dt` of another precision to `float_type(p)` itself (since 1.10), so that a
-direct call `integrate!(p, p.param, 0.1)` on a `Float32` population steps with `0.1f0` (and a `Float64` population given a
-`Float32` step uses `Float64(dt)`, e.g. `0.10000000149011612` for `0.1f0`).
+`sim!` and `train!`, after the stimuli and before the connections. `dt` is converted to the precision of the
+population (`float_type(p)`). The fallback does nothing for a `Float32` step and throws an `ArgumentError` for
+another precision (a model without a `Float64` method).
 
 See the documentation of each population type for the equations and the integration scheme.
 """
@@ -35,9 +31,6 @@ integrate!(p::AbstractPopulation, param::AbstractPopulationParameter, dt::Abstra
 const _FLOAT64_POPULATIONS = "Identity, IF, AdEx, ExtendedIF, HH, IZ, MorrisLecar, Rate, WilsonCowan, Tripod, BallAndStick, " *
                              "Poisson, VariablePoisson, InhomogeneousPoisson"
 
-# One precision per population (used by the `snn_kw_finalize` of every population that has a Float64 model): each parameter
-# object of the population (`what => obj` pairs) must have the floating-point type `FT` of its state arrays (`float_type`).
-# Objects without a floating-point type parameter (`DeltaSynapse()`, `RateParameter()`) are precision-agnostic and pass.
 # Copy of a parametric parameter struct with its floating-point fields and type parameters converted to `T` (the methods of
 # `convert_precision` for synapse models and spike parameters); `x` itself when it is already `T` or has no float type parameter.
 function _convert_float_struct(x::S, ::Type{T}) where {S,T<:AbstractFloat}
@@ -48,9 +41,10 @@ function _convert_float_struct(x::S, ::Type{T}) where {S,T<:AbstractFloat}
     return Base.typename(S).wrapper{newps...}(vals...)
 end
 
-# float type of the state of a population type `T` (with its type parameters, as `snn_kw_finalize` receives it): the element type of the
-# field `field` (`:v` for most models, a field of type `VFT`), Float32 when the type is not parameterised
+# float type of the state of a population type `T`: the element type of its field `field`, Float32 when not parameterised
 _state_float(::Type{T}, field::Symbol) where {T} = (V = fieldtype(T, field); V isa DataType && V <: AbstractArray ? eltype(V) : Float32)
+# One precision per population (`snn_kw_finalize`): each parameter object (`what => obj`) must have the float type `FT` of the
+# state; objects without a floating-point type parameter (`DeltaSynapse()`, `RateParameter()`) pass.
 function _check_precision(name, FT, objs::Pair...)
     for (what, obj) in objs
         T = _float_type(typeof(obj))
@@ -163,10 +157,8 @@ include("multicompartment/dendneuron_parameter.jl")
 include("multicompartment/tripod.jl")
 include("multicompartment/ballandstick.jl")
 
-## Spike lists owned by the integrate-and-fire family
-# Populations that keep only their `fire` flags and own one `SpikeIndex` (field `spikes`, `owned_spike_index`), shared
-# by every `SpikingSynapse` that reads them and by their `:fire` recorder (`_recording_spike_index`). The set is written
-# once here; a population type added later and not listed falls back to a new list per connection (correct, slower).
+## Spike lists owned by the integrate-and-fire family (see `spike_index`)
+# A population type not listed here falls back to a new list per connection (correct, slower).
 const _OWNED_LIST_POPULATIONS = Union{IF,AdEx,ExtendedIF,HetRec,Tripod,BallAndStick,HH,IZ,MorrisLecar}
 
 spike_index(p::_OWNED_LIST_POPULATIONS) = getfield(p, :spikes)

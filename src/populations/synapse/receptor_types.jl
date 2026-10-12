@@ -3,10 +3,9 @@
 """
     EyalNMDA :: NMDAVoltageDependency{Float32}
 
-NMDA magnesium block with `mg = 1` mM, `b = 3.36` mM, `k = -0.077` 1/mV (values attributed in
-the code to Eyal et al. 2018). Numerically identical to `SomaNMDA`.
+NMDA magnesium block with `mg = 1` mM, `b = 3.36` mM, `k = -0.077` 1/mV (Eyal et al. 2018).
+Numerically identical to `SomaNMDA`.
 """
-# (Before 1.10: `mg = Float32(1.0mM)/mM`, `b = 3.36f0`, `k = -0.077f0`, the same Float32 values.)
 EyalNMDA = _predefined(NMDAVoltageDependency; mg = 1.0, b = 3.36, k = -0.077)   # b: voltage dependence of NMDA channels; k: Eyal 2018
 
 
@@ -16,7 +15,6 @@ EyalNMDA = _predefined(NMDAVoltageDependency; mg = 1.0, b = 3.36, k = -0.077)   
 #     hippocampus, Neuron 16(4):815-823, doi:10.1016/S0896-6273(00)80101-4 (GABA receptors).
 #   Eyal G. et al. (2018), Human cortical pyramidal neurons: from spines to spikes via models,
 #     Front. Cell. Neurosci. 12, doi:10.3389/fncel.2018.00181 (dendritic AMPA/NMDA).
-#   Duarte: somatic AMPA; reference not given in the code.
 ## Tripod
 MilesGabaSoma = _predefined(Receptor; E_rev = -70.0, τr = 0.1, τd = 15.0, g0 = 0.38, target = :gaba)
 

@@ -3,8 +3,8 @@
 """
     integrate!(p::AbstractGeneralizedIF, param::AbstractGeneralizedIFParameter, dt)
 
-One integration step of a generalized integrate-and-fire population (`IF`, `AdEx`, `Tripod`,
-`BallAndStick`). Calls, in this order,
+One integration step of a generalized integrate-and-fire population (`IF`, `AdEx`; the other
+models have their own method). Calls, in this order,
 1. `update_synapses!(p, p.synapse, p.receptors, p.synvars, dt)`: the spikes written by the
    connections into `p.receptors` during the previous step are added to the synaptic variables,
    which are then integrated over `dt`; the receptor buffers are zeroed;
@@ -18,7 +18,7 @@ function integrate!(
     param::T,
     dt_::AbstractFloat,
 ) where {P<:AbstractGeneralizedIF,T<:AbstractGeneralizedIFParameter}
-    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
+    dt = _step_dt(p, dt_)   # in the precision of the population
     dt_ isa Float32 || _float64_supported(p) || throw(ArgumentError(
         "population $(nameof(typeof(p))) is not implemented in $(typeof(dt_)) (populations with Float64 state: $(_FLOAT64_POPULATIONS))"))
     if _chunkable(p, p.synapse)
@@ -36,7 +36,7 @@ function integrate!(
     end
 end
 
-# Populations and synapse models whose three stages have chunk methods (`..., rng::UnitRange{Int}`), see `foreach_chunk`.
+# populations and synapse models whose three stages have chunk methods (`..., rng::UnitRange{Int}`)
 _chunk_population(::AbstractGeneralizedIF) = false
 # generalized IF populations whose model is implemented in other precisions than Float32 (all but `HetRec`)
 _float64_supported(::AbstractGeneralizedIF) = true

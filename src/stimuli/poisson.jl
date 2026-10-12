@@ -123,18 +123,8 @@ g_n \leftarrow g_n + \mu\, k_n, \qquad k_n \sim \mathrm{Poisson}(\nu(t)\,\Delta 
 ```
 Nothing is added when ``\nu(t)\,\Delta t \le 0`` or when `param.active[1] == false`.
 
-# Sampling
-The counts are not drawn neuron by neuron. The neurons that receive at least one spike
-(probability ``1 - e^{-\nu\Delta t}`` each, independently) are found by geometric skipping through
-`neurons`, and their count is drawn from the zero-truncated Poisson distribution, so that the law of
-every ``k_n`` is exactly ``\mathrm{Poisson}(\nu(t)\,\Delta t)`` and the cost of a step is
-proportional to the number of input spikes, not to the number of targeted neurons (see
-[`stimulate!`](@ref)). Since SNNModels 1.10 the sequence of random numbers differs from the dense
-sampler of earlier versions: statistics are unchanged, a seeded run does not reproduce 1.9.
-
-# Sparse hand-off
-If `post` has a sparse update (`Identity`), the stimulus logs every neuron it writes in `inbox`
-(`attach_driver!`), so that `post` visits only those neurons while all its writers do the same.
+The counts are sampled sparsely, at a cost proportional to the number of input spikes (see
+[`stimulate!`](@ref)). Neurons written are logged in `inbox` (see `attach_driver!`).
 
 # Constructor arguments
 - `post`: target population.
@@ -152,10 +142,9 @@ If `post` has a sparse update (`Identity`), the stimulus logs every neuron it wr
 - `id::String`, `name::String = "Poisson"`
 - `param::PoissonStimulusParameter`
 - `neurons::Vector{Int}`: targeted neuron indices.
-- `g::Vector{Float32}`: the target variable of `post` (shared, not copied).
+- `g::VFT`: the target variable of `post` (shared, not copied); `VFT` and `param` follow the precision of `post`.
 - `targets::Dict`, `records::Dict`
-- `inbox`: log of the neurons of `post` written in the current step (`TouchList`) if `post` has a sparse
-  update, `nothing` otherwise.
+- `inbox`: log of the neurons of `post` written (see `attach_driver!`), or `nothing`.
 
 The stimulus has no spike vector of its own (it is not a presynaptic population).
 
@@ -172,7 +161,7 @@ SNN.sim!(; model, duration = 100ms)
 """
 PoissonStimulus
 
-# Does `stimulate!` of the `PoissonStimulus` with this parameter log the neurons it writes in `inbox`? True for the built-in parameters.
+# whether `stimulate!` with this parameter logs the neurons it writes in `inbox` (only the built-in parameters do)
 _logs_writes(::PoissonStimulusParameter) = false
 _logs_writes(::Union{PoissonFixed,PoissonVariable,PoissonInterval}) = true
 
@@ -214,8 +203,7 @@ function PoissonStimulus(
         end
     end
 
-    # only the built-in parameters log the neurons they write; a user-defined parameter with its own `stimulate!` does not, so the
-    # target keeps its dense update (see `attach_driver!`)
+    # a user-defined parameter with its own `stimulate!` does not log its writes: the target keeps its dense update
     inbox = _logs_writes(param) ? attach_driver!(post) : nothing
     return PoissonStimulus(;
         VFT = Vector{eltype(g)},
@@ -279,9 +267,8 @@ end
 """
     _zt_poisson(λ)
 
-Draw `k ~ Poisson(λ)` conditioned on `k >= 1` (zero-truncated Poisson): by inversion of the
-truncated cdf for `λ < 1` (the first term `P(k = 1 | k >= 1) = λ / expm1(λ)` is about 1 for the
-small `λ` of one step), by rejection of `Poisson(λ)` draws otherwise.
+Draw `k ~ Poisson(λ)` conditioned on `k >= 1`: by inversion of the truncated cdf for `λ < 1`, by
+rejection of `Poisson(λ)` draws otherwise.
 """
 @inline function _zt_poisson(λ::Float64)
     if λ < 1.0
@@ -312,20 +299,11 @@ end
 If `param.active[1]`, add `param.μ` times a Poisson count of mean `λ = get_poisson_rate(param, time) * dt`
 to `p.g[n]` for every neuron `n` in `p.neurons`, drawn independently per neuron.
 
-The counts are sampled sparsely. A neuron receives at least one spike with probability
-`q = 1 - exp(-λ)`, independently of the others, so the positions of the neurons with spikes in
-`p.neurons` form a Bernoulli(q) sequence: the gap to the next one is geometric,
-`floor(-log(1 - U) / λ)` for `U` uniform, and only the neurons that spike are visited (one uniform
-draw and one logarithm per input spike instead of one Poisson draw per neuron). Their count is
-then drawn from the zero-truncated Poisson distribution, so the marginal law of every count is
-exactly `Poisson(λ)` and the counts of different neurons are independent: the statistics equal
-those of the dense per-neuron sampler of SNNModels up to 1.9 (the stream of random numbers
-differs, so a seeded run does not reproduce 1.9). The rate is read at every step, so
-time-dependent rates (`PoissonVariable`, `PoissonInterval`, `set_variable!`) are exact. The cost
-per step is `O(1 + λ n)` for `n` targeted neurons (it approaches the dense cost when `λ` is of order 1).
-
-If `post` has a sparse update (`Identity`, see `attach_driver!`), every neuron written is also
-logged in `p.inbox`. Uses the global random number generator (`Random.seed!`).
+Sampling: a neuron receives at least one spike with probability `1 - exp(-λ)`, independently, so the
+next such neuron of `p.neurons` is found by a geometric gap `floor(-log(1 - U) / λ)`, and its count is
+drawn from the zero-truncated Poisson distribution (`_zt_poisson`). Every count is exactly `Poisson(λ)`
+and independent; the cost per step is `O(1 + λ n)` for `n` targeted neurons. The rate is read at every
+step. Neurons written are logged in `p.inbox` (see `attach_driver!`). Uses the global RNG.
 """
 function stimulate!(
     p::PoissonStimulus,

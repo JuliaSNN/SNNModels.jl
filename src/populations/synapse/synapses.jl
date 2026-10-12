@@ -87,10 +87,8 @@ end
 """
     synaptic_variables(synapse::AbstractSynapseParameter, N::Int[, FT]) -> AbstractSynapseVariable
 
-Allocate the state variables (all zero, element type `FT`) of the synapse model `synapse` for `N`
-neurons or compartments. Without `FT` the precision of the synapse model, `float_type(synapse)` (`Float32` by default); the
-populations pass the precision of their state (`eltype(VFT)`). Every synapse model implements the three-argument method;
-the fallback throws an error.
+Allocate the state variables (all zero, element type `FT`, default `float_type(synapse)`) of the synapse model
+`synapse` for `N` neurons or compartments. Every synapse model implements the three-argument method.
 """
 synaptic_variables(synapse::AbstractSynapseParameter, N::Int) = synaptic_variables(synapse, N, float_type(synapse))
 function synaptic_variables(synapse::AbstractSynapseParameter, N::Int, ::Type{FT}) where {FT<:AbstractFloat}
@@ -98,11 +96,8 @@ function synaptic_variables(synapse::AbstractSynapseParameter, N::Int, ::Type{FT
     error("synaptic_variables not implemented for synapse type $(typeof(synapse))")
 end
 
-# Synapse models written for SNNModels <= 1.9 define only the two-argument `synaptic_variables(synapse, N)` /
-# `synaptic_receptors(synapse, N)`, while the populations call the three-argument form with their precision (1.10). The
-# generic three-argument methods use the model's own two-argument method when it has one and `FT` is the precision of the
-# model (`float_type(synapse)`, Float32 for such models), so that existing models keep working in Float32 populations; for
-# another precision they ask for the three-argument method.
+# A synapse model that defines only the two-argument `synaptic_variables`/`synaptic_receptors` keeps working when `FT` is
+# its own precision; for another precision the error asks for the three-argument method.
 function _two_argument_only(f, synapse, ::Type{FT}) where {FT}
     which(f, Tuple{typeof(synapse),Int}).sig == Tuple{typeof(f),AbstractSynapseParameter,Int} && return false
     FT === float_type(synapse) && return true
@@ -116,8 +111,7 @@ end
 Allocate the spike-input buffers of a population: a `NamedTuple` of `Vector{FT}` of length
 `N`, one per receptor group. The default is `(glu = zeros(FT, N), gaba = zeros(FT, N))`;
 `MultiReceptorSynapse` creates one buffer per distinct receptor `target`. Connections add their
-weights into these buffers and `update_synapses!` empties them at every step. Without `FT` the precision of the synapse
-model, `float_type(synapse)`.
+weights into these buffers and `update_synapses!` empties them at every step. `FT` defaults to `float_type(synapse)`.
 """
 synaptic_receptors(synapse::AbstractSynapseParameter, N::Int) = synaptic_receptors(synapse, N, float_type(synapse))
 function synaptic_receptors(synapse::AbstractSynapseParameter, N::Int, ::Type{FT}) where {FT<:AbstractFloat}
@@ -125,9 +119,7 @@ function synaptic_receptors(synapse::AbstractSynapseParameter, N::Int, ::Type{FT
     return (glu = zeros(FT, N), gaba = zeros(FT, N))
 end
 
-# Copy of a synapse model in the precision `T` (the floating-point fields and type parameters converted, see `convert_precision`);
-# the object itself when it already has type `T` or has no floating-point field (`DeltaSynapse`). Used by the populations to bring
-# their default synapse models to the precision of their state.
+# Copy of a synapse model in precision `T`; the object itself when already in `T` or without floating-point fields.
 convert_precision(x::AbstractSynapseParameter, ::Type{T}) where {T<:AbstractFloat} = _convert_float_struct(x, T)
 
 """

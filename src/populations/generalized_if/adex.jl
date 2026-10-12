@@ -105,12 +105,10 @@ After a spike the neuron is therefore clamped for `round(Int, τabs / dt) - 1` s
 - `param::AdExParameter = AdExParameter()`, `synapse = DoubleExpSynapse()`,
   `spike::PostSpike = PostSpike()`.
 - `N::Int32 = 100`: number of neurons.
-- `v::VFT`: membrane potential (mV), uniform in `[Vr, Vt]`. `VFT = Vector{Float32}` by default; `VFT = Vector{Float64}` gives a
-  `Float64` population (`param`, `synapse`, `spike`, the synaptic variables and receptor buffers follow; see `float_type`).
+- `v::VFT`: membrane potential (mV), uniform in `[Vr, Vt]`. `VFT = Vector{Float64}` gives a `Float64` population (see `float_type`).
 - `w::VFT`: adaptation current (pA), zeros.
 - `fire::Vector{Bool}`: spike flags.
-- `spikes::SpikeIndex`: ascending list of the neurons that fired in the step, owned by the population and shared by its
-  connections and recorder (see `spike_index`).
+- `spikes::SpikeIndex`: neurons that fired in the step (see `spike_index`).
 - `θ::VFT`: adaptive threshold of the exponential term (mV), initialised to `Vt`.
 - `tabs::Vector{Int}`: refractory counters (steps), ones.
 - `I::VFT`: external current (pA).
@@ -191,13 +189,8 @@ function Population(
 end
 
 
-# Membrane update of `AdEx` (scalar parameters); see the `AdEx` docstring for the step order.
-#
-# Branchless and vectorised (`@inbounds @simd`): the update is evaluated for every neuron and discarded for the
-# refractory ones (`tabs > 0` after the decrement) with `ifelse`, which is bit-identical to the branching loop of
-# SNNModels <= 1.9 (every value that is kept goes through the same floating-point operations in the same order).
-# The exponential term does not depend on the neuron through anything but `v` and `θ`; for a refractory neuron it may overflow to `Inf`,
-# which is discarded. Hoisted out of the loop: `round(Int, τabs / dt)` and the test `ΔT < 0`.
+# Membrane update of `AdEx` (scalar parameters); step order in the `AdEx` docstring. Branchless: the update is evaluated
+# for every neuron and discarded with `ifelse` for the refractory ones (whose exponential term may overflow to `Inf`).
 function update_neuron!(p::P, param::T, dt::AbstractFloat) where {P<:AdEx,T<:AdExParameter}
     update_neuron!(p, param, dt, 1:Int(p.N))
 end

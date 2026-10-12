@@ -77,8 +77,8 @@ end
     update_synapses!(p, param, receptors, synvars, dt, 1:Int(input_N(p)))
 end
 
-# Chunk method: the neurons `rng` only; clears the spike buffers of the same neurons. `@noinline`: the `@fastmath` loop is compiled on its own,
-# as in SNNModels <= 1.9 (inlined into the chunk closure LLVM generates different last-bit results for some N).
+# Chunk method: the neurons `rng` only; clears the spike buffers of the same neurons. `@noinline`: inlined into the chunk
+# closure, the `@fastmath` loop compiles to different last bits for some N.
 @noinline function update_synapses!(
     p::P,
     param::T,
@@ -96,8 +96,7 @@ end
         ge[i] += dt * (-ge[i] / τe)
         gi[i] += dt * (-gi[i] / τi)
     end
-    # the buffers are cleared in a loop of their own: stores to them inside the `@fastmath` loop above change the code LLVM generates for
-    # its arithmetic (last-bit differences from the loop of SNNModels <= 1.9)
+    # cleared in a loop of their own: stores inside the `@fastmath` loop above change its last bits
     z = zero(eltype(glu))
     @inbounds @simd for i ∈ rng
         glu[i] = z

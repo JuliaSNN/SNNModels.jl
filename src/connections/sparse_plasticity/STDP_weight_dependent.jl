@@ -27,8 +27,8 @@ exactly Auryn's `STDPwdConnection` (`learning_rate = η`, `param_alpha = α`,
 
 Fields: `η = 1e-3` (relative learning rate), `α = 1` (LTD/LTP asymmetry), `μ_plus = 1`,
 `μ_minus = 1` (weight-dependence exponents), `τpre = τpost = 20ms`, `Wmax = 30pF`,
-`Wmin = 0pF`. State: `STDPVariables` (lazily decayed traces, see `STDPGerstner`).
-Event-driven with the ordering of `STDP_kernels.jl`, serial, applied only under `train!`.
+`Wmin = 0pF`. State: `STDPVariables`.
+Event-driven with the ordering of `STDP_kernels.jl`, applied only under `train!`.
 
 # Example
 ```julia

@@ -102,14 +102,12 @@ Then, only if `τw > 0`, for every neuron `w += b` if it fired and
 - `spike::PST = PostSpike()`: spike parameters (only `τabs` is used).
 - `id::String = randstring(12)`, `name::String = "IF"`.
 - `N::Int32 = 100`: number of neurons.
-- `v::VFT`: membrane potential (mV), initialised uniformly in `[Vr, Vt]`. `VFT = Vector{Float32}` by default;
-  `IF(N = 10, VFT = Vector{Float64})` is a `Float64` population: `param`, `synapse` (`DoubleExpSynapse`), `spike`, the
-  synaptic variables and the receptor buffers default to `Float64` too, and the connections and stimuli built on it
-  follow (see `float_type`). Mixing precisions in one population is an `ArgumentError`.
+- `v::VFT`: membrane potential (mV), initialised uniformly in `[Vr, Vt]`. `IF(N = 10, VFT = Vector{Float64})` is a
+  `Float64` population: its parameters and synapse default to `Float64` (see `float_type`); mixing precisions in one
+  population is an `ArgumentError`.
 - `w::VFT`: adaptation current (pA), zeros.
 - `fire::Vector{Bool}`: spike flags of the last step.
-- `spikes::SpikeIndex`: ascending list of the neurons that fired in the step, owned by the population and shared by its
-  connections and recorder (see `spike_index`).
+- `spikes::SpikeIndex`: neurons that fired in the step (see `spike_index`).
 - `tabs::Vector{Int}`: refractory counters (steps), ones.
 - `I::VFT`: external current (pA), zeros.
 - `syn_curr::VFT`: total synaptic current (pA).
@@ -210,7 +208,7 @@ function update_neuron!(
     update_neuron!(p, param, dt, 1:Int(p.N))
 end
 
-# Chunk method: the neurons `rng` only (see `foreach_chunk`); the neurons are independent, so the result does not depend on the split.
+# chunk method: the neurons `rng` only
 function update_neuron!(
     p::IF,
     param::T,
@@ -224,8 +222,7 @@ function update_neuron!(
     nabs = round(Int, τabs / dt)    # refractory steps, loop invariant
     FT = eltype(v)
 
-    # Branchless: the membrane update is evaluated for every neuron and discarded for the refractory ones,
-    # which keeps the loop free of control flow so that it vectorises.
+    # branchless so that the loop vectorises: the update is discarded for the refractory neurons
     @inbounds @simd for i in rng
         ti = tabs[i]
         vi = v[i]
@@ -248,8 +245,7 @@ function update_neuron!(
     end
 end
 
-# Guard for the `@inbounds` neuron loops: every state vector must hold at least `N` entries
-# (unrolled at compile time over the argument tuple, no allocation).
+# guard of the `@inbounds` neuron loops: every state vector holds at least `N` entries
 @inline _lengths_ok(N, ::Tuple{}) = true
 @inline _lengths_ok(N, t::Tuple) = length(first(t)) >= N && _lengths_ok(N, Base.tail(t))
 @inline function _check_state_lengths(N, vs::Vararg{AbstractVector})

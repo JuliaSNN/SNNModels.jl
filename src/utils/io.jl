@@ -55,10 +55,8 @@ end
 Throw an `ArgumentError` if `x` (a loaded model, params or `NamedTuple`/`Dict` of them) contains
 a `JLD2.ReconstructedMutable` or `JLD2.ReconstructedStatic` placeholder, searching recursively
 through tuples, dictionaries, arrays of non-bits elements and struct fields. JLD2 builds such
-placeholders when the file holds a type whose layout no longer exists in the running SNNModels.
-This is the case for the `model` of files saved with SNNModels <= 1.9.1 (the clock `Time`, and
-`SpikingSynapse`, `SpikeTimeStimulus`, `Identity` or the STDP rule objects changed layout). They
-load without error and then fail in `train!` with an unrelated message. No migration is attempted. Returns `x`.
+placeholders when the file holds a type whose layout no longer exists, e.g. a `model` saved with SNNModels <= 1.9.1;
+such a model loads without error and then fails later with an unrelated message. No migration is attempted. Returns `x`.
 """
 function check_loaded_model(x; what::AbstractString = "file")
     seen = Base.IdSet{Any}()
@@ -298,8 +296,8 @@ function SNNsave(
     @info "Storing $(type)-$count of `$(savename(name, info, connector="-"))`
     at $(path) \n"
 
-    # saved weights are the current ones: materialise the deferred weight updates (vSTDPParameter; the accumulation
-    # epoch restarts, a perturbation of the later trajectory at the rounding level of the rule)
+    # saved weights are the current ones: materialise the deferred weight updates (vSTDPParameter; changes the later
+    # trajectory at rounding level)
     _sync_model_weights!(model)
 
     ## Create directory if it does not exist

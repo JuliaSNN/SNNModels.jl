@@ -103,30 +103,19 @@ each spike, all its targets ``i`` are incremented:
 g_i \leftarrow g_i + W_{ij}
 ```
 
-# Sampling
-The spikes are sampled sparsely: the gap to the next firing neuron is drawn from the geometric
-distribution (`PoissonLayer`), or candidates are drawn at the largest probability and thinned
-(`PoissonLayerHet`), so that a step costs one random draw per spike instead of one per layer neuron.
-The probabilities and the independence across neurons are exactly those above; only the random
-number stream differs from SNNModels 1.9 (see [`stimulate!`](@ref)).
+The spikes are sampled sparsely, at one random draw per spike (see [`stimulate!`](@ref)).
 
 # Fields
 - `N::Int`: number of layer neurons; `id`, `name = "Poisson"`
 - `param::PoissonLayerParameter`
-- `g::Vector{Float32}`: target variable of `post` (shared).
+- `g::VFT`: target variable of `post` (shared); `VFT`, `W` and `param` follow the precision of `post`.
 - `colptr`, `rowptr`, `I`, `J`, `index`, `W`: sparse connectivity, as returned by `dsparse`
   (`I` are postsynaptic indices, `W` the weights).
 - `fire::Vector{Bool}`: spikes of the layer neurons in the last step (can be recorded with
   `monitor!(stim, :fire)`).
-- `spikes::SpikeIndex`: the ascending list of the layer neurons that fired in the last step (fed by the
-  stimulus, so it is what `spike_index(stim)` returns for a connection that would read the layer).
-  The flags of `fire` are cleared through this list, not by a pass over `N`.
-- `inbox`: log of the neurons of `post` written in the current step (`TouchList`) if `post` has a sparse
-  update (`Identity`, see `attach_driver!`), `nothing` otherwise.
+- `spikes::SpikeIndex`: ascending list of the layer neurons that fired in the last step (`spike_index(stim)`).
+- `inbox`: log of the neurons of `post` written (see `attach_driver!`), or `nothing`.
 - `records::Dict`, `targets::Dict`
-
-Up to SNNModels 1.9 the layer had a field `randcache` (one uniform number per neuron and step); the spikes are
-now sampled sparsely (see [`stimulate!`](@ref)): same statistics, other random numbers.
 
 `param` is required (the keyword struct constructor has no default for it).
 
@@ -264,24 +253,14 @@ const _DENSE_SPIKE_P = 0.2
 
 One step of a Poisson layer: layer neuron `j` fires with probability `rate * dt` (`rates[j] * dt`
 for `PoissonLayerHet`), independently, at most once per step; for each firing neuron the weights
-of its outgoing connections are added to `p.g`. `p.fire` holds the layer spikes of this step and
-`p.spikes` the ascending list of the firing neurons. The layer does not fire while
-`param.active[1]` is `false`.
+of its outgoing connections are added to `p.g`. `p.fire` and `p.spikes` hold the layer spikes of this step.
+The layer does not fire while `param.active[1]` is `false`. Targets written are logged in `p.inbox` (see `attach_driver!`).
 
-The spikes are sampled sparsely, without one random number per neuron and step.
-- `PoissonLayer` (one probability `p`): the index gap to the next spike of the Bernoulli(`p`)
-  sequence is geometric, `floor(log(1 - U) / log(1 - p))`; one logarithm and one uniform draw per spike.
-- `PoissonLayerHet`: rejection against the largest probability `pmax`: candidates are generated as above with
-  `pmax` and the candidate `j` is kept with probability `rates[j] * dt / pmax`. Each neuron then fires with
-  probability exactly `rates[j] * dt`, independently, also if `rates` is changed between steps. `pmax` is
-  recomputed at every step with one read-only pass over `rates` (no random numbers); the expected number of
-  candidates is `N * pmax`, so the cost grows with the largest rate, not the mean.
-- If the probability (`pmax`) exceeds $(_DENSE_SPIKE_P) every neuron is tested with one uniform draw (the skipping
-  sampler would be slower there).
-
-The marginal statistics are those of the dense sampler of SNNModels up to 1.9; the sequence of random
-numbers is different (global RNG, `Random.seed!`). Layer neurons are written to `p.fire` and `p.spikes`; if
-`post` has a sparse update (`Identity`), the targets written are logged in `p.inbox` (see `attach_driver!`).
+Sampling (global RNG), with one random draw per spike:
+- `PoissonLayer`: the gap to the next spike of the Bernoulli(`p`) sequence is geometric, `floor(log(1 - U) / log(1 - p))`.
+- `PoissonLayerHet`: candidates drawn as above at the largest probability `pmax` (recomputed every step), each kept
+  with probability `rates[j] * dt / pmax`; the cost grows with the largest rate.
+- From a probability of $(_DENSE_SPIKE_P) on, every neuron is tested with one uniform draw.
 """
 function stimulate!(p::PoissonStimulusLayer, param::PoissonLayer, time::Time, dt::AbstractFloat)
     _layer_clear!(p)

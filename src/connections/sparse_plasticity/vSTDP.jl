@@ -1,32 +1,23 @@
 #=
 Voltage-based STDP (Clopath et al. 2010), two implementations of the same rule:
 
-  vSTDPParameter / vSTDPVariables              event-driven, the default. The weights are updated lazily.
+  vSTDPParameter / vSTDPVariables              event-driven; the weights are updated lazily.
   vSTDPDenseParameter / vSTDPDenseVariables    clock-driven reference, every synapse at every step.
-
-Both are generic over the floating-point type of the synapse (`float_type`): the state follows the precision of
-the postsynaptic population the synapse is built on.
 =#
 
 @doc raw"""
     vSTDPParameter(; A_LTD = 8e-4, A_LTP = 1.4e-3, θ_LTD = -70mV, θ_LTP = -49mV,
                      τu = 20ms, τv = 7ms, τx = 15ms, Wmax = 30pF, Wmin = 0.1pF, epoch = 10)
 
-Voltage-based STDP in the form of Clopath et al. (2010), event-driven: the default form of the rule.
-Depression is triggered by a presynaptic spike and depends on a low-pass filtered postsynaptic membrane
-potential; potentiation depends on a presynaptic spike trace, on the instantaneous postsynaptic potential and on
-a second low-pass filter of it. It is a subtype of `LTPParameter`; pass it as `LTPParam` to a `SpikingSynapse`
-that targets a population with a membrane potential (`v_post` of the synapse). Its state is `vSTDPVariables`.
-The clock-driven form that evaluates the potentiation on every synapse at every step is
-[`vSTDPDenseParameter`](@ref) (the reference of this rule; up to 1.9 `vSTDPParameter` was that rule).
+Voltage-based STDP of Clopath et al. (2010), event-driven. Depression is triggered by a presynaptic spike and
+depends on a low-pass filtered postsynaptic potential; potentiation depends on a presynaptic trace, on the
+instantaneous postsynaptic potential and on a second low-pass filter of it. Pass it as `LTPParam` to a
+`SpikingSynapse` whose target has a membrane potential. State: `vSTDPVariables`. The clock-driven form of the
+same rule is [`vSTDPDenseParameter`](@ref).
 
-!!! warning "Changed in SNNModels 1.10: `vSTDPParameter` is event-driven and `syn.W` is lazy"
-    Up to 1.9 `vSTDPParameter` was the dense rule (now `vSTDPDenseParameter`, same equations, same fields without
-    `epoch`). The event-driven rule gives the same weights (to rounding, see below) at a cost that does not
-    grow with the number of synapses, but it materialises the weights lazily: `syn.W` holds the weights as of
-    the last materialisation of each synapse, NOT the current weights. Read them with
-    `plasticity_value(syn, :W)` (what `monitor!(syn, [:W])` does), or call `sync_traces!(syn)` first and read
-    `syn.W`. `forward!` is always correct. See "Reading the weights".
+!!! warning "`syn.W` is not the current weight vector"
+    The potentiation is applied lazily: read the weights with `plasticity_value(syn, :W)`, or call
+    `sync_traces!(syn)` first. See "Reading the weights".
 
 # Equations
 With ``V_i`` the postsynaptic potential (`v_post`), ``u_i``, ``v_i`` its low-pass filters,
@@ -41,39 +32,27 @@ With ``V_i`` the postsynaptic potential (`v_post`), ``u_i``, ``v_i`` its low-pas
 \end{aligned}
 ```
 A presynaptic spike increases ``x_j`` by ``1/τ_x`` (units 1/ms) and potentiation is a rate, integrated over
-`dt`; the rule is independent of `dt`, as in Clopath et al. (2010). Note that both thresholds of the LTP term are
-as in the code: the filtered potential ``v`` is compared with `θ_LTD`, the instantaneous one with `θ_LTP`.
+`dt`. The filtered potential ``v`` is compared with `θ_LTD`, the instantaneous one with `θ_LTP`.
 Per step (the order of the dense rule): (1) forward Euler for ``x`` (this step's spikes included), (2) forward Euler
-for ``u`` and ``v`` (driven by the current `v_post`), (3) LTD at the presynaptic spikes of the step, clamped at
-`Wmin`, then (4) the LTP increment `dt * A_LTP * x * ...` on all outgoing synapses, clamped at `Wmax`. At the first
-call the voltage traces ``u`` and ``v`` are set to the current postsynaptic potential (they are not started at 0 mV).
+for ``u`` and ``v``, (3) LTD at the presynaptic spikes of the step, clamped at `Wmin`, then (4) the LTP increment
+`dt * A_LTP * x * ...` on all outgoing synapses, clamped at `Wmax`. At the first call ``u`` and ``v`` are set to
+the current postsynaptic potential.
 
-# What is exact and what is paid
-The filters ``u_i``, ``v_i`` of the postsynaptic potential and the thresholded drive
-``g_i(n) = [v_i(n) - θ_{LTD}]_+ [V_i(n) - θ_{LTP}]_+`` are properties of the postsynaptic neuron,
-so they are still computed at every step (cost O(`Npost`)). The presynaptic trace obeys
-``x_j(n) = q\,x_j(n-1) + s_j(n)/τ_x`` with ``q = 1 - dt/τ_x``, hence between presynaptic spikes
-``x_j(n) = a_j q^n`` with ``a_j`` constant (a spike adds ``q^{-n}/τ_x`` to it). The LTP weight
-``dt\,A_{LTP} \sum_n x_j(n) g_i(n)`` is then ``dt\,A_{LTP}\,a_j (K_i(n) - K_i(n_k - 1))`` since the
-last presynaptic spike ``n_k`` of ``j``, where ``K_i(n) = \sum_{m \le n} q^m g_i(m)`` is accumulated
-per postsynaptic neuron. Per synapse only a snapshot of ``K_i`` taken at the previous presynaptic
-spike of ``j`` is kept. The weights are materialised
+# Event-driven evaluation
+The filters ``u_i``, ``v_i`` and the drive ``g_i(n) = [v_i(n) - θ_{LTD}]_+ [V_i(n) - θ_{LTP}]_+`` are computed
+every step (O(`Npost`)). Between presynaptic spikes ``x_j(n) = a_j q^n`` with ``q = 1 - dt/τ_x``, so the LTP
+since the last presynaptic spike ``n_k`` of ``j`` is ``dt\,A_{LTP}\,a_j (K_i(n) - K_i(n_k - 1))`` with the
+per-neuron accumulator ``K_i(n) = \sum_{m \le n} q^m g_i(m)``; each synapse keeps a snapshot of ``K_i``. The
+weights are materialised
 
-- at a presynaptic spike of ``j`` (in `update_traces!`, before `forward!`, so that the spike is
-  transmitted with the current weight; the LTD of the spike then acts on the materialised weight),
-  for the outgoing synapses of ``j`` only;
-- for all synapses once per epoch (`epoch` times `τx`, default 10 `τx`): `K` is a sum with
-  geometrically decaying terms and the difference ``K(n) - K(n_k - 1)`` loses all its digits after
-  about 35 `τx` in `Float64`, so the accumulator, the snapshots and the amplitudes ``a_j`` are
-  restarted every epoch. With `epoch = 10` the relative error of an increment is about
-  ``10^{-16} e^{10} = 2 \cdot 10^{-12}``;
-- on demand (`sync_traces!`, a change of `dt`, `τx`, `A_LTP` or `Wmax`).
+- at a presynaptic spike of ``j``, for its outgoing synapses, in `update_traces!` (before `forward!`, so the
+  spike is transmitted with the current weight);
+- for all synapses once per epoch (`epoch` times `τx`): the difference of ``K`` loses its digits after about
+  35 `τx` in `Float64`, so ``K``, the snapshots and ``a_j`` are restarted every epoch;
+- on demand (`sync_traces!`, a change of `dt`, `τx`, `A_LTP`, `Wmax` or `epoch`).
 
-`K`, the snapshots and `a_j` are `Float64` whatever the precision of the synapse (8 B per synapse for the
-snapshot): with `Float32` the same cancellation would give a relative error of ``6 \cdot 10^{-8} e^{10} = 10^{-3}``
-of an increment at the end of an epoch. The weights, the filters and the thresholds are in the precision of the
-synapse (`float_type`). Against the dense rule in `Float64` the final weights agree to about 1e-12 (see the validation
-README); in `Float32` the difference is the `Float32` accumulation error of the dense rule (1e-5 relative).
+`K`, the snapshots and `a_j` are `Float64` whatever the precision of the synapse; the weights, the filters and the
+thresholds have the precision of the synapse.
 
 # Bounds
 LTD acts at presynaptic spikes, before the LTP of the same step, on the materialised weight,
@@ -86,14 +65,11 @@ clamped by the dense rule at the first step and by this rule at the first materi
 recorded and forwarded weights are the clamped ones in both).
 
 # Reading the weights
-`syn.W` holds the weights as of the last materialisation of each synapse, NOT the current weights. The
-current weights are given by `plasticity_value(syn, :W)` (a scratch vector, state unchanged; used by `monitor!` of
-`:W`, see [`plasticity_value`](@ref)), the same accessor as for the lazily decayed traces. Or call
-[`sync_traces!`](@ref)`(syn)` (materialise all, in place, restarts the accumulation epoch) before reading `syn.W`
-directly (plots, `matrix`, saving a model, another rule or a metaplasticity object that rescales or rewires the
-weights: pending increments are not rescaled by a rule that acts on `W` in between). The library's own copy and
-save paths (`copy_model`, `save_model`) do this. The trace `x` is stored as the amplitude ``a_j``; read the value
-with `plasticity_value(syn, :LTPVars, :x, t)` (`monitor!(syn, [:x], :LTPVars)` does).
+`syn.W` holds the weights as of the last materialisation of each synapse. The current weights are
+[`plasticity_value`](@ref)`(syn, :W)` (a scratch vector, state unchanged; used by `monitor!`). Call
+[`sync_traces!`](@ref)`(syn)` (materialises all synapses and restarts the epoch) before reading or modifying `syn.W`
+directly (`save_model` does this). The trace `x` is stored as the amplitude ``a_j``; read it with
+`plasticity_value(syn, :LTPVars, :x, t)`.
 
 # Fields
 - `A_LTD::FT = 8 * 10e-5pA / mV` (= 8e-4): LTD amplitude per mV.
@@ -107,15 +83,12 @@ with `plasticity_value(syn, :LTPVars, :x, t)` (`monitor!(syn, [:x], :LTPVars)` d
   `vSTDPVariables` (see `set_LTP!`).
 
 # Precision
-`FT = Float32` by default. The synapse converts the rule to the precision of its postsynaptic population
-(`convert_precision`): a `Float64` population gives a `Float64` synapse, weights and state, whatever `FT` the rule was
-built with; the values of a rule built with `Float32` fields are then those of the `Float32` numbers (8e-4 as
-`Float32` is 8.0000002e-4 as `Float64`). Build the rule with `FT = Float64` and `Float64` values to have them exactly:
-`vSTDPParameter(FT = Float64, A_LTD = 8e-4)`. The unit constants (`ms`, `pA`, `Hz`, ...) are `Float32`.
+`FT = Float32` by default; the synapse converts the rule to its own precision (`convert_precision`). A rule built
+with `Float32` fields keeps the `Float32` values: use `vSTDPParameter(FT = Float64, A_LTD = 8e-4)` for exact
+`Float64` values.
 
 # Cost
-Per step O(`Npost`) (filters, `g`, `K`); per presynaptic spike O(fan-out); once per epoch O(nnz).
-No work per synapse per step. Serial.
+Per step O(`Npost`); per presynaptic spike O(fan-out); once per epoch O(nnz). Serial.
 
 # References
 Clopath, C., Büsing, L., Vasilaki, E. & Gerstner, W. (2010). Connectivity reflects coding: a
@@ -153,12 +126,10 @@ needs_transpose(::vSTDPParameter) = false   # event vSTDP reads colptr, I, W onl
 """
     vSTDPVariables(; Npre, Npost)
 
-State of `vSTDPParameter`: `u`, `v` (filters of the postsynaptic potential, precision of the synapse, `Npost`),
-`x` (STORED amplitudes ``a_j`` of the presynaptic traces, `Float64`, value ``x_j = a_j q^n``; read the
-value with `plasticity_value`), `K` (accumulator per postsynaptic neuron), `snap` (snapshot of `K`
-per synapse, allocated at the first step), the scratch `Wcur` of `plasticity_value(syn, :W)`, and the counters
-and cached constants of the step (`steps`, `tick`, `matstep`, `pw`, `cache`). All `Float64` where
-precision matters; see `vSTDPParameter`. Lists `:x` and `:W` in `lazy_variables`.
+State of `vSTDPParameter`: `u`, `v` (filters of the postsynaptic potential), `x` (stored amplitudes ``a_j``, value
+``a_j q^n``: read it with `plasticity_value`), `K` (accumulator per postsynaptic neuron), `snap` (snapshot of `K`
+per synapse), the scratch `Wcur` of `plasticity_value(syn, :W)`, and step counters and cached constants (`steps`,
+`tick`, `matstep`, `pw`, `cache`). Lists `:x` and `:W` in `lazy_variables`.
 """
 vSTDPVariables
 
@@ -236,7 +207,7 @@ function current_weights(c, vars::vSTDPVariables)
     return Wcur
 end
 
-# constants of the step; a change of dt, τx, A_LTP or Wmax (the factors of the accumulation) syncs first
+# constants of the step; a change of dt, τx, A_LTP, Wmax or epoch materialises the weights first
 function _ev_check!(c, vars::vSTDPVariables, param::vSTDPParameter, dt::AbstractFloat)
     ca = vars.cache
     if !(ca[1] == dt && ca[2] == param.τx && ca[3] == param.A_LTP && ca[4] == param.Wmax && ca[5] == param.epoch)
@@ -346,12 +317,9 @@ export vSTDPParameter, vSTDPVariables, plasticityvariables, plasticity!
     vSTDPDenseParameter(; A_LTD = 8e-4, A_LTP = 1.4e-3, θ_LTD = -70mV, θ_LTP = -49mV,
                           τu = 20ms, τv = 7ms, τx = 15ms, Wmax = 30pF, Wmin = 0.1pF, active = [true])
 
-Clock-driven voltage-based STDP (Clopath et al. 2010), the dense reference of [`vSTDPParameter`](@ref) (it was called
-`vSTDPParameter` up to SNNModels 1.9): the same rule, evaluated on every synapse at every step. Same equations,
-update order, fields (without `epoch`) and precision rules as `vSTDPParameter`, but `syn.W` always holds the
-current weights, and a negative `A_LTP` is allowed. The cost per step is O(nnz). Its state is `vSTDPDenseVariables`.
-Use it as a reference, to check the event-driven rule, or when the weights must be read by code that does not go
-through `plasticity_value`.
+Clock-driven voltage-based STDP (Clopath et al. 2010): the rule of [`vSTDPParameter`](@ref) evaluated on every
+synapse at every step (O(nnz) per step). Same equations, update order, fields (without `epoch`) and precision, but
+`syn.W` always holds the current weights and a negative `A_LTP` is allowed. State: `vSTDPDenseVariables`.
 
 # Equations
 With ``V_i`` the postsynaptic potential (`v_post`), ``u_i``, ``v_i`` its low-pass filters,
@@ -366,9 +334,8 @@ With ``V_i`` the postsynaptic potential (`v_post`), ``u_i``, ``v_i`` its low-pas
 \end{aligned}
 ```
 A presynaptic spike increases ``x_j`` by ``1/τ_x`` (units 1/ms) and potentiation is a rate,
-integrated over `dt`; the rule is independent of `dt`, as in Clopath et al. (2010). Note that
-both thresholds of the LTP term are as in the code: the filtered potential ``v`` is compared
-with `θ_LTD`, the instantaneous one with `θ_LTP`.
+integrated over `dt`. The filtered potential ``v`` is compared with `θ_LTD`, the instantaneous
+one with `θ_LTP`.
 
 # Integration
 `plasticity!` (only under `train!`), per step: (1) forward Euler for ``x`` (all presynaptic
@@ -377,14 +344,7 @@ postsynaptic neurons, driven by the current `v_post`), (3) for each presynaptic 
 if ``j`` fired, LTD on its outgoing synapses and clamp at
 `Wmin`; then, whether or not ``j`` fired, the LTP increment `dt * A_LTP * x * ...` on all its
 outgoing synapses and clamp at `Wmax`. At the first call, the voltage traces ``u`` and ``v`` are
-set to the current postsynaptic potential (they are not started at 0 mV).
-
-!!! note "Changed after SNNModels 1.8.4"
-    Up to 1.8.4 a spike increased ``x_j`` by ``dt/τ_x`` and the LTP increment was added per step
-    without `dt`. The two factors cancel, so the weights are unchanged (same values up to
-    rounding); only the scale of the recorded trace `x` changes (it was proportional to `dt`).
-    The voltage traces started at 0 mV, which produced spurious depression during the first
-    ``τ_u`` (about 0.02 of mean weight in 50 ms for a silent AdEx target with 20 Hz input).
+set to the current postsynaptic potential.
 
 # Fields
 - `A_LTD::FT = 8 * 10e-5pA / mV` (= 8e-4): LTD amplitude per mV.
@@ -397,11 +357,6 @@ set to the current postsynaptic potential (they are not started at 0 mV).
 - `Wmax::FT = 30pF`, `Wmin::FT = 0.1pF`: weight bounds.
 - `active::VBT = [true]`: present in the parameter type; activation is controlled by the
   `active` field of `vSTDPDenseVariables` (see `set_LTP!`).
-
-# Precision
-As for `vSTDPParameter`: the synapse converts the rule and its state to the precision of the postsynaptic
-population. In `Float32` the per-step accumulation over 2e5 steps gives a relative error of 1e-5 against a `Float64`
-reference; in `Float64` it agrees with the event-driven rule to about 1e-12.
 
 # References
 Clopath, C., Büsing, L., Vasilaki, E. & Gerstner, W. (2010). Connectivity reflects coding: a

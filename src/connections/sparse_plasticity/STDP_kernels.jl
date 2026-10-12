@@ -19,15 +19,12 @@ Ordering convention, for one call of `plasticity!` at step n (time t_n):
   3. trace increment : x[k] += 1 for every neuron k that fired at t_n
   4. trace decay     : x[k] *= exp(-dt/τ) for every neuron (exact, factor precomputed)
 
-Step 4 is lazy: no pass over the neurons. A trace is stored as `x` together with one
-scalar `scale` per trace type (all pre or all post neurons share it), the value being
-`x[k] * scale`. Decaying by one step multiplies `scale` by the one-step factor; an increment
-of 1 adds `1/scale` to `x[k]`; reads multiply by `scale`. Only when `scale` has fallen below
-`_SCALE_MIN` the stored values are multiplied by it and `scale` is reset to 1 (`_rescale!`,
-one pass every `log(_SCALE_MIN)/log(factor)` steps, about 2000 steps for τ = 20 ms,
-dt = 0.125 ms). `sync_traces!` does that pass on demand, `trace_values` returns the
-current values without changing the state. Direct reads of the stored vectors (`syn.LTPVars.tpre`)
-are NOT the trace values; the recorder reads through `plasticity_value`.
+Lazy traces (step 4 makes no pass over the neurons): a trace is stored as `x` with one scalar
+`scale` per trace type (all pre, or all post neurons), its value being `x[k] * scale`. A step of
+decay multiplies `scale` by the one-step factor; an increment of 1 adds `1/scale` to `x[k]`. When
+`scale` falls below `_SCALE_MIN` the stored values absorb it and `scale` is reset to 1 (`_rescale!`).
+`sync_traces!` does this on demand; `trace_values` and `plasticity_value` read values without
+changing the state. The stored vectors (`syn.LTPVars.tpre`) are not the trace values.
 
 So in 1-2 every trace is read BEFORE the spikes of step n are added: the value read
 at t_n is  sum_{m < n} exp(-(t_n - t_m)/τ)  over the earlier spikes t_m of that
@@ -37,22 +34,14 @@ neuron. A pre and a post spike in the same step do not interact with each other
 `on_pre`/`on_post` code that updates `w` before incrementing the trace.
 
 Cost per step: O(spikes x fan-out) for the weight updates and O(spikes) for the trace
-increments, plus the decay: O(1) per step plus an O(Npre + Npost) rescale every few thousand steps. Only touched
-weights are clamped. Single-threaded (parallelisation is deferred: splitting
-pre-spikes over threads would race on shared postsynaptic rows).
+increments, plus an O(Npre + Npost) rescale every few thousand steps. Only touched weights are
+clamped. The weight passes are threaded by postsynaptic range (see below); trace updates are serial.
 =#
 
-# Stored traces are multiplied by `scale` to give the value; `scale` is kept in [_SCALE_MIN, 1].
-# Larger stored values (up to 1/_SCALE_MIN times the trace) are far from the Float32 limit.
+# `scale` is kept in [_SCALE_MIN, 1]: stored values stay within 1/_SCALE_MIN of the trace, far from the Float32 limit.
 const _SCALE_MIN = 1.0e-6
 
-"""
-    _rescale!(x, s)
-
-Multiply every stored trace by `s` (`x .*= s`). Values below `floatmin(T)` (`T = eltype(x)`) are set to
-zero: subnormal products are about 100 times slower, and a trace of that size changes no weight
-(it is below 1e-38 for `Float32`, 1e-308 for `Float64`).
-"""
+# `x .*= s`, flushing results below `floatmin` to zero (subnormal arithmetic is slow; such a trace changes no weight)
 @inline function _rescale!(x::AbstractVector{T}, s::T) where {T<:AbstractFloat}
     fmin = floatmin(T)
     @inbounds @simd for k in eachindex(x)
@@ -61,13 +50,8 @@ zero: subnormal products are about 100 times slower, and a trace of that size ch
     end
 end
 
-"""
-    _advance_scale!(scale, k, x, factor)
-
-Decay trace type `k` by one step: `scale[k] *= factor` (in `Float64`, so that the chain of the
-products of the `Float32` factor is not rounded at every step). When `scale[k]` falls below
-`_SCALE_MIN` the stored values `x` absorb it (`_rescale!`) and `scale[k]` is reset to 1.
-"""
+# Decay trace type `k` by one step: `scale[k] *= factor`, in Float64 so the product chain is not rounded to Float32
+# every step; below `_SCALE_MIN` the stored values absorb it.
 @inline function _advance_scale!(scale::Vector{Float64}, k::Int, x::AbstractVector{T}, factor::Real) where {T<:AbstractFloat}
     s = scale[k] * Float64(factor)
     if s < _SCALE_MIN
@@ -78,28 +62,14 @@ products of the `Float32` factor is not rounded at every step). When `scale[k]` 
     return nothing
 end
 
-"""
-    _read_scale(scale, k, x) -> eltype(x)
-
-Factor that turns a stored trace `x` of type `k` into its value at the start of this step (the value
-after the decay of the previous step), the one the weight updates read, in the precision of `x`.
-"""
+# factor from stored trace `x` (type `k`) to its value at the start of this step, in the precision of `x`
 @inline _read_scale(scale::Vector{Float64}, k::Int, x::AbstractVector{T}) where {T<:AbstractFloat} = T(scale[k])
 
-"""
-    _write_inc(scale, k, x) -> eltype(x)
-
-Stored amount that adds 1 to the value of a trace `x` of type `k`: `1/scale[k]`.
-"""
+# stored amount that adds 1 to the value of a trace `x` of type `k`
 @inline _write_inc(scale::Vector{Float64}, k::Int, x::AbstractVector{T}) where {T<:AbstractFloat} = T(1.0 / scale[k])
 
-"""
-    _decay_stale(cache, dt, τ...) -> Bool
-
-`true` if the factors in `cache` were computed for other `dt` or `τ...` (always at the first call).
-A rule that finds its cache stale calls `sync_traces!` before the new factors are used, because
-the pending `scale` of its traces was accumulated with the old ones.
-"""
+# Whether `cache` was computed for another `dt` or `τ...` (always at the first call). The caller then runs
+# `sync_traces!` first: the pending `scale` was accumulated with the old factors.
 @inline function _decay_stale(cache::Vector{Float64}, dt, τ::Vararg{Real,N}) where {N}
     hit = cache[1] == dt
     for k in 1:N
@@ -108,14 +78,8 @@ the pending `scale` of its traces was accumulated with the old ones.
     return !hit
 end
 
-"""
-    _decay_factors!(cache, dt, τ...)
-
-The one-step decay factors `exp(-dt/τ)` of the time constants `τ...`, in the precision of `dt` (`Float32(exp(-dt/τ))` for
-a `Float32` step). The factors are
-stored in `cache` (`NaN` initially: `1 + 2N` entries for `N` time constants) together with the
-`dt` and `τ` they were computed for, and `exp` is evaluated only when one of them changes.
-"""
+# One-step factors `exp(-dt/τ)` in the precision of `dt`, cached in `cache` (`1 + 2N` entries: dt, the τs, the
+# factors) and recomputed only when `dt` or a τ changes.
 @inline function _decay_factors!(cache::Vector{Float64}, dt::T, τ::Vararg{Real,N}) where {N,T<:AbstractFloat}
     if _decay_stale(cache, dt, τ...)
         cache[1] = dt
@@ -127,15 +91,7 @@ stored in `cache` (`NaN` initially: `1 + 2N` entries for `N` time constants) tog
     return ntuple(k -> T(cache[1+N+k]), Val(N))
 end
 
-"""
-    _euler_factors!(cache, dt, τ...)
-
-Like `_decay_factors!` for the rules whose traces are integrated by forward Euler
-(`x += -dt x / τ`): the one-step factor is `1 - dt/τ` (kept in `Float64`, not rounded to `Float32`: the
-scale chain is `Float64`) instead of `exp(-dt/τ)`. A trace decayed lazily with this factor follows the
-Euler recursion, so these rules keep their numerics when their traces become lazy. The stale test and
-the cache layout (`1 + 2N` entries) are those of `_decay_factors!`.
-"""
+# As `_decay_factors!` with the forward-Euler factor `1 - dt/τ` (in Float64), for the rules whose traces are Euler-integrated.
 @inline function _euler_factors!(cache::Vector{Float64}, dt, τ::Vararg{Real,N}) where {N}
     if _decay_stale(cache, dt, τ...)
         cache[1] = dt
@@ -161,12 +117,7 @@ Add `a` to the trace of every neuron that fired this step and store its spike ti
     end
 end
 
-"""
-    _spike_increment!(x, last, spikes::AbstractVector{Int32}, t, a = 1)
-
-Same as above for the index list of the neurons that fired (`presynaptic_spikes`,
-`postsynaptic_spikes`): no scan of the whole spike vector.
-"""
+# same, for the index list of the neurons that fired
 @inline function _spike_increment!(x, last, spikes::AbstractVector{Int32}, t::Real, a::Real = one(eltype(x)))
     @inbounds for k in spikes
         x[k] += a
@@ -210,7 +161,7 @@ end
 """
     _pre_spike_pass!(f, W, colptr, I, spikes::AbstractVector{Int32}, Wmin, Wmax)
 
-Same as above, for the index list `spikes` of the presynaptic neurons that fired.
+Same, for the index list of the neurons that fired.
 """
 @inline function _pre_spike_pass!(f::F, W, colptr, I, spikes::AbstractVector{Int32}, Wmin, Wmax) where {F}
     @inbounds for j in spikes
@@ -238,11 +189,7 @@ For each postsynaptic spike i and each incoming synapse s = index[st] (pre j = J
     return nothing
 end
 
-"""
-    _post_spike_pass!(f, W, rowptr, index, J, spikes::AbstractVector{Int32}, Wmin, Wmax)
-
-Same as above, for the index list `spikes` of the postsynaptic neurons that fired.
-"""
+# same, for the index list of the neurons that fired
 @inline function _post_spike_pass!(f::F, W, rowptr, index, J, spikes::AbstractVector{Int32}, Wmin, Wmax) where {F}
     @inbounds for i in spikes
         for st = rowptr[i]:(rowptr[i+1]-1)
@@ -253,12 +200,7 @@ Same as above, for the index list `spikes` of the postsynaptic neurons that fire
     return nothing
 end
 
-"""
-    _pre_spike_add!(f, W, colptr, I, spikes::AbstractVector{Int32})
-
-Presynaptic pass without clamping: `W[s] += f(W[s], I[s], j)` for each spike `j` and each outgoing
-synapse `s`. For the rules that clamp after both passes (`_clamp_touched!`).
-"""
+# pre- and postsynaptic passes without clamping, for the rules that clamp after both passes (`_clamp_touched!`)
 @inline function _pre_spike_add!(f::F, W, colptr, I, spikes::AbstractVector{Int32}) where {F}
     @inbounds for j in spikes
         for s = colptr[j]:(colptr[j+1]-1)
@@ -268,12 +210,6 @@ synapse `s`. For the rules that clamp after both passes (`_clamp_touched!`).
     return nothing
 end
 
-"""
-    _post_spike_add!(f, W, rowptr, index, J, spikes::AbstractVector{Int32})
-
-Postsynaptic pass without clamping: `W[s] += f(W[s], i, J[s])` for each spike `i` and each incoming
-synapse `s = index[st]`.
-"""
 @inline function _post_spike_add!(f::F, W, rowptr, index, J, spikes::AbstractVector{Int32}) where {F}
     @inbounds for i in spikes
         for st = rowptr[i]:(rowptr[i+1]-1)
@@ -284,11 +220,7 @@ synapse `s = index[st]`.
     return nothing
 end
 
-"""
-    _clamp_touched!(W, colptr, rowptr, index, spikes_pre::AbstractVector{Int32}, spikes_post::AbstractVector{Int32}, Wmin, Wmax)
-
-Same as the method with flags, for the index lists of the neurons that fired.
-"""
+# clamp only the synapses of the neurons that fired this step (index lists or flags)
 @inline function _clamp_touched!(W, colptr, rowptr, index, spikes_pre::AbstractVector{Int32},
                                  spikes_post::AbstractVector{Int32}, Wmin, Wmax)
     @inbounds for j in spikes_pre
@@ -305,12 +237,6 @@ Same as the method with flags, for the index lists of the neurons that fired.
     return nothing
 end
 
-"""
-    _clamp_touched!(W, colptr, rowptr, index, fireJ, fireI, Wmin, Wmax)
-
-Clamp only the synapses of neurons that fired this step (used by rules that apply
-both passes before clamping, e.g. STDPMexicanHat and the structured rules).
-"""
 @inline function _clamp_touched!(W, colptr, rowptr, index, fireJ, fireI, Wmin, Wmax)
     @inbounds for j in eachindex(fireJ)
         fireJ[j] || continue
@@ -332,13 +258,10 @@ end
 #=
 Threaded weight passes (partition by postsynaptic range)
 --------------------------------------------------------
-A synapse owns the weights of its entries; chunk `c` (the chunk of the postsynaptic population, see `ChunkPtr`) owns the entries whose post lies
-in its range. For a rule whose weight updates read only traces that are not modified during the passes (all the event-driven rules here), every
-chunk can run both passes on its own entries: the pre-spike pass over the sub-rows `ptr[c, j]:ptr[c+1, j]-1` of the spiking columns
-(`j` in the shared spike list, in order), the post-spike pass over the incoming synapses of the postsynaptic spikes that lie in its range
-(`rowptr`, `index`). A given weight is touched by at most one entry of each pass, and the pre pass precedes the post pass in the chunk as in the
-serial code, so every weight sees the same operations in the same order: bit-identical for any chunking. The trace updates stay serial (they are
-O(spikes)), the shared scales are scalars advanced serially before the fork.
+Chunk `c` of the postsynaptic population (see `ChunkPtr`) owns the entries whose post lies in its range and runs both passes on
+them: pre pass over the sub-rows `ptr[c, j]:ptr[c+1, j]-1`, then post pass over the postsynaptic spikes in its range. Valid
+because the updates read only traces that the passes do not modify; each weight sees the same operations in the same order as
+serially, so results are bit-identical for any chunking. Trace updates stay serial.
 =#
 _chunkptr(::AbstractSparseSynapse) = nothing
 @inline _syn_chunk_ptr(::Nothing, args...) = nothing
@@ -398,8 +321,7 @@ end
 """
     _stdp_passes!(c, f_pre, f_post, spikes_pre, spikes_post, Wmin, Wmax)
 
-The clamped pre-spike pass followed by the clamped post-spike pass (`_pre_spike_pass!`, `_post_spike_pass!`), threaded by postsynaptic range
-when `c` has several chunks and enough work (see `ChunkPtr`). Bit-identical to the serial passes.
+Clamped pre-spike pass, then clamped post-spike pass, threaded by postsynaptic range when there is enough work.
 """
 @inline function _stdp_passes!(c, f_pre::F1, f_post::F2, spikes_pre, spikes_post, Wmin, Wmax) where {F1,F2}
     @unpack rowptr, colptr, I, J, index, W = c

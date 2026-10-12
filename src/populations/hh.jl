@@ -16,18 +16,13 @@ specified as densities times a membrane area of 20000 μm²:
 - `τe::FT = 5ms`, `τi::FT = 10ms`: decay time constants of `ge`, `gi` (ms).
 - `Ee::FT = 0mV`, `Ei::FT = -80mV`: synaptic reversal potentials (mV).
 
-The four area-scaled defaults are computed with the `Float32` unit constants (`um` is not exact in
-`Float32`), so in `Float32` they are 199.99998 pF, 9.999999 nS, 19999.998 nS and 5999.9995 nS (unchanged
-since 1.8); with `FT = Float64` they are the decimal values 200, 10, 20000 and 6000.
-
-`HHParameter <: AbstractPopulationParameter`, so `HH` runs under `sim!` and `train!` (no-op
-`update_traces!`/`plasticity!` fallbacks). Up to SNNModels 1.8.4 `train!` raised a `MethodError`.
+In `Float32` the four area-scaled defaults carry the rounding of the `Float32` unit constants (199.99998 pF,
+...); with `FT = Float64` they are the decimal values 200, 10, 20000 and 6000.
 """
 HHParameter
 
 @snn_kw struct HHParameter{FT = Float32} <: AbstractPopulationParameter
-    # area-scaled values: in Float32 as computed with the Float32 unit constants (199.99998, 9.999999, ...), as before
-    # 1.10; in Float64 the decimal values (200 pF, 10 nS, 20000 nS, 6000 nS), see `_unit_default`
+    # area-scaled values: see `_unit_default`
     Cm::FT = _unit_default(FT, 1uF * cm^(-2) * 20000um^2, 200.0)
     gl::FT = _unit_default(FT, 5e-5siemens * cm^(-2) * 20000um^2, 10.0)
     El::FT = -65mV
@@ -71,8 +66,8 @@ function synaptic_target(
     return g, v_post
 end
 
-# `x^4` of a `Float32`, written out: Base evaluates `Float32 ^ 4` in `Float64` by `power_by_squaring` (an out-of-line call that blocks vectorisation);
-# this is the same arithmetic, `x2 = x * x; x2 * x2` in `Float64`, rounded to `Float32`, hence the same bits.
+# `x^4` written out: Base's `Float32 ^ 4` is an out-of-line call that blocks vectorisation; same arithmetic
+# (squaring in Float64, rounded to Float32), same bits.
 @inline function _pow4(x::Float32)
     y = Float64(x)
     y2 = y * y
@@ -112,29 +107,24 @@ with ``u = v - V_t`` (mV) and rates in 1/ms:
 Forward Euler, sequential: `m`, `n`, `h` are updated first, then ``v`` with the new gating
 variables, then `ge`, `gi` decay. A spike is flagged (`fire[i] = true`) in the step in which
 ``v`` crosses -20 mV upwards (`v_old <= -20mV < v`), so each action potential gives exactly one
-flag. There is no reset and no refractory period. (Up to SNNModels 1.8.4 `fire` was the level
-test `v > -20mV`, true for every step above -20 mV, i.e. several flags per action potential.) A small `dt` (e.g. 0.01-0.05 ms) is needed for stability.
+flag. There is no reset and no refractory period. A small `dt` (e.g. 0.01-0.05 ms) is needed for stability.
 
 # Fields
 - `name::String = "HH"`, `id::String = randstring(12)`, `param::HHParameter = HHParameter()`.
 - `N::Int32 = 100`.
-- `VFT = Vector{Float32}`: type of the state vectors; `VFT = Vector{Float64}` gives a `Float64` population (the parameters
-  follow; see `float_type`).
+- `VFT = Vector{Float32}`: type of the state vectors; `Vector{Float64}` gives a `Float64` population (see `float_type`).
 - `v = El .+ 5(randn(N) .- 1)`: membrane potential (mV).
 - `m = zeros(N)`, `n = zeros(N)`, `h = ones(N)`: gating variables.
 - `ge = (1.5randn(N) .+ 4) .* 10nS`, `gi = (12randn(N) .+ 20) .* 10nS`: synaptic conductances
   (nS), random initial values.
 - `fire::Vector{Bool}`; `I`: external current (pA); `records::Dict`.
-- `spikes::SpikeIndex`: ascending list of the neurons that fired in the step, owned by the population and shared by its
-  connections and recorder (see `spike_index`).
+- `spikes::SpikeIndex`: neurons that fired in the step (see `spike_index`).
 
 # References
-The code links only the Wikipedia page of the Hodgkin-Huxley model. Canonical model:
 Hodgkin A. L., Huxley A. F. (1952). A quantitative description of membrane current and its
 application to conduction and excitation in nerve. J. Physiol. 117:500-544.
 The rate functions and conductance densities above have the Traub-Miles form used in the
-COBAHH benchmark of Brette et al. (2007, J. Comput. Neurosci.); the code does not
-cite this source.
+COBAHH benchmark of Brette et al. (2007, J. Comput. Neurosci.).
 
 # Example
 ```julia
@@ -150,12 +140,12 @@ SNN.sim!([E]; duration = 50ms, dt = 0.01ms)
 HH
 
 function integrate!(p::HH, param::HHParameter, dt_::AbstractFloat)
-    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
+    dt = _step_dt(p, dt_)   # in the precision of the population
     @unpack N, v, m, n, h, ge, gi, fire, I = p
     @unpack Cm, gl, El, Ek, En, gn, gk, Vt, τe, τi, Ee, Ei = param
     _check_state_lengths(N, v, m, n, h, ge, gi, fire, I)
     T = eltype(v)    # literals in the precision of the state (`T(0.32) === 0.32f0` in Float32)
-    # `@inline exp`: the exponentials are inlined so that the loop vectorises (same bits as the `exp` call)
+    # `@inline exp` so that the loop vectorises
     @inbounds @simd for i = 1:N
         v_old = v[i]
         m[i] +=

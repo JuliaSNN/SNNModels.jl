@@ -36,9 +36,8 @@ by 1 at a spike:
 # Integration
 `plasticity!` (only under `train!`): (1) pre-spike pass, (2) post-spike pass, both reading
 the traces before this step's spikes are added; (3) forward-Euler decay of all traces (factor
-`1 - dt/τ`), then +1 for the neurons that fired (the traces are stored lazily, one scale per trace type and
-no pass over the neurons: the stored vectors are not the values, read them with `trace_values`); (4) clamp to `[Wmin, Wmax]` of the touched weights (all
-weights once at the first step).
+`1 - dt/τ`), then +1 for the neurons that fired (stored lazily, see `STDPStructuredVariables`); (4) clamp
+to `[Wmin, Wmax]` of the touched weights (all weights once at the first step).
 
 # Fields
 - `A_x::FT = 3e-2`: amplitude of the narrow (potentiating) kernel.
@@ -135,9 +134,8 @@ Traces of `STDPSymmetric` / `STDPAntiSymmetric`: `to_x`, `to_y` are postsynaptic
 clamp of all weights; `active` enables the rule.
 
 !!! warning "The stored traces are not the trace values"
-    The Euler decay is lazy: the value of `to_x` is `to_x * scale[1]`, of `to_y` `to_y * scale[2]`,
-    of `tr_x` `tr_x * scale[3]`, of `tr_y` `tr_y * scale[4]`; `decay` caches `dt`, `τ_x`, `τ_y` and their
-    factors `1 - dt/τ`. Read values with `trace_values(syn, :to_x)`, `sync_traces!(syn)` first, or the recorder.
+    As for `STDPVariables`: the value of `to_x`, `to_y`, `tr_x`, `tr_y` is the stored vector times
+    `scale[1:4]`. Read values with [`trace_values`](@ref) or call [`sync_traces!`](@ref) first.
 """
 STDPStructuredVariables
 
@@ -179,10 +177,8 @@ lazy_variables(::STDPStructuredVariables) = (:to_x, :to_y, :tr_x, :tr_y)
 
 current_value(v::STDPStructuredVariables, param, key::Symbol, t::Real) = trace_values(v, key)
 
-# Euler traces (x <- x (1 - dt/τ), then +1 for the spikes of the step, AFTER the weight passes: the passes read the
-# traces of the previous step, spikes included). Stored lazily, with the Euler factor `1 - dt/τ` as the per-step
-# factor of the scale. Order inside one trace type: decay first (`_advance_scale!`), then the increment
-# `1/scale` (value `x f + 1`), unlike the exponential pair rules.
+# Euler traces: decay by `1 - dt/τ`, then +1 for the spikes of the step, both AFTER the weight passes (value `x f + 1`,
+# unlike the exponential pair rules).
 @inline function _structured_prepare!(plasticity::STDPStructuredVariables, dt::AbstractFloat, τ_x, τ_y)
     # a new dt or τ: bring the stored traces to their values before the factors change
     _decay_stale(plasticity.decay, dt, τ_x, τ_y) && sync_traces!(plasticity)
@@ -195,8 +191,7 @@ end
     @unpack initialized, scale = plasticity
     spikes_pre, spikes_post = presynaptic_spikes(c), postsynaptic_spikes(c)
     _initial_clamp!(W, initialized, Wmin, Wmax)
-    # weight passes: traces of the previous step (value = stored * scale), no clamp between the passes
-    # (the clamp of the touched weights, which follows the trace update in the serial code, does not read the traces: it is done with the passes)
+    # weight passes on the traces of the previous step; the clamp does not read the traces, so it is done with the passes
     _add_passes!(c, f_pre, f_post, spikes_pre, spikes_post, Wmin, Wmax)
     # decay, then +1 for this step's spikes
     for (x, k, spikes, f) in traces

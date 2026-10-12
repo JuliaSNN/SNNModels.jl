@@ -193,13 +193,9 @@ State of the Markram STP rules, one entry per presynaptic neuron. Created by
 
 !!! warning "Stored `u` and `x` are the values at the last spike"
     With the event-driven rules (`MarkramSTPParameterEvent`, `MarkramSTPParameterHet`) `u` and `x` are
-    updated only when the presynaptic neuron spikes (right after the spike: ``u^+`` and the depleted
-    ``x``); between spikes they are NOT relaxed. Their value at time `t` is
-    `U - (U - u) exp(-(t - last_spike)/τF)` and `1 - (1 - x) exp(-(t - last_spike)/τD)`. Direct access
-    (`syn.STPVars.u`) returns the stored values; use `plasticity_value(syn, :STPVars, :u, t)`
-    (state unchanged). `monitor!(syn, [:u, :x], :STPVars)` records the values at the sampling time.
-    `_ρ` and `last_spike` are event quantities and are exact as stored. `MarkramSTPParameterTimestep`
-    relaxes `u` and `x` at every step, so its stored values are the values.
+    updated only at a presynaptic spike (to ``u^+`` and the depleted ``x``). Their value at time `t` is
+    `U - (U - u) exp(-(t - last_spike)/τF)` and `1 - (1 - x) exp(-(t - last_spike)/τD)`; read it with
+    `plasticity_value(syn, :STPVars, :u, t)`. `MarkramSTPParameterTimestep` stores the values.
 - `active`: the rule is applied only if `any(active)`; see `set_STP!`.
 """
 MarkramSTPVariables
@@ -226,8 +222,7 @@ end
 
 lazy_variables(::MarkramSTPVariables) = (:u, :x)
 
-# Values of the event-updated variables at time t: exact relaxation from the last spike of each neuron
-# (the same expression as in update_traces!); U, τF, τD are scalars or vectors over the presynaptic neurons.
+# value at time t of the event-updated u, x: relaxation from the last spike (U, τF, τD scalars or per-neuron vectors)
 function current_value(v::MarkramSTPVariables, param::AbstractMarkramSTPParameterEvent, key::Symbol, t::Real)
     key === :u && return _relax_event(v.u, v.last_spike, param.U, param.τF, t)
     key === :x && return _relax_event(v.x, v.last_spike, one(eltype(v.x)), param.τD, t)
@@ -239,9 +234,8 @@ current_value(v::MarkramSTPVariables, param::MarkramSTPParameterTimestep, key::S
 _relax_event(y, last_spike, target, τ, t::Real) =
     target .- (target .- y) .* exp.(-max.(t .- last_spike, zero(eltype(y))) ./ τ)
 
-# Efficacy of the synapses of the neurons that spiked: `ρ[s] = _ρ[j]` for every outgoing synapse `s` of each spiking `j`. The per-neuron
-# state (`u`, `x`, `_ρ`) is updated once, serially, by the callers (it is per presynaptic neuron and O(spikes)); this fan-out copy is
-# partitioned by postsynaptic range like `forward!`, so the chunk that reads `ρ[s]` in `forward!` is the one that wrote it.
+# `ρ[s] = _ρ[j]` for every outgoing synapse of each spiking `j`, partitioned by postsynaptic range like `forward!`
+# (the per-neuron state is updated serially by the callers).
 function _set_efficacy!(c, spikes, _ρ)
     @unpack colptr, I, ρ = c
     Npost = length(c.fireI)
@@ -285,7 +279,6 @@ function update_traces!(
     for j in presynaptic_spikes(c) # Iterate over the presynaptic neurons that fired
         ΔT = tnow > variables.last_spike[j] ? tnow - variables.last_spike[j] : zero(FT)
         variables.last_spike[j] = tnow
-        # update u and x based on time since last spike
         # relax u and x over the interval since the previous spike (exact solution)
         u[j] = U - (U - u[j]) * exp(-ΔT / τF)
         x[j] = 1 - (1 - x[j]) * exp(-ΔT / τD)
@@ -315,7 +308,6 @@ function update_traces!(
     for j in presynaptic_spikes(c) # Iterate over the presynaptic neurons that fired
         ΔT = tnow > variables.last_spike[j] ? tnow - variables.last_spike[j] : zero(FT)
         variables.last_spike[j] = tnow
-        # update u and x based on time since last spike
         # relax u and x over the interval since the previous spike (exact solution)
         u[j] = U[j] - (U[j] - u[j]) * exp(-ΔT / τF[j])
         x[j] = 1 - (1 - x[j]) * exp(-ΔT / τD[j])

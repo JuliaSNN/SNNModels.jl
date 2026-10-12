@@ -19,24 +19,18 @@ For each neuron, per step: `h += g`; `spikecount = g` if `g > 0` (else 0); `fire
 then `g = 0`.
 
 # Sparse update
-If every component that writes `g` (every connection or stimulus built with the population as
-target, counted in `nwriters`) is a [`SpikeTimeStimulus`](@ref), which logs the neurons it writes
-(`inbox`, see `attach_driver!`), `integrate!` visits only those neurons and the neurons that fired
-in the previous step, instead of all `N`. The result is the same, value for value. `fire` is
-still a complete `Bool` vector (set at the neurons that fire, cleared at the ones that fired
-last step), and `spikes` holds the ascending index list of the neurons that fire. Connections
-built with the population as `pre` (or `post`) share `spikes` as their `SpikeIndex`, so they
-never scan `fire`. With any other writer (a connection, a stimulus without a log), or after more
-writes than neurons in a step, the update is dense. Do not write `g`, `fire` or `h` of such a
-population by hand; if a connection was redirected to another target vector after its construction,
-call [`release_input!`](@ref) so that it no longer counts as a writer.
+If every component that writes `g` (counted in `nwriters`) is a stimulus that logs the neurons it
+writes (`SpikeTimeStimulus`, the Poisson stimuli; see `attach_driver!`), `integrate!` visits only those neurons and the
+neurons that fired in the previous step, with the same result as the dense update, and feeds the
+spike list `spikes` that its connections share. Any other writer, or more writes than neurons in a
+step, makes the update dense. Do not write `g`, `fire` or `h` of such a population by hand; if a
+connection was redirected to another target vector after construction, call [`release_input!`](@ref).
 
 # Fields
 - `name::String = "identity"`, `id::String = randstring(12)`, `param::IdentityParam`.
 - `N::Int32 = 100`.
 - `g::VFT`: input received in the current step (summed synaptic weights), reset
-  each step. `VFT = Vector{Float32}` by default; `Identity(N = 10, VFT = Vector{Float64})` is a `Float64`
-  population, and every connection and stimulus built on it is `Float64` (see `float_type`).
+  each step. `VFT = Vector{Float64}` gives a `Float64` population (see `float_type`).
 - `spikecount::VFT`: input of the last step for neurons that fired (0 otherwise).
 - `h::VFT`: cumulative input since construction.
 - `fire::Vector{Bool}`; `records::Dict`.
@@ -76,7 +70,7 @@ end
 @inline _list_driven(p::Identity) = p.ndrivers > 0 && p.ndrivers == p.nwriters
 
 function integrate!(p::Identity, param::IdentityParam, dt_::AbstractFloat)
-    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
+    dt = _step_dt(p, dt_)   # in the precision of the population
     driven = _list_driven(p)
     if driven && p.tracked && p.inbox.n <= length(p.inbox.idx)
         _integrate_sparse!(p)
@@ -99,7 +93,7 @@ function _integrate_dense!(p::Identity)
     z = zero(eltype(spikecount))
     (length(h) == n && length(fire) == n && length(spikecount) == n) ||
         throw(DimensionMismatch("Identity state vectors must have the same length"))
-    # branchless: the neuron fires on any positive input, spikecount is that input; per neuron, so it runs in chunks (`foreach_chunk`)
+    # branchless: the neuron fires on any positive input, spikecount is that input
     foreach_chunk(n) do rng
         @inbounds @simd for i in rng
             gi = g[i]
@@ -112,9 +106,8 @@ function _integrate_dense!(p::Identity)
     end
 end
 
-# Same update as the dense loop, only at the neurons that can have input (`inbox`) and at the
-# neurons that fired in the last step (cleared). A neuron listed twice is processed once: its
-# input is zeroed by the first visit.
+# The dense update restricted to the logged neurons (`inbox`) and those that fired last step. A neuron
+# logged twice is processed once: its input is zeroed by the first visit.
 function _integrate_sparse!(p::Identity)
     @unpack g, h, fire, spikecount, spikes, inbox = p
     idx = spikes.idx
@@ -154,12 +147,9 @@ attach_driver!(p::Identity) = (p.ndrivers += 1; p.inbox)
 """
     release_input!(p::Identity)
 
-Declare that a component built with `p` as target no longer writes to `p.g`, for instance because
-the `g` of a connection was replaced by another vector after construction. Every construction of a
-connection or stimulus with `p` as target counts as a writer (`synaptic_target`), and `p` can use
-its sparse update only while all its writers are stimuli that log their writes; this removes one
-writer from the count. Calling it for a component that still writes to `p.g` makes `p` miss
-that input.
+Declare that one component built with `p` as target no longer writes to `p.g` (e.g. the `g` of a
+connection was replaced after construction), removing it from the writer count of the sparse update.
+Calling it for a component that still writes to `p.g` makes `p` miss that input.
 """
 release_input!(p::Identity) = (p.nwriters = max(p.nwriters - 1, 0); p)
 spike_index(p::Identity) = p.spikes

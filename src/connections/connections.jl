@@ -70,9 +70,8 @@ abstract type AbstractSpikingSynapse <: AbstractSparseSynapse end
     prepare_spikes!(c::AbstractConnection)
     release_spikes!(c::AbstractConnection)
 
-Called by `train!` and `sim!` around the update of every connection: `prepare_spikes!` lets
-the connection reuse one index list of the spiking neurons for all its consumers during the
-step, `release_spikes!` drops it. No-op for connections without spike index lists.
+Called by `train!` and `sim!` around the update of every connection: between the two calls the
+connection's spike index lists are reused by all its consumers. No-op for connections without them.
 """
 prepare_spikes!(c::AbstractConnection) = nothing
 release_spikes!(c::AbstractConnection) = nothing
@@ -125,13 +124,10 @@ Connectivity = Union{NamedTuple,AbstractMatrix}
 """
     convert_precision(x, ::Type{T})
 
-Copy of the parameter object `x` (a plasticity rule, a metaplasticity parameter, a stimulus parameter, ...) with its floating
-point fields and type parameters converted to `T`; `x` itself if it already has type `T`. Used by the connection and
-stimulus constructors to bring a rule to the precision of the population it acts on, so a rule built with the default
-`Float32` parameters works on a `Float64` population (the values are those of the `Float32` numbers: build the rule with
-`FT = Float64`, for example `STDPGerstner(FT = Float64, A_pre = 1e-4)`, to have the `Float64` values) and a `Float64`
-rule on a `Float32` population is rounded to `Float32`. Fields that are not floating point (flags, integers) are kept
-(shared, not copied).
+Copy of the parameter object `x` (plasticity rule, metaplasticity or stimulus parameter, ...) with its floating-point
+fields and type parameters converted to `T`; `x` itself if nothing changes. Other fields are shared, not copied. Used by
+the connection and stimulus constructors. A `Float32` rule converted to `Float64` keeps the `Float32` values: build it
+with `FT = Float64` (e.g. `STDPGerstner(FT = Float64, A_pre = 1e-4)`) for exact `Float64` values.
 """
 convert_precision(x, ::Type{T}) where {T<:AbstractFloat} = x
 function convert_precision(x::P, ::Type{T}) where {P<:Union{AbstractParameter,PlasticityParameter},T<:AbstractFloat}

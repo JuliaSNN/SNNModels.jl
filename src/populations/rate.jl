@@ -24,23 +24,18 @@ with ``t`` in ms, i.e. the time constant is fixed to 1 ms. ``g`` is the input wr
 Forward Euler, `x += dt * (-x + g + I)`, then `r = tanh(x)`, then `g` is set to zero: ``g`` is
 the synaptic input of one step, written by the connections after the population update
 (`RateSynapse` adds ``W r``, the FORCE connections overwrite it). Use `I` for a constant input.
-Since populations are recorded right after their update, a recorded `:g` is zero: record `:x`
-or `:r` instead.
-Up to SNNModels 1.8.4 `g` was never reset, so with a `RateSynapse` it was the running sum of all
-past inputs.
-
-The population has no `fire` field, so only `:x`, `:r`, `:g` can be recorded (`:g` is zero when
-recorded, see above).
+The population has no `fire` field, so only `:x`, `:r`, `:g` can be recorded; populations are
+recorded right after their update, so a recorded `:g` is zero.
 
 # Fields
 - `id::String = randstring(12)`, `name::String = "Rate"`, `param::RateParameter = RateParameter()`.
 - `N::Int32 = 100`.
-- `VFT = Vector{Float32}`: type of the state vectors; `VFT = Vector{Float64}` gives a `Float64` population (see `float_type`).
-- `x::Vector{Float32} = 0.5randn(N)`: internal state.
-- `r::Vector{Float32} = tanh.(x)`: output rate, in ``(-1, 1)``.
-- `g::Vector{Float32}`: synaptic input, zeros; the target of `RateSynapse` (any target symbol
+- `VFT = Vector{Float32}`: type of the state vectors; `Vector{Float64}` gives a `Float64` population (see `float_type`).
+- `x::VFT = 0.5randn(N)`: internal state.
+- `r::VFT = tanh.(x)`: output rate, in ``(-1, 1)``.
+- `g::VFT`: synaptic input, zeros; the target of `RateSynapse` (any target symbol
   is mapped to `:g`).
-- `I::Vector{Float32}`: external input, zeros.
+- `I::VFT`: external input, zeros.
 - `records::Dict`.
 
 # References
@@ -84,16 +79,16 @@ function synaptic_target(
 end
 
 """
-    integrate!(p::Rate, param::RateParameter, dt::Float32)
+    integrate!(p::Rate, param::RateParameter, dt)
 
 One forward-Euler step of the rate units: `x += dt * (-x + g + I)`, `r = tanh(x)`, then
 `g = 0` (see `Rate`).
 """
 function integrate!(p::Rate, param::RateParameter, dt_::AbstractFloat)
-    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
+    dt = _step_dt(p, dt_)   # in the precision of the population
     @unpack N, x, r, g, I = p
     _check_state_lengths(N, x, r, g, I)
-    # `_tanh_inl`: the bits of `tanh`, with the exponential inlined so that the loop vectorises
+    # `_tanh_inl`: the bits of `tanh`, inlined so that the loop vectorises
     @inbounds @simd for i = 1:N
         xi = x[i] + dt * (-x[i] + g[i] + I[i])
         x[i] = xi

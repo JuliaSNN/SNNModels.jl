@@ -59,7 +59,7 @@ SNNModels.exp64(-1.0f0)   # 0.3650, exp(-1) = 0.3679
     x *= x
     return x
 end
-# other real arguments (integers, rationals): in Float32, as `Float32` arithmetic did before 1.10
+# other real arguments (integers, rationals) are computed in Float32
 @inline exp64(x::Real) = exp64(Float32(x))
 
 """
@@ -85,9 +85,8 @@ Inputs below `-10` are replaced by `-256`, so that the result is exactly `0`.
     return x
 end
 
-# `tanh` and `cosh` of a `Float32` with the `exp` call inlined. They are the algorithms of `Base.tanh` / `Base.cosh`
-# (same constants, same operations, so the same bits for every argument: see test/utils/inline_math_test.jl), but because
-# the exponential is inlined a loop that uses them vectorises (`@simd`); the `Base` functions call an out-of-line `exp`.
+# `Base.tanh` / `Base.cosh` of a `Float32` (same algorithm, same bits) with `exp` inlined, so that loops using them
+# vectorise; the `Base` functions call an out-of-line `exp`.
 @inline function _tanh_inl(x::Float32)
     abs2x = abs(2x)
     abs2x >= Base.Math.TANH_LARGE_X(Float32) && return copysign(one(Float32), x)
@@ -162,10 +161,8 @@ str_name(pre::String, k = nothing) = isnothing(k) ? "$pre" : "$(pre)_$(k)"
 """
     sorted_ntuple(d::AbstractDict; by = identity)
 
-`NamedTuple` with the entries of `d` ordered by `sort(keys; by)` (the function `by` is applied to
-the keys). `String` keys are converted to `Symbol`. Same result as
-`DrWatson.dict2ntuple(sort(d; by))` with OrderedCollections 1.x, which provided `sort(::Dict)`;
-OrderedCollections 2 removed that method.
+`NamedTuple` with the entries of `d` ordered by `sort(keys; by)`; `String` keys become `Symbol`s.
+Replaces `DrWatson.dict2ntuple(sort(d; by))`: OrderedCollections 2 removed `sort(::Dict)`.
 """
 function sorted_ntuple(d::AbstractDict; by = identity)
     ks = sort!(collect(keys(d)); by = by)
@@ -190,12 +187,12 @@ Returns the `NamedTuple` `(pop = ..., syn = ..., stim = ..., name = name, time =
   into without prefixing and the key `:name` is skipped.
 - `name`: model name (default: random 10-character string).
 - `silent = false`: if `false`, print the model summary with `print_model`.
-- `time = nothing`: the simulation clock of the new model; by default a new `Time{FT}()` where `FT` is the promotion of the `float_type`s of the populations (`Float32` unless a population is `Float64`). The clocks of merged models are
-  not reused: pass `time = model.time` to keep one.
+- `time = nothing`: the clock of the new model; by default a new `Time{FT}()` with `FT` the promotion of the `float_type`s
+  of the populations. The clocks of merged models are not reused: pass `time = model.time` to keep one.
 
 Components are classified by type (`AbstractPopulation`, `AbstractConnection`,
-`AbstractStimulus` or `AbstractStimulusGroup`); duplicated keys raise an `AssertionError` that names the key and the container that collided
-(to replace a synapse of an existing model use [`change_plasticity`](@ref), not `compose(; model..., EE = new)`).
+`AbstractStimulus` or `AbstractStimulusGroup`); a duplicated key is an `AssertionError` (to replace a synapse of an
+existing model use [`change_plasticity`](@ref)).
 `pop` and `syn` are sorted by key, `stim` by the stimuli `name`.
 
 # Example
@@ -356,8 +353,7 @@ function print_model(model, get_keys = false)
     @info "================"
 end
 
-# Message of the duplicate-key assertion of `extract_items`: `key` is the colliding key and `root` the argument of
-# `compose` (keyword name, empty for a positional argument) whose container delivered the second component.
+# Message of the duplicate-key assertion of `extract_items` (`root`: the `compose` keyword that delivered `key`, empty if positional).
 function _dup_msg(kind, key, root)
     where = isempty(String(root)) ? "a positional argument of `compose`" : "the container `$(root)` given to `compose`"
     hint = kind == "synapse" ?
@@ -488,24 +484,13 @@ end
     change_plasticity(model, syn_name::Symbol; LTP = nothing, STP = nothing)
 
 A new model in which the synapse `syn_name` is replaced by `with_plasticity(model.syn[syn_name]; LTP, STP)` (see
-[`with_plasticity`](@ref)). A rule left to `nothing` is kept, `NoLTP()` / `NoSTP()` switch that part off, and
-`LTP = NoLTP(), STP = NoSTP()` is `without_plasticity`. The populations, the other synapses, the stimuli, the `name` and
-the clock `time` of the result are the same objects as in `model`, in the same order; the new synapse refers to the same
-pre- and postsynaptic populations as the old one. `model` is not modified, and is still a valid model.
+[`with_plasticity`](@ref)): a rule left to `nothing` is kept, `NoLTP()` / `NoSTP()` switch that part off. Everything
+else in the result is the same object as in `model`, which is not modified. The rule types are type parameters of the
+synapse, so there is no in-place model-level variant.
 
-The synapse type depends on its rules (they are type parameters of `SpikingSynapse`, fields are concretely typed), so the
-synapse cannot be changed in place and there is no model-level `change_plasticity!` (the in-place `change_plasticity!(syn; ...)`
-of a synapse only replaces a rule by one of the same type).
-
-`compose(; model..., EE = new)` cannot do this replacement: `model` already holds `EE` and `compose` raises a duplicate-key
-error. `change_plasticity` replaces the entry instead.
-
-# Shared structure
-The new synapse shares `W`, the connectivity (`colptr`, `rowptr`, `I`), the delay queue, the records and, for a kept
-rule, its state with the old one. The old and the new synapse must be treated as desynchronised from the start: simulate
-only the new model, and do not use `model` again (or `deepcopy(model)` first). A `SynapseNormalization` or
-`AggregateScaling` in the model keeps acting on the old synapse. See [`with_plasticity`](@ref) for what is shared and for the
-records.
+The new synapse shares `W`, the connectivity, the delay queue, the records and any kept rule state with the old one:
+simulate only the new model (or `deepcopy(model)` first). A `SynapseNormalization` or `AggregateScaling` in the model keeps
+acting on the old synapse.
 
 # Throws
 `ArgumentError` if `syn_name` is not a synapse of the model; the message lists the available names.

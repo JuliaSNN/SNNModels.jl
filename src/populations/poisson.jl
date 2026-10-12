@@ -73,24 +73,19 @@ the Bernoulli approximation of a Poisson process of rate ``\nu_i`` (accurate whe
 (heterogeneous).
 
 # Integration
-The spikes are sampled sparsely, without one random number per neuron and step: the index gap to the next
-firing neuron of the Bernoulli(`rate * dt`) sequence is drawn from the geometric distribution (homogeneous rate), or
-candidates are generated with the largest probability of the population and thinned (heterogeneous rates), so that a step
-costs one random draw per spike (see `PoissonStimulusLayer`). Probabilities and independence are those above; the random
-number stream differs from SNNModels 1.9 (and so do seeded results). When the largest per-step probability exceeds 3 % (rates
-above 300 Hz at `dt = 0.1 ms`) skipping is slower than testing every neuron, and the step uses one vectorised uniform draw per neuron
-(`rand!(randcache)`, then `fire[i] = randcache[i] < rate * dt`) as SNNModels 1.9 did. `fire` holds the spikes of the last step and
-`spikes` the ascending list of the neurons that fired, which connections read instead of scanning `fire`.
+Spikes are sampled sparsely, with one random draw per spike: the gap to the next firing neuron is drawn from the
+geometric distribution (homogeneous rate), or candidates drawn at the largest probability are thinned (heterogeneous
+rates). When the largest per-step probability is at least 3 % (`_POP_DENSE_SPIKE_P`), every neuron is tested against
+one uniform draw (`randcache`) instead. `spikes` holds the ascending list of the neurons that fired (sparse regime only).
 
 # Fields
 - `id::String = randstring(12)`, `name::String = "Poisson"`.
 - `param::PoissonParameter = PoissonHomoParameter()` (1 Hz).
-- `N::Int32 = 100`; `randcache::VFT` (used only in the dense regime); `VFT = Vector{Float32}` by default, `VFT = Vector{Float64}` gives a
-  `Float64` population (rates and probabilities in `Float64`, the default `param` follows; see `float_type`); `fire::Vector{Bool}`; `spikes::SpikeIndex` (list of the
-  neurons that fired, fed by `integrate!`); `records::Dict`.
+- `N::Int32 = 100`; `randcache::VFT` (dense regime only); `VFT = Vector{Float64}` gives a `Float64` population
+  (see `float_type`); `fire::Vector{Bool}`; `spikes::SpikeIndex`; `records::Dict`.
 
 # References
-[Poisson model of spike generation (D. Heeger, handout)](https://www.cns.nyu.edu/~david/handouts/poisson.pdf), linked in the code.
+[Poisson model of spike generation (D. Heeger, handout)](https://www.cns.nyu.edu/~david/handouts/poisson.pdf).
 
 # Example
 ```julia
@@ -105,10 +100,9 @@ SNN.firing_rate(P; interval = 0:10ms:1s)
 """
 Poisson
 
-# ---- sparse sampling of the spikes of a population (shared by Poisson, InhomogeneousPoisson and VariablePoisson)
+# ---- sparse sampling of the spikes of a population (Poisson, InhomogeneousPoisson, VariablePoisson)
 
-# Above this per-step probability testing every neuron (one vectorised uniform draw each) is cheaper than geometric skipping
-# (about 0.5 ns per neuron against 15 ns per spike at one core; measured crossover 3 %).
+# From this per-step probability on, testing every neuron is cheaper than geometric skipping.
 const _POP_DENSE_SPIKE_P = 0.03
 
 # Neuron `j` fires: flag it and append it to the (ascending) list.
@@ -131,9 +125,8 @@ end
     return nothing
 end
 
-# Dense regime: every neuron is tested against its probability `pj(j)` (type of the cache) with one uniform number of `cache` (freshly drawn), as in
-# SNNModels 1.9. Only `fire` is written: the list is not built and not offered (`fed = false`), so the connections scan `fire` themselves
-# (`spike_list!`), as they did before the sparse sampling.
+# Dense regime: every neuron is tested against its probability `pj(j)` with a fresh uniform number of `cache`. Only `fire` is
+# written; the list is not fed (`fed = false`), so the connections scan `fire`.
 function _pop_dense!(pj::F, fire, spikes::SpikeIndex, cache::AbstractVector{<:AbstractFloat}, N::Int) where {F}
     (length(cache) >= N && length(fire) >= N) ||
         throw(DimensionMismatch("random cache or flags shorter than N = $N"))
@@ -147,8 +140,7 @@ function _pop_dense!(pj::F, fire, spikes::SpikeIndex, cache::AbstractVector{<:Ab
     return nothing
 end
 
-# Entering (or staying in) the sparse regime: the list is fed again. After a dense step the flags are not described by the list,
-# so all of them are cleared; otherwise only those set in the previous step are.
+# Enter or stay in the sparse regime: clear the previous flags (all of them after a dense step) and feed the list.
 @inline function _pop_sparse_start!(fire::AbstractVector{Bool}, spikes::SpikeIndex)
     if spikes.fed
         _pop_clear!(fire, spikes)
@@ -193,7 +185,7 @@ function _pop_thinned!(pj::F, fire, spikes::SpikeIndex, N::Int, pmax::Float64) w
 end
 
 function integrate!(p::Poisson, param::PoissonHomoParameter , dt_::AbstractFloat)
-    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
+    dt = _step_dt(p, dt_)   # in the precision of the population
     @unpack N, fire, spikes, randcache = p
     pr = Float64(param.rate * dt)
     if pr >= _POP_DENSE_SPIKE_P
@@ -207,14 +199,14 @@ function integrate!(p::Poisson, param::PoissonHomoParameter , dt_::AbstractFloat
 end
 
 function integrate!(p::Poisson, param::PoissonHetParameter , dt_::AbstractFloat)
-    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
+    dt = _step_dt(p, dt_)   # in the precision of the population
     @unpack N, fire, spikes, randcache = p
     @unpack rate = param
     length(rate) >= N || throw(DimensionMismatch("the rate vector has $(length(rate)) entries for N = $N neurons"))
     n = Int(N)
     if !spikes.fed
-        # dense regime of the last step: stay dense and read the largest probability in the pass that tests the neurons, so the
-        # high-rate step costs no more than SNNModels 1.9; when the rates dropped, resume the sparse sampling next step
+        # dense regime of the last step: stay dense and get the largest probability in the same pass; when it drops below the
+        # threshold, resume the sparse sampling next step
         length(randcache) >= n && length(fire) >= n || throw(DimensionMismatch("random cache or flags shorter than N = $N"))
         rand!(randcache)
         pm = zero(eltype(randcache))
@@ -290,17 +282,13 @@ total rate ``\nu``:
 and each neuron fires with probability ``\nu\, dt / N``, so ``\nu`` is the rate of the whole
 population. With ``\beta = 0`` the slow feedback on ``\rho`` (initialised to ``r_0``) drives
 ``\nu`` to ``r_0``. Note the discontinuity of ``F`` at 0 (values of ``\beta\eta`` in ``(0, 1)``
-reduce the rate below the ``\beta\eta \le 0`` value); this is how the code is written.
+reduce the rate below the ``\beta\eta \le 0`` value).
 
 # Fields
 - `id`, `param`, `name = "VariablePoisson"`, `N::Int32 = 100`, `fire`.
 - `noise::VFT` (length 1): ``\eta``; `r::VFT` (length 1): ``\rho``; `Erate::VFT` (length 1): the total rate ``\nu`` of the last step.
-  `VFT = Vector{Float32}` by default; `VFT = Vector{Float64}` with `param = VariablePoissonParameter(FT = Float64)` gives a `Float64`
-  population (see `float_type`).
-- `spikes::SpikeIndex`: the ascending list of the neurons that fired in the last step (fed by `integrate!`);
-  `randcache` (dense regime only); `records::Dict`. The spikes are sampled sparsely (see `Poisson`).
-
-Reference not given in the code.
+  `VFT = Vector{Float64}` with `param = VariablePoissonParameter(FT = Float64)` gives a `Float64` population.
+- `spikes::SpikeIndex`, `randcache`, `records::Dict`. The spikes are sampled as in `Poisson`.
 
 # Example
 ```julia
@@ -331,7 +319,7 @@ end
 
 
 function integrate!(p::VariablePoisson, param::VariablePoissonParameter, dt_::AbstractFloat)
-    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
+    dt = _step_dt(p, dt_)   # in the precision of the population
     @unpack N, fire, spikes, randcache = p
 
     ## Inhomogeneous Poisson process
@@ -340,7 +328,7 @@ function integrate!(p::VariablePoisson, param::VariablePoissonParameter, dt_::Ab
     FT = eltype(noise)
     R(x, v0 = zero(x)) = x > zero(x) ? x : v0
 
-    re = convert(FT, rand() - 0.5f0)    # the Float64 draw of SNNModels <= 1.9, rounded to the state type
+    re = convert(FT, rand() - 0.5f0)    # Float64 draw rounded to the state type
     cc = convert(FT, one(FT) - dt / τ)
     i = 1
     noise[i] = (noise[i] - re) * cc + re

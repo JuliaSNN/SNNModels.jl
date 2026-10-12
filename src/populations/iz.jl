@@ -65,16 +65,14 @@ finally spikes are detected (`v > 30`) and reset. No refractory period.
 # Fields
 - `id::String = randstring(12)`, `name::String = "IZ"`, `param::IZParameter = IZParameter()`.
 - `N::Int32 = 100`.
-- `VFT = Vector{Float32}`: type of the state vectors; `VFT = Vector{Float64}` gives a `Float64` population (the parameters
-  follow; see `float_type`).
-- `v::Vector{Float32} = fill(-65, N)`: membrane potential (mV).
-- `u::Vector{Float32} = param.b * v`: recovery variable.
-- `fire::Vector{Bool}`; `I::Vector{Float32}`: external input (mV/ms), zeros.
-- `spikes::SpikeIndex`: ascending list of the neurons that fired in the step, owned by the population and shared by its
-  connections and recorder (see `spike_index`).
-- `ge::Vector{Float32} = (1.5randn(N) .+ 4) .* 10nS`: excitatory conductance, random initial
+- `VFT = Vector{Float32}`: type of the state vectors; `Vector{Float64}` gives a `Float64` population (see `float_type`).
+- `v::VFT = fill(-65, N)`: membrane potential (mV).
+- `u::VFT = param.b * v`: recovery variable.
+- `fire::Vector{Bool}`; `I::VFT`: external input (mV/ms), zeros.
+- `spikes::SpikeIndex`: neurons that fired in the step (see `spike_index`).
+- `ge::VFT = (1.5randn(N) .+ 4) .* 10nS`: excitatory conductance, random initial
   values (mean 40 nS).
-- `gi::Vector{Float32} = (12randn(N) .+ 20) .* 10nS`: inhibitory conductance, random initial
+- `gi::VFT = (12randn(N) .+ 20) .* 10nS`: inhibitory conductance, random initial
   values (mean 200 nS, can be negative).
 - `records::Dict`.
 
@@ -122,21 +120,21 @@ function synaptic_target(
 end
 
 """
-    integrate!(p::IZ, param::IZParameter, dt::Float32)
+    integrate!(p::IZ, param::IZParameter, dt)
 
 One step of the Izhikevich population: exponential decay of `ge`, `gi` (forward Euler), two
 half steps of the quadratic membrane equation, one step of `u`, the synaptic term, then spike
 detection (`v > 30`) with reset `v = c`, `u += d`. See `IZ`.
 """
 function integrate!(p::IZ, param::IZParameter, dt_::AbstractFloat)
-    dt = _step_dt(p, dt_)   # a step of another precision is converted to that of the population (as `sim!` does)
+    dt = _step_dt(p, dt_)   # in the precision of the population
     @unpack N, v, u, fire, I = p
     @unpack a, b, c, d, τe, τi, Ee, Ei = param
     @unpack ge, gi = p
     _check_state_lengths(N, v, u, fire, I, ge, gi)
     T = eltype(v)    # literals in the precision of the state (`T(0.04) === 0.04f0` in Float32)
-    # One pass over the neurons (the three loops of SNNModels <= 1.9 fused: every neuron is independent, same operations in the same order).
-    Tv = eltype(v); Tu = eltype(u); Tg = eltype(ge); Tgi = eltype(gi)    # every `x[i] += ...` of the old loops rounded to the array type
+    # one fused pass over the independent neurons; every intermediate is rounded to its array type
+    Tv = eltype(v); Tu = eltype(u); Tg = eltype(ge); Tgi = eltype(gi)
     @inbounds @simd for i = 1:N
         gei = convert(Tg, ge[i] + dt * -ge[i] / τe)
         gii = convert(Tgi, gi[i] + dt * -gi[i] / τi)
