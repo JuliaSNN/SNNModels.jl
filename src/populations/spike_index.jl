@@ -118,8 +118,7 @@ _disarm!(s::SpikeIndex) = ((s.fed || s.owned) || (s.active = false; s.valid = fa
 
 Window of the list owned by a population (`spike_index`). `_publish_spikes!` is called by `sim!`/`train!` right after
 `integrate!` and opens it lazily (`active`, not `valid`: the first consumer of the step scans `fire`, the others reuse
-the list); `_retire_spikes!` closes it (`_retire_all_spikes!(P)` at the end of every step, and in a `finally` around the
-run), after which every `spike_list!` call rescans `fire`. No-ops for populations without an owned list. O(1), no
+the list); `_retire_spikes!` closes it (`_retire_all_spikes!(P)` at the end of every step; an exception leaves it open), after which every `spike_list!` call rescans `fire`. No-ops for populations without an owned list. O(1), no
 allocation.
 """
 _publish_spikes!(::AbstractPopulation) = nothing
@@ -189,8 +188,9 @@ their own list return it, so that the connections share it:
   Contract: no component may write `pop.fire` between `integrate!` of `pop` and the end of the step (flags set by hand
   from a custom component are not seen by the consumers after the first). Outside the window (direct calls of
   `forward!`, `plasticity!`, `record!`, manual loops, populations not passed to `sim!`) every call rescans `fire`.
-  A step interrupted by an exception leaves the list open until the next step publishes or retires it; `sim!` and
-  `train!` close every list of `P` on exit.
+  A step interrupted by an exception may leave the list open and stale (an error voids the run, so nothing closes the
+  window: for debugging, call `SNNModels._retire_all_spikes!(P)` before using `forward!`, `plasticity!` or `record!` by hand);
+  the next step publishes the list afresh.
 - populations that write the list themselves (`Identity` with list-aware stimuli, the Poisson populations in the
   sparse regime) return their fed list, and the connections never scan `pop.fire`.
 """

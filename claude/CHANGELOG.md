@@ -1023,8 +1023,8 @@ What changed:
 - **Lazy step window (D3).** `_publish_spikes!(p)` runs right after `integrate!` in `_sim_component!`/`_train_component!`.
   It sets `active = true, valid = false` (O(1)); the first consumer of the step (a connection or the recorder) scans `fire`
   once, and the others reuse the list. `_retire_all_spikes!(P)` closes the window at the end of `_sim_step!`/
-  `_train_step!`. `_run!` and the five-argument `sim!`/`train!` also close it in a `finally`, so an exception leaves no list
-  open. Outside the window an owned list rescans at every call, exactly like an unarmed scratch list. A population that no
+  `_train_step!`. A failed step is a fatal error and the run is discarded: nothing closes the window after an exception (no `try/finally`),
+  and the next step publishes afresh. Outside the window an owned list rescans at every call, exactly like an unarmed scratch list. A population that no
   synapse or recorder reads pays the O(1) publish/retire only.
 - **Recorder (D5).** `_recording_spike_index` returns `p.spikes` for the owners. `_fire_step_list` uses `spike_list!` when
   the list is owned and active, and otherwise the recorder's scratch scan. `_has_step_list` (renamed from `_has_fed_list`)
@@ -1115,19 +1115,20 @@ Files:
 - `src/populations/spike_index.jl`: `owned`, `owned_spike_index`, the window functions, docstrings;
 - the nine population files: one field and one docstring line each;
 - `src/populations/populations.jl`: the Union, `spike_index`, publish/retire for the owners;
-- `src/utils/main.jl`: publish after `integrate!`, retire at the end of the step and in `finally`, docstrings;
+- `src/utils/main.jl`: publish after `integrate!`, retire at the end of the step, docstrings;
 - `src/utils/record.jl`: the owner method of `_recording_spike_index`, `_fire_step_list`, `_has_step_list`;
 - tests: `test/syn/population_spike_list.jl` (new, L1-L14) and `test/utils/record_spikeindex_test.jl` (T9).
 
 ### Known limitations
-- The five-argument `sim!(P, C, S, dt, T)` / `train!(P, C, S, dt, T)` (one call per step, as in hand-written loops) costs about
-  12 to 30 ns per call more than in the 1.10-dev builds before the spike lists: a heap `Ref` for `dt` (16 B per call; it keeps
-  the per-component calls allocation-free when the vectors have an abstract element type) and a `try/finally` that closes the
-  spike-list windows after an exception (test L10), plus the function barrier of `_train_step!`. It is a fixed cost per call,
-  independent of the number of synapses: visible only in networks of a few components with steps of 100 to 200 ns (the
-  event-driven STDP timing benchmarks of 2e5 steps: +3 to +4 ms on 20 to 40 ms). `sim!(model, duration)` and
-  `train!(model, duration)` pay the `Ref` and the `finally` once per run. Measured by
-  `papers/JuliaSNN_publication/validation/profilation_v1.10/perf/final_v2/out/step_ablation_*.txt`.
+- An exception inside a step leaves the owned spike lists open and possibly stale: a failed step is a fatal error and the run is
+  discarded, so no `try/finally` closes them (the `finally` cost 5 to 8 ns per call of the five-argument `sim!`/`train!`, a
+  measurable share of the event-driven STDP benchmarks). The next step publishes the lists afresh; for debugging call
+  `SNNModels._retire_all_spikes!(P)` before using `forward!`, `plasticity!` or `record!` by hand (test L10).
+- The five-argument `sim!(P, C, S, dt, T)` / `train!(P, C, S, dt, T)` (one call per step) passes `dt` as is when the three
+  vectors have concrete element types, and in a `Ref` (16 B per call) when they do not, where the calls are dynamic and an
+  unboxed `dt` would be boxed per component; the function barrier of `_train_step!` stays (0 to 4 ns per call). Timing of the
+  event-driven STDP benchmarks against the 1.10-dev campaign (395412d), 2e5 steps, median of 3: pair 200 synapses 15.2 vs 14.5 ms
+  (b25eb27: 17.9), pair 1e4 20.0 vs 20.3 (24.8), event vSTDP 1e4 35.5 vs 37.7 (39.1); `final_v2/out/step_fix_check.txt`.
 - A record closed by a switch (rule variable the new rule does not have) is not reopened by a later switch; re-monitoring the
   same key needs `clear_records!`/`clear_monitor!` first. `records` is shared, so the source synapse stops sampling it too.
 - `compose` cannot replace a component by name (`compose(; model..., EE = new)` fails with a misleading "Receptors EE already

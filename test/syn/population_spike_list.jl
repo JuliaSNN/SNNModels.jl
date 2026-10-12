@@ -466,28 +466,26 @@ end
     @test _pl_same(a, b) && _pl_same_records(a, b)
 end
 
-@testset "L10: exception inside sim! closes every list" begin
-    # thrown by perturbation! (before step 5)
+@testset "L10: after an exception the lists may be stale; the next step starts clean" begin
+    # the error propagates from the loops and from the five-argument step (an error voids the run: nothing closes the windows)
     net = _pl_ei(; monitor = false)
     pert = (; t, kw...) -> (t >= 4 * _PL_DT && error("perturbation at step 5"))
     @test_throws ErrorException sim!(net.P, net.C; dt = _PL_DT, duration = 20 * _PL_DT, time = net.T, perturbation! = pert)
-    @test all(p -> !p.spikes.active, net.P)
-    # thrown inside the step, after the synapses consumed the lists
-    net = _pl_ei(; monitor = false)
     C = _PL.AbstractConnection[net.C..., _PLThrow(5)]
     @test_throws ErrorException sim!(net.P, C; dt = _PL_DT, duration = 20 * _PL_DT, time = net.T)
-    @test all(p -> !p.spikes.active && !p.spikes.valid, net.P)
     C = _PL.AbstractConnection[net.C..., _PLThrow(5)]
     @test_throws ErrorException train!(net.P, C; dt = _PL_DT, duration = 20 * _PL_DT, time = net.T)
-    @test all(p -> !p.spikes.active, net.P)
-    # five-argument step
     th = _PLThrow(1)
     @test_throws ErrorException sim!(net.P, _PL.AbstractConnection[net.C..., th], _PL.AbstractStimulus[], _PL_DT, net.T)
-    @test all(p -> !p.spikes.active, net.P)
     th = _PLThrow(1)
     @test_throws ErrorException train!(net.P, _PL.AbstractConnection[net.C..., th], _PL.AbstractStimulus[], _PL_DT, net.T)
-    @test all(p -> !p.spikes.active, net.P)
-    # then direct forward! sees hand-set flags
+    # the next step publishes the lists afresh and closes them at its end
+    sim!(net.P, net.C, _PL.AbstractStimulus[], _PL_DT, net.T)
+    @test all(p -> !p.spikes.active && !p.spikes.valid, net.P)
+    # debugging recipe: close the windows by hand, then direct calls see hand-set flags
+    th = _PLThrow(1)
+    @test_throws ErrorException sim!(net.P, _PL.AbstractConnection[net.C..., th], _PL.AbstractStimulus[], _PL_DT, net.T)
+    _PL._retire_all_spikes!(net.P)
     EI = net.C[2]
     net.E.fire .= false; net.E.fire[[1, 4, 9, 100]] .= true
     fill!(EI.g, 0)

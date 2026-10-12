@@ -87,18 +87,14 @@ function _run!(step!::F, P, C, S, dt::AbstractFloat, dts, duration, time::Time, 
     _allocate_records!(P, C, S, Float32(dt), Float32(duration))
     start_time = get_time(time)
     dtr = Ref(dt)
-    try
-        with_neurons_per_thread(neurons_per_thread) do
-            with_flush_subnormals(flush_subnormals) do
-                if pbar
-                    _run_pbar!(step!, P, C, S, dt, dtr, dts, time, perturbation!, start_time)
-                else
-                    _run_loop!(step!, P, C, S, dt, dtr, dts, time, perturbation!, start_time)
-                end
+    with_neurons_per_thread(neurons_per_thread) do
+        with_flush_subnormals(flush_subnormals) do
+            if pbar
+                _run_pbar!(step!, P, C, S, dt, dtr, dts, time, perturbation!, start_time)
+            else
+                _run_loop!(step!, P, C, S, dt, dtr, dts, time, perturbation!, start_time)
             end
         end
-    finally
-        _retire_all_spikes!(P)   # a step interrupted by an exception leaves no list open
     end
     return time
 end
@@ -188,23 +184,27 @@ function train!(
     dt::AbstractFloat,
     T::Time,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
-    try
-        _train_step!(P, C, S, Ref(dt), T)
-    finally
-        _retire_all_spikes!(P)
-    end
+    _train_step!(P, C, S, _dtarg(dt, Val(isconcretetype(TP) && isconcretetype(TC) && isconcretetype(TS))), T)
     return nothing
 end
 
-# One `train!` step. `dtr[]` is the model `dt`; every component gets it in its own precision (float_type): a Float32
+# The step argument of the five-argument `sim!`/`train!`. With concretely typed vectors every call of the step is statically
+# dispatched, so `dt` is passed as is (no allocation); with abstractly typed vectors the calls are dynamic and an unboxed
+# `dt` would be boxed once per component, so it goes in a `Ref` (see `_run!`). `_dtval` reads either.
+@inline _dtarg(dt, ::Val{true}) = dt
+@inline _dtarg(dt, ::Val{false}) = Ref(dt)
+@inline _dtval(d::Base.RefValue) = d[]
+@inline _dtval(d::AbstractFloat) = d
+
+# One `train!` step. `_dtval(dtr)` is the model `dt`; every component gets it in its own precision (float_type): a Float32
 # population in a Float64 model runs in Float32. The work of a component sits behind one dynamically dispatched function
 # barrier that takes the component, its `param` (as read from the boxed element of the vector: some populations hold
 # an abstractly typed `param`, and a call dispatched on it from inside a method specialized on the population would
 # box the population again) and the `Ref` of `dt` (see `_run!`), and returns `nothing`: no argument or return value is
 # boxed, and everything inside the barrier is statically dispatched.
-function _train_step!(P::Vector, C::Vector, S::Vector, dtr::Base.RefValue{<:AbstractFloat}, T::Time)
+function _train_step!(P::Vector, C::Vector, S::Vector, dtr::Union{Base.RefValue{<:AbstractFloat},AbstractFloat}, T::Time)
     record_zero!(P, C, S, T)
-    update_time!(T, dtr[])
+    update_time!(T, _dtval(dtr))
     for s in S
         _train_component!(s, getfield(s, :param), dtr, T)
     end
@@ -219,12 +219,12 @@ function _train_step!(P::Vector, C::Vector, S::Vector, dtr::Base.RefValue{<:Abst
 end
 
 function _train_component!(s::AbstractStimulus, param, dtr, T)
-    stimulate!(s, param, T, _step_dt(s, dtr[]))
+    stimulate!(s, param, T, _step_dt(s, _dtval(dtr)))
     record!(s, T)
     return nothing
 end
 function _train_component!(p::AbstractPopulation, param, dtr, T)
-    dtp = _step_dt(p, dtr[])
+    dtp = _step_dt(p, _dtval(dtr))
     update_traces!(p, param, dtp, T)
     integrate!(p, param, dtp)
     _publish_spikes!(p)
@@ -233,7 +233,7 @@ function _train_component!(p::AbstractPopulation, param, dtr, T)
     return nothing
 end
 function _train_component!(c::AbstractConnection, param, dtr, T)
-    dtc = _step_dt(c, dtr[])
+    dtc = _step_dt(c, _dtval(dtr))
     prepare_spikes!(c)
     update_traces!(c, param, dtc, T)
     forward!(c, param, dtc, T)
@@ -365,18 +365,14 @@ function sim!(
     dt::AbstractFloat,
     T::Time,
 ) where {TP<:AbstractPopulation,TC<:AbstractConnection,TS<:AbstractStimulus}
-    try
-        _sim_step!(P, C, S, Ref(dt), T)
-    finally
-        _retire_all_spikes!(P)
-    end
+    _sim_step!(P, C, S, _dtarg(dt, Val(isconcretetype(TP) && isconcretetype(TC) && isconcretetype(TS))), T)
     return nothing
 end
 
 # One `sim!` step (see `_train_step!` for the `Ref` and the function barrier)
-function _sim_step!(P::Vector, C::Vector, S::Vector, dtr::Base.RefValue{<:AbstractFloat}, T::Time)
+function _sim_step!(P::Vector, C::Vector, S::Vector, dtr::Union{Base.RefValue{<:AbstractFloat},AbstractFloat}, T::Time)
     record_zero!(P, C, S, T)
-    update_time!(T, dtr[])
+    update_time!(T, _dtval(dtr))
     for s in S
         _sim_component!(s, getfield(s, :param), dtr, T)
     end
@@ -391,19 +387,19 @@ function _sim_step!(P::Vector, C::Vector, S::Vector, dtr::Base.RefValue{<:Abstra
 end
 
 function _sim_component!(s::AbstractStimulus, param, dtr, T)
-    stimulate!(s, param, T, _step_dt(s, dtr[]))
+    stimulate!(s, param, T, _step_dt(s, _dtval(dtr)))
     record!(s, T)
     return nothing
 end
 function _sim_component!(p::AbstractPopulation, param, dtr, T)
-    integrate!(p, param, _step_dt(p, dtr[]))
+    integrate!(p, param, _step_dt(p, _dtval(dtr)))
     _publish_spikes!(p)
     record!(p, T)
     return nothing
 end
 function _sim_component!(c::AbstractConnection, param, dtr, T)
     prepare_spikes!(c)
-    forward!(c, param, _step_dt(c, dtr[]), T)
+    forward!(c, param, _step_dt(c, _dtval(dtr)), T)
     record!(c, T)
     release_spikes!(c)
     return nothing
