@@ -768,14 +768,21 @@ Creates `modelcopy(model)` (or uses `from_state`), applies `condition!`, runs si
 Storage schema (1.9.2 / 2.0.2 and later; one ragged store per variable and condition):
 ```
 obj.records[:perturbation][variable::Symbol][condition::String]
-    = PerturbationStore         # dense: data::Vector{Float32} (N x sum(T), column-major),
-                                #   offsets (CSR: window j = columns offsets[j]:offsets[j+1]-1), tstart, tend, ids
-    | PerturbationSpikeStore    # :fire: times::Vector{Float32}, neuron::Vector{Int32}, offsets (CSR), tstart, tend, ids
+    = PerturbationStore         # mutable; dense: data::Vector{Float32} (N x sum(T), column-major),
+                                #   offsets (CSR, length+1: window j = columns offsets[j]:offsets[j+1]-1),
+                                #   tstart, tend, ids, next_id
+    | PerturbationSpikeStore    # mutable; :fire: times::Vector{Float32}, neuron::Vector{Int32}, offsets (CSR),
+                                #   tstart, tend, ids, next_id
 ```
-Both have `version` (1) and `N`. Older versions stored `[condition][n] = Dict("interval", "data")` per window;
-readers accept it and `compact_perturbation_records!(model_or_obj)` converts it in place.
+Both have `version` (1) and `N`. Window ids (`ids`, argument `n` of `clear_*`) are never reused: `next_id` is
+the counter (kept when the store becomes empty). Deleting window `n` removes its columns/spikes and shifts the later offsets.
+Only 2-D dense windows are stored (N-dimensional ones: `ArgumentError` at flush).
+Older versions stored `[condition][n] = Dict("interval", "data")` per window. That layout is never mixed with the new one:
+flush, `perturbation_windows`, `perturbation_record` and `clear_*(...; n)` throw an `ArgumentError` (object, variable, condition)
+when they meet it; convert once with `compact_perturbation_records!(model_or_obj)` (bitwise verified, in place; save again).
+Files with compact records need SNNModels >= 1.9.2 / >= 2.0.2 in every process that reads them.
 Windows: `perturbation_windows(obj, variable, condition)` returns `(tstart, tend, data)` per window in insertion order
-(dense: `N x T` view; `:fire`: `(neuron, times)` views).
+(dense: `N x T` read-only view; `:fire`: `(neuron, times)` views).
 
 ### `perturbation_record`
 
@@ -791,7 +798,7 @@ Returns baseline trace with perturbation windows spliced in. Uses `interpolated_
 ```julia
 clear_perturbation_records!(obj)                          # all perturbation data
 clear_perturbation_records!(obj, condition)               # one condition
-clear_perturbation_records!(obj, condition; variable, n)  # one variable or n-th recording
+clear_perturbation_records!(obj, condition; variable, n)  # one variable or the window with id n (ids never reused)
 
 clear_perturbation_monitor!(obj, variable)                # by variable
 clear_perturbation_monitor!(obj, variable, condition; n)  # by variable + condition

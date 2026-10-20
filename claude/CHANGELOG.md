@@ -1,32 +1,45 @@
 # SNNModels changelog (branch notes)
 
 ## 2.0.2: compact perturbation records
-
 Compact storage of perturbation records (same change as 1.9.2).
 
-- `perturbation_test(...; add_records = cond)` stored every window as its own `Dict("interval", "data")`; with 17,160
-  windows per population and variable (1,320 presentations x 13 conditions) the JLD2 files reached 35-41 GB and loading
-  one peaked at 83 GB (SNN2AC_optim). The windows of one `(variable, condition)` now go to one ragged store,
-  `PerturbationStore` (dense: `N x sum(T)` Float32 as a flat vector with `offsets`, `tstart`, `tend`, `ids`) or
-  `PerturbationSpikeStore` (`:fire`: flat `times`, `neuron`, `offsets`). Both have a `version` field (1).
-- `perturbation_record` gives bit-identical output to the old layout and reads both layouts.
-- New exports: `perturbation_windows(obj, var, cond)` (named tuples `(tstart, tend, data)`, data a view, insertion order),
-  `compact_perturbation_records!(model_or_obj)` (in place, one variable at a time, verified bit by bit before the old
-  dictionaries are dropped, idempotent, returns windows and bytes converted per variable), `PerturbationStore`,
-  `PerturbationSpikeStore`. Code that read `entry["interval"]`, `entry["data"]` should call `perturbation_windows`;
-  `store[n]` still returns such a dictionary (a copy).
-- Bug fix: after `clear_perturbation_records!(...; n = 2)` of windows `{1,2,3}` the next flush got `n = 3` and overwrote
-  the existing window 3. Window numbers are never reused now (next is `maximum + 1`), for both layouts; `n` refers to the
-  window number. A flush into a condition that still holds the old layout converts it first.
-- Compatibility: records that are compact (written, or converted by `compact_perturbation_records!`, with 2.0.2) cannot be read by
-  the `perturbation_record` of 2.0.1 or earlier: every process that reads such files needs >= 2.0.2. Stores carry a `version` field
-  (1); readers and writers throw an `ArgumentError` for another value. `offsets` has `length(store) + 1` entries (CSR style), so
-  objects with 0 rows and windows with 0 columns work.
-- Unchanged: a one-sample window (`T = 1`) makes `perturbation_record` throw (Interpolations `ArgumentError`).
-- The two structs have the same names and fields in 1.9.2 and 2.0.2. A `:data` file written by 1.9.2 is still refused by
-  `load_data` in 2.0 (its populations use the 1.9 layout); loading a store without SNNModels loaded makes JLD2 reconstruct it
-  with the arrays accessible by field name.
-
+- `perturbation_test(...; add_records = cond)` stored every window as its own `Dict("interval", "data")` under
+  `records[:perturbation][var][cond][n]`. With 1,320 presentations x 13 conditions x several variables that is 17,160
+  small objects per population and variable, JLD2 files of 35-41 GB and a load that peaked at 83 GB (SNN2AC_optim).
+  The windows of one `(variable, condition)` now go to one ragged store: `PerturbationStore` (dense: `N x sum(T)`
+  Float32 kept as a flat vector, CSR `offsets` with `length + 1` entries, `tstart`, `tend`, `ids`, `next_id`) or
+  `PerturbationSpikeStore` (`:fire`: flat `times` and `neuron`, CSR `offsets`, `tstart`, `tend`, `ids`, `next_id`).
+  Both are mutable structs with a `version` field (1) and the same fields in 1.9.2 and 2.0.2. See the docstrings.
+- `perturbation_record` returns bit-identical values to the old layout (same window order, clipping, interpolation).
+- New exports: `perturbation_windows(obj, var, cond)` (named tuples `(tstart, tend, data)`, data a read-only view,
+  insertion order), `compact_perturbation_records!(model_or_obj)`, `PerturbationStore`, `PerturbationSpikeStore`.
+  Code that read `entry["interval"]` / `entry["data"]` should call `perturbation_windows`; `store[n]` still returns
+  such a dictionary (a copy).
+- The old and the new layout never coexist in a working model. Records of the old layout (Dict per window) are not
+  read, appended to or edited window by window: a flush, `perturbation_windows`, `perturbation_record` or
+  `clear_perturbation_records!(...; n)` that meets one throws an `ArgumentError` naming object, variable and
+  condition ("... are in the pre-1.9.2 layout (one Dict per window); convert them once with
+  compact_perturbation_records! (then save the model again) ..."). Clearing a whole condition, variable or all
+  records still works on old records. Nothing is converted automatically.
+- `compact_perturbation_records!(model_or_obj)` is the required one-time migration of existing files: in place, one
+  object and one variable at a time with `GC.gc()` between, each store checked bit by bit against the old
+  dictionaries before they are dropped, idempotent, returns windows and bytes converted per variable. The old keys
+  `n` (gaps allowed) become the `ids`, `next_id` becomes `maximum(n) + 1`; conditions it cannot store (3-D data,
+  differing N) throw an `ArgumentError` naming object, variable, condition and `n`. Save the model again afterwards.
+- Dense windows with more than two dimensions (matrix-valued variables, size `(N, D, T)`) are refused by the flush
+  with an `ArgumentError` naming object, variable, condition and the number of dimensions. They could never be read
+  before either (the old reader asserted `Matrix{Float32}`).
+- Bug fix: window numbers were `length(dict) + 1`, so after `clear_perturbation_records!(...; n = 2)` of `{1,2,3}`
+  the next flush overwrote window 3. Window numbers (`ids`) are now never reused, not even after every window was
+  deleted (the empty store stays and keeps its `next_id`); `n` in `clear_*` is that number. Deleting window `n`
+  physically removes its columns (dense) or spikes (`:fire`) and shifts the later `offsets`.
+- Compatibility: files holding compact records need SNNModels >= 2.0.2 in every process that reads them
+  (`perturbation_record` of 2.0.1 and earlier cannot read them). Stores carry a `version` field (1); readers and
+  writers throw an `ArgumentError` for another value. Objects with 0 rows and windows with 0 columns work.
+- A `:data` file written by 1.9.2 is still refused by `load_data` in 2.0 (its populations use the 1.9 layout); a store
+  loaded without SNNModels makes JLD2 reconstruct it with the arrays accessible by field name.
+- Not changed: a window of one sample (`T = 1`, e.g. `perturbation_test(model, 1ms)` at 1 kHz) makes
+  `perturbation_record` throw an `ArgumentError` from Interpolations, as before.
 
 ## 2.0.0 (was 1.10 during development): sparse spike lists, ring-buffer delays, always-lazy trace decay
 Faster event-driven STDP and delayed transmission: fewer scans of the spike flags, type-stable
