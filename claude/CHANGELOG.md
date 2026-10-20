@@ -1,5 +1,27 @@
 # SNNModels changelog (branch notes)
 
+## 1.9.2: compact perturbation records
+- `perturbation_test(...; add_records = cond)` stored every window as its own
+  `Dict("interval", "data")` under `records[:perturbation][var][cond][n]`. With 1,320 presentations x 13 conditions
+  x several variables that is 17,160 small objects per population and variable, JLD2 files of 35-41 GB and a load
+  that peaked at 83 GB (reported by SNN2AC_optim). The windows of one `(variable, condition)` are now appended to
+  one ragged store: `PerturbationStore` (dense: `N x sum(T)` Float32 kept as a flat vector, `offsets`, `tstart`,
+  `tend`, `ids`) and `PerturbationSpikeStore` (`:fire`: flat `times` and `neuron`, per-window `offsets`).
+  Both carry a `version` field (1). See the docstrings.
+- `perturbation_record` returns bit-identical values to the old layout (same window order, clipping,
+  interpolation); it reads both layouts.
+- New: `perturbation_windows(obj, var, cond)` (tstart, tend, data views per window, insertion order),
+  `compact_perturbation_records!(model_or_obj)` (converts old records in place, one variable at a time,
+  checked bit by bit against the old dictionaries before they are dropped; idempotent; returns a summary).
+  Downstream code that read `entry["interval"]` / `entry["data"]` should use `perturbation_windows`;
+  `store[n]` still returns such a dictionary (a copy).
+- Bug fix: `n` was `length(dict) + 1`, so after `clear_perturbation_records!(...; n = 2)` of `{1,2,3}` the next
+  flush overwrote window 3. Window numbers (`ids`) are now never reused (`maximum + 1`); `n` in `clear_*`
+  refers to that number. Also fixed for the old layout. Flushing into a condition that still holds the old layout
+  converts it first, so one `(variable, condition)` never has two stores.
+- Not changed: a window of one sample (`T = 1`, e.g. `perturbation_test(model, 1ms)` at 1 kHz) makes
+  `perturbation_record` throw an `ArgumentError` from Interpolations, as before.
+
 ## 1.9.1: recording buffers across chunks
 - `_extend_fire!` and `_extend_dense!` (called when a new `sim!`/`train!` chunk needs more room)
   grew by exactly the missing amount, so a run of many chunks reallocated and copied the whole
