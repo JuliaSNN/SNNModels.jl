@@ -33,8 +33,8 @@ modified only when `add_records` is given (its `records[:perturbation]` entries 
 
 # Storage schema (when `add_records` is set)
 
-From SNNModels 1.9.2 / 2.0.2 the windows of one `(variable, condition)` are stored in one ragged,
-append-only store:
+From SNNModels 1.9.2 / 2.0.2 the windows of one `(variable, condition)` are stored in one ragged
+store (append, delete by id):
 
 ```
 obj.records[:perturbation][variable::Symbol][condition::String]
@@ -45,10 +45,14 @@ obj.records[:perturbation][variable::Symbol][condition::String]
 See [`PerturbationStore`](@ref) and [`PerturbationSpikeStore`](@ref) for the layout, and
 [`perturbation_windows`](@ref) to read the windows one by one. Records written by earlier versions
 (one `Dict("interval" => ..., "data" => ...)` per window, under
-`records[:perturbation][variable][condition][n]`) are still read, and
-[`compact_perturbation_records!`](@ref) converts them in place. The old layout stored 17,160 small
-dictionaries per variable for 1,320 presentations x 13 conditions; the new one stores a handful of
-arrays.
+`records[:perturbation][variable][condition][n]`) are NOT read, appended to or edited window by
+window: the old and the new layout never coexist in a working model, and every flush or reader that
+meets a legacy store throws an `ArgumentError` naming object, variable and condition. Any other value (e.g. a `NamedTuple`) in place of a store is refused the same way, with its type. Convert such files
+once with [`compact_perturbation_records!`](@ref) and save them again. The old layout stored 17,160
+small dictionaries per variable for 1,320 presentations x 13 conditions; the new one stores a handful of
+arrays. Only 2-D (N x T) dense windows can be stored; a flush of an N-dimensional window throws an
+`ArgumentError`. Files with compact records need SNNModels >= 1.9.2 / >= 2.0.2 in every process that
+reads them.
 
 Retrieve with `perturbation_record(obj, variable, condition, interval)`.
 
@@ -94,8 +98,10 @@ function perturbation_test(
     end
 end
 
-# Walk model and pert_model in lockstep and flush each component pair.
+# Walk model and pert_model in lockstep and flush each component pair. All pairs are checked
+# first, so a refused flush leaves every record untouched.
 function _flush_perturbation!(model, pert_model, condition::String)
+    pairs = Tuple{Any,Any}[]
     for field in (:pop, :syn, :stim)
         haskey(model, field) || continue
         haskey(pert_model, field) || continue
@@ -103,7 +109,55 @@ function _flush_perturbation!(model, pert_model, condition::String)
         pert_group = getfield(pert_model, field)
         for key in keys(orig_group)
             haskey(pert_group, key) || continue
-            _flush_component!(getfield(orig_group, key), getfield(pert_group, key), condition)
+            push!(pairs, (getfield(orig_group, key), getfield(pert_group, key)))
+        end
+    end
+    for (o, p) in pairs
+        _check_flush(o, p, condition)
+    end
+    for (o, p) in pairs
+        _flush_component!(o, p, condition)
+    end
+end
+
+_legacy_layout_error(obj, variable, condition) = throw(ArgumentError(
+    "perturbation records of $(_cname(obj)), variable :$variable, condition \"$condition\" are in the " *
+    "pre-1.9.2 layout (one Dict per window); convert them once with compact_perturbation_records! " *
+    "(then save the model again) before reading, appending to or deleting single windows of them"))
+
+# Throw if cs (the stored object of a (variable, condition)) is anything but a store (or nothing /
+# an empty Dict): a legacy Dict-per-window store, or a foreign layout such as a NamedTuple.
+function _check_not_legacy(obj, variable, condition, cs)
+    (isnothing(cs) || cs isa AbstractPerturbationStore) && return cs
+    cs isa AbstractDict && isempty(cs) && return cs
+    cs isa AbstractDict && _legacy_layout_error(obj, variable, condition)
+    throw(ArgumentError(
+        "perturbation records of $(_cname(obj)), variable :$variable, condition \"$condition\" hold a value of type " *
+        "$(typeof(cs)), not a PerturbationStore / PerturbationSpikeStore; this SNNModels reads and writes only those " *
+        "(the interim layouts of other projects must be rebuilt as stores)"))
+end
+
+function _stored_condition(obj, variable, condition)
+    pert = get(obj.records, :perturbation, nothing)
+    isnothing(pert) && return nothing
+    vs = get(pert, variable, nothing)
+    isnothing(vs) && return nothing
+    return get(vs, condition, nothing)
+end
+
+# Refusals of a flush, raised before anything is written.
+function _check_flush(orig_obj, pert_obj, condition::String)
+    haskey(pert_obj.records, :data) || return
+    isempty(pert_obj.records[:data]) && return
+    for key in pert_obj.records[:data]
+        tstart = get(pert_obj.records[:start_time], key, NaN32)
+        tend   = get(pert_obj.records[:end_time],   key, NaN32)
+        (isnan(tstart) || isnan(tend)) && continue
+        _check_not_legacy(orig_obj, key, condition, _stored_condition(orig_obj, key, condition))
+        if key !== :fire
+            nd = ndims(getvariable(pert_obj, key))
+            nd == 2 || throw(ArgumentError(
+                "perturbation window of $(_cname(orig_obj)), variable :$key, condition \"$condition\" has $nd dimensions; the perturbation store holds matrices (N, T) only"))
         end
     end
 end
@@ -111,6 +165,7 @@ end
 function _flush_component!(orig_obj, pert_obj, condition::String)
     haskey(pert_obj.records, :data) || return
     isempty(pert_obj.records[:data]) && return
+    _check_flush(orig_obj, pert_obj, condition)
     haskey(orig_obj.records, :perturbation) ||
         (orig_obj.records[:perturbation] = Dict{Symbol,Any}())
     pert_store = orig_obj.records[:perturbation]
@@ -123,53 +178,19 @@ function _flush_component!(orig_obj, pert_obj, condition::String)
         haskey(pert_store, key) || (pert_store[key] = Dict{String,Any}())
         var_store = pert_store[key]
         cond_store = get(var_store, condition, nothing)
-
-        # A condition still in the legacy layout (loaded from an older file) is converted first, so a
-        # (variable, condition) never has two stores. If it cannot be converted it stays legacy.
-        if cond_store isa AbstractDict && !isempty(cond_store) &&
-           isnothing(_not_compactable(cond_store, key))
-            new = _build_compact(cond_store, key)
-            _verify_compact(cond_store, new, key) &&
-                (var_store[condition] = cond_store = new)
-        end
+        # an empty Dict (nothing stored) is replaced by a store
+        cond_store isa AbstractDict && (cond_store = nothing)
 
         if key === :fire
             st = spiketimes(pert_obj)
-            if isnothing(cond_store) || (cond_store isa AbstractDict && isempty(cond_store))
-                cond_store = PerturbationSpikeStore(length(st))
-                var_store[condition] = cond_store
-            end
-            if cond_store isa PerturbationSpikeStore
-                _push_window!(cond_store, st, tstart, tend)
-            else
-                _push_legacy!(cond_store, tstart, tend, st)
-            end
+            isnothing(cond_store) && (var_store[condition] = cond_store = PerturbationSpikeStore(length(st)))
+            _push_window!(cond_store, st, tstart, tend)
         else
             raw = getvariable(pert_obj, key)
-            if isnothing(cond_store) || (cond_store isa AbstractDict && isempty(cond_store))
-                if ndims(raw) == 2
-                    cond_store = PerturbationStore(size(raw, 1))
-                else
-                    cond_store = Dict{Int,Any}()   # N-dimensional window: legacy entry format
-                end
-                var_store[condition] = cond_store
-            end
-            if cond_store isa PerturbationStore && ndims(raw) == 2
-                _push_window!(cond_store, raw, tstart, tend)
-            elseif cond_store isa AbstractDict
-                _push_legacy!(cond_store, tstart, tend, copy(Float32.(raw)))
-            else
-                throw(ArgumentError("perturbation window of $key has $(ndims(raw)) dimensions; the compact store of condition \"$condition\" holds matrices"))
-            end
+            isnothing(cond_store) && (var_store[condition] = cond_store = PerturbationStore(size(raw, 1)))
+            _push_window!(cond_store, raw, tstart, tend)
         end
     end
-end
-
-# Legacy layout: one Dict per window, keyed by n.
-function _push_legacy!(cond_store::AbstractDict, tstart, tend, data)
-    n = isempty(cond_store) ? 1 : maximum(keys(cond_store)) + 1
-    cond_store[n] = Dict{String,Any}("interval" => Float32[tstart, tend], "data" => data)
-    return cond_store
 end
 
 # ── Compact layout ────────────────────────────────────────────────────────────
@@ -177,8 +198,8 @@ end
 """
     AbstractPerturbationStore
 
-Supertype of [`PerturbationStore`](@ref) and [`PerturbationSpikeStore`](@ref): the ragged,
-append-only containers of the perturbation windows of one `(variable, condition)`.
+Supertype of [`PerturbationStore`](@ref) and [`PerturbationSpikeStore`](@ref): the ragged
+containers of the perturbation windows of one `(variable, condition)`.
 They support `length` (number of windows), `isempty`, `keys` (the window numbers `n`),
 `haskey(store, n)` and `store[n]` (a legacy-style `Dict("interval" => ..., "data" => ...)`,
 a copy).
@@ -201,12 +222,16 @@ Dense perturbation windows of one `(variable, condition)` of an object with `N` 
   `offsets[j] : offsets[j+1]-1` (zero columns allowed; an empty store has `offsets == [1]`).
 - `tstart::Vector{Float32}`, `tend::Vector{Float32}`: absolute simulation interval (ms) of each window.
 - `ids::Vector{Int}`: window number `n` (the argument `n` of `clear_perturbation_records!`);
-  increasing; a new window gets `maximum(ids) + 1`, so numbers are not reused after a deletion.
+  increasing.
+- `next_id::Int`: the number the next window gets (then incremented). Window numbers are never
+  reused, not even after every window was deleted; the store is mutable for this counter.
+  `compact_perturbation_records!` sets it to `maximum(legacy keys) + 1`.
 
-Windows may differ in length. Appending is amortised O(window size). The fields are plain
-arrays of bits types: JLD2 stores them as they are.
+Windows may differ in length. Appending is amortised O(window size); deleting a window is O(store
+size) (its columns are removed from `data` and the later `offsets` shift down). The fields are
+plain arrays of bits types and integers: JLD2 stores them as they are.
 """
-struct PerturbationStore <: AbstractPerturbationStore
+mutable struct PerturbationStore <: AbstractPerturbationStore
     version::Int
     N::Int
     data::Vector{Float32}
@@ -214,9 +239,10 @@ struct PerturbationStore <: AbstractPerturbationStore
     tstart::Vector{Float32}
     tend::Vector{Float32}
     ids::Vector{Int}
+    next_id::Int
 end
 PerturbationStore(N::Integer) =
-    PerturbationStore(1, Int(N), Float32[], [1], Float32[], Float32[], Int[])
+    PerturbationStore(1, Int(N), Float32[], [1], Float32[], Float32[], Int[], 1)
 
 """
     PerturbationSpikeStore(N)
@@ -230,9 +256,9 @@ Spike windows (variable `:fire`) of one condition of an object with `N` neurons.
   `spiketimes(pert_obj)` flattened neuron by neuron).
 - `offsets::Vector{Int}`: `length(store) + 1` entries, `offsets[1] = 1`; window `j` is the spikes
   `offsets[j] : offsets[j+1]-1` of `times`/`neuron` (an empty store has `offsets == [1]`).
-- `tstart`, `tend`, `ids`: as in [`PerturbationStore`](@ref).
+- `tstart`, `tend`, `ids`, `next_id`: as in [`PerturbationStore`](@ref).
 """
-struct PerturbationSpikeStore <: AbstractPerturbationStore
+mutable struct PerturbationSpikeStore <: AbstractPerturbationStore
     version::Int
     N::Int
     times::Vector{Float32}
@@ -241,9 +267,10 @@ struct PerturbationSpikeStore <: AbstractPerturbationStore
     tstart::Vector{Float32}
     tend::Vector{Float32}
     ids::Vector{Int}
+    next_id::Int
 end
 PerturbationSpikeStore(N::Integer) =
-    PerturbationSpikeStore(1, Int(N), Float32[], Int32[], [1], Float32[], Float32[], Int[])
+    PerturbationSpikeStore(1, Int(N), Float32[], Int32[], [1], Float32[], Float32[], Int[], 1)
 
 Base.length(s::AbstractPerturbationStore) = length(s.offsets) - 1
 Base.isempty(s::AbstractPerturbationStore) = length(s) == 0
@@ -270,7 +297,11 @@ function Base.show(io::IO, s::PerturbationSpikeStore)
     print(io, "PerturbationSpikeStore(N = $(s.N), $(length(s)) windows, $(length(s.times)) spikes)")
 end
 
-_next_id(s::AbstractPerturbationStore) = isempty(s.ids) ? 1 : maximum(s.ids) + 1
+function _take_id!(s::AbstractPerturbationStore)
+    id = s.next_id
+    s.next_id = id + 1
+    return id
+end
 
 function _push_window!(s::PerturbationStore, M::AbstractMatrix, tstart, tend)
     _check_version(s)
@@ -279,7 +310,7 @@ function _push_window!(s::PerturbationStore, M::AbstractMatrix, tstart, tend)
     append!(s.data, M)                    # column-major, converted to Float32
     push!(s.offsets, s.offsets[end] + size(M, 2))
     push!(s.tstart, tstart); push!(s.tend, tend)
-    push!(s.ids, _next_id(s))
+    push!(s.ids, _take_id!(s))
     return s
 end
 
@@ -296,7 +327,7 @@ function _push_window!(s::PerturbationSpikeStore, st::AbstractVector, tstart, te
     end
     push!(s.offsets, s.offsets[end] + length(s.times) - n0)
     push!(s.tstart, tstart); push!(s.tend, tend)
-    push!(s.ids, _next_id(s))
+    push!(s.ids, _take_id!(s))
     return s
 end
 
@@ -317,15 +348,7 @@ function _window_at(s::PerturbationSpikeStore, j)
             data = (neuron = view(s.neuron, r), times = view(s.times, r)))
 end
 
-# Legacy dictionary layout, same accessors.
-_window_keys(cs::AbstractDict) = sort!(collect(keys(cs)))
 _window_keys(cs::AbstractPerturbationStore) = (_check_version(cs); 1:length(cs))
-function _window_at(cs::AbstractDict, k)
-    e = cs[k]
-    ts, te = e["interval"]
-    d = e["data"]
-    return (tstart = Float32(ts), tend = Float32(te), data = d)
-end
 
 # (neuron, times) <-> Spiketimes
 function _flatten_spikes(st::AbstractVector)
@@ -373,15 +396,15 @@ function _delete_window!(s::PerturbationSpikeStore, n)
     deleteat!(s.tstart, j); deleteat!(s.tend, j); deleteat!(s.ids, j)
     return true
 end
-_delete_window!(cs::AbstractDict, n) = (r = haskey(cs, n); delete!(cs, n); r)
 
 """
     perturbation_windows(obj, variable, condition)
 
 The perturbation windows stored in `obj.records[:perturbation][variable][condition]`, in
 insertion order (the order of the window numbers `n`; not sorted by `tstart`), as a vector of `(tstart, tend, data)` named tuples. `tstart` and
-`tend` are `Float32` absolute simulation times in ms. Works on the compact layout and on the legacy
-layout (see [`compact_perturbation_records!`](@ref)). Returns an empty vector when nothing is stored.
+`tend` are `Float32` absolute simulation times in ms. Returns an empty vector when nothing is stored.
+Throws an `ArgumentError` if the records are still in the pre-1.9.2 layout (one `Dict` per window):
+convert them once with [`compact_perturbation_records!`](@ref).
 
 `data` is
 - dense variables: the `N x T` window (a `reshape(view(...))` of the store, no copy; `T`
@@ -390,8 +413,7 @@ layout (see [`compact_perturbation_records!`](@ref)). Returns an empty vector wh
   ms): the spikes of the window sorted by neuron, then by time. `times[neuron .== i]` are the spike
   times of neuron `i`.
 
-For the compact layout the views alias the store and are read-only; a later flush or `clear_*` invalidates them (their contents may change or be stale), so copy what you keep.
-The legacy layout returns its stored matrix (dense) or the flattened spikes (`:fire`).
+The views alias the store and are read-only; a later flush or `clear_*` invalidates them (their contents may change or be stale), so copy what you keep.
 
 ```julia
 for (tstart, tend, v) in perturbation_windows(E, :v, "kick")
@@ -400,32 +422,25 @@ end
 ```
 """
 function perturbation_windows(obj, variable::Symbol, condition::String)
-    cs = _cond_store(obj, variable, condition)
-    isnothing(cs) && return NamedTuple[]
-    out = [_window_at(cs, k) for k in _window_keys(cs)]
-    if cs isa AbstractDict && variable === :fire
-        out = [(tstart = w.tstart, tend = w.tend, data = _flatten_spikes(w.data)) for w in out]
-    end
-    return out
+    cs = _stored_condition(obj, variable, condition)
+    (isnothing(cs) || cs isa AbstractDict && isempty(cs)) && return NamedTuple[]
+    _check_not_legacy(obj, variable, condition, cs)
+    return [_window_at(cs, k) for k in _window_keys(cs)]
 end
 
-function _cond_store(obj, variable, condition)
-    pert = get(obj.records, :perturbation, nothing)
-    isnothing(pert) && return nothing
-    var_store = get(pert, variable, nothing)
-    isnothing(var_store) && return nothing
-    return get(var_store, condition, nothing)
-end
-
-# ── Conversion of the legacy layout ───────────────────────────────────────────
+# ── One-time conversion of the pre-1.9.2 layout ───────────────────────────────
 
 """
     compact_perturbation_records!(model_or_obj) -> Dict{Symbol,NamedTuple{(:windows,:bytes)}}
 
-Convert, in place, perturbation records written in the legacy layout (one
+The one-time migration of files written before SNNModels 1.9.2 / 2.0.2. Convert, in place, perturbation records written in the legacy layout (one
 `Dict("interval", "data")` per window, `records[:perturbation][variable][condition][n]`) into
 [`PerturbationStore`](@ref) / [`PerturbationSpikeStore`](@ref). The legacy keys `n` (which may have
-gaps) become the window `ids`; the insertion order is the order of increasing `n`.
+gaps) become the window `ids`, `next_id` becomes `maximum(n) + 1`; the insertion order is the order of increasing `n`.
+Until a file is converted, every reader, flush and single-window deletion on its legacy records throws an
+`ArgumentError` naming the object, variable and condition (legacy and compact records never coexist in
+a working model); clearing a whole condition, variable or all records still works on legacy records.
+Save the model again after converting.
 
 Accepts a single component, a `NamedTuple` of components, a model (`pop`, `syn`, `stim`) or the
 `NamedTuple` returned by `load_data` (its `model`). The conversion goes one object and one
@@ -442,8 +457,9 @@ touching it. Conditions already compact are skipped, so running it twice is a no
 Returns, per variable, the number of windows converted and the legacy size in bytes
 (`Base.summarysize`), summed over the objects; empty when nothing needed conversion.
 
-Readers (`perturbation_record`, `perturbation_windows`) accept both layouts; run this once on
-files written by older versions to shrink them (save again afterwards) and to cut load time and memory.
+Run this once on each file written by an older version: it shrinks the file (save again afterwards)
+and cuts load time and memory. Files with compact records need SNNModels >= 1.9.2 / >= 2.0.2 in
+every process that reads them.
 """
 function compact_perturbation_records!(obj)
     summary = Dict{Symbol,NamedTuple{(:windows, :bytes),Tuple{Int,Int}}}()
@@ -455,7 +471,9 @@ function compact_perturbation_records!(obj)
             converted = false
             for cond in collect(keys(var_store))
                 cs = var_store[cond]
-                cs isa AbstractDict || continue
+                cs isa AbstractPerturbationStore && continue
+                cs isa AbstractDict || throw(ArgumentError(
+                    "compact_perturbation_records!: $(_cname(c)), variable $var, condition \"$cond\" holds a value of type $(typeof(cs)); only the legacy Dict-per-window layout is converted"))
                 isempty(cs) && continue
                 why = _not_compactable(cs, var)
                 isnothing(why) ||
@@ -518,6 +536,7 @@ function _build_compact(cs::AbstractDict, var::Symbol)
         _push_window!(s, cs[k]["data"], Float32(ts), Float32(te))
         s.ids[end] = k
     end
+    s.next_id = maximum(ks) + 1
     return s
 end
 
@@ -527,7 +546,7 @@ _bits(x::Real) = reinterpret(UInt32, Float32(x))
 # Bitwise comparison of a compact store with the legacy dictionaries it replaces.
 function _verify_compact(cs::AbstractDict, new::AbstractPerturbationStore, var::Symbol)
     ks = sort!(collect(keys(cs)))
-    length(new) == length(ks) && new.ids == ks || return false
+    length(new) == length(ks) && new.ids == ks && new.next_id == maximum(ks) + 1 || return false
     for (j, k) in enumerate(ks)
         e = cs[k]
         w = _window_at(new, j)
@@ -630,12 +649,13 @@ function _perturbation_record_dense(obj, variable::Symbol, condition::String, in
     isnothing(var_store) && return result, eval_r
     cond_store = get(var_store, condition, nothing)
     isnothing(cond_store) && return result, eval_r
+    _check_not_legacy(obj, variable, condition, cond_store)
 
     eval_r_vec = collect(eval_r)
-    for k in _window_keys(cond_store)   # insertion order (n)
+    for k in _window_keys(cond_store)   # insertion order (position j)
         w = _window_at(cond_store, k)
         tstart, tend = w.tstart, w.tend
-        pert_data    = w.data isa Matrix{Float32} ? w.data : Matrix{Float32}(w.data)
+        pert_data    = Matrix{Float32}(w.data)
         t_lo_idx = searchsortedfirst(eval_r_vec, Float32(tstart))
         t_hi_idx = searchsortedlast(eval_r_vec,  Float32(tend))
         n_win    = t_hi_idx - t_lo_idx + 1
@@ -658,12 +678,12 @@ function _perturbation_record_fire(obj, condition::String, interval::AbstractRan
     isnothing(var_store) && return result, interval
     cond_store = get(var_store, condition, nothing)
     isnothing(cond_store) && return result, interval
+    _check_not_legacy(obj, :fire, condition, cond_store)
 
     for k in _window_keys(cond_store)
         w = _window_at(cond_store, k)
         tstart, tend = w.tstart, w.tend
-        nt = w.data isa NamedTuple ? w.data : _flatten_spikes(w.data)
-        neuron, times = nt.neuron, nt.times
+        neuron, times = w.data.neuron, w.data.times
         i = 1
         nspk = length(times)
         @inbounds for n in eachindex(result)
@@ -691,9 +711,12 @@ Delete stored perturbation data from `obj`.
 - With `condition`: removes all entries for that condition across all variables.
 - With `variable` kwarg: restricts deletion to that variable only.
 - With both `condition` and `n` kwarg: removes only the window numbered `n` for that
-  condition (and variable if specified). Window numbers are the `ids` of the store (1, 2, ... in
-  order of recording); they are not renumbered after a deletion. Works on the compact and on the
-  legacy layout.
+  condition (and variable if specified): its columns (dense) or spikes (`:fire`) are removed from
+  the store and the later windows keep their numbers. Window numbers are the `ids` of the store (1, 2, ...
+  in order of recording); they are never reused, also after the last window was deleted (the empty
+  store stays and keeps counting). Deleting a window of a condition still in the pre-1.9.2 layout throws
+  an `ArgumentError` (convert with [`compact_perturbation_records!`](@ref) first); deleting whole
+  conditions, variables or everything works on any layout.
 
 Accepts a single `AbstractComponent`, a `NamedTuple` of components (e.g.
 `model.pop`), or a full model `NamedTuple`.
@@ -748,8 +771,8 @@ function _clear_pert_component!(obj, condition; variable, n)
             if isnothing(n)
                 delete!(pert[var], condition)
             else
-                _delete_window!(cond_store, n)
-                isempty(cond_store) && delete!(pert[var], condition)
+                _check_not_legacy(obj, var, condition, cond_store)
+                cond_store isa AbstractDict || _delete_window!(cond_store, n)
             end
             isempty(pert[var]) && delete!(pert, var)
         end
@@ -771,7 +794,7 @@ This is the targeted complement to `clear_perturbation_records!`:
 |:---|:---|
 | `clear_perturbation_monitor!(obj, :v_s)` | remove all conditions for `:v_s` |
 | `clear_perturbation_monitor!(obj, :v_s, "silence")` | remove all `n` under `"silence"` for `:v_s` |
-| `clear_perturbation_monitor!(obj, :v_s, "silence"; n=2)` | remove only the 2nd recording |
+| `clear_perturbation_monitor!(obj, :v_s, "silence"; n=2)` | remove only the window with id 2 (ids are never reused) |
 """
 function clear_perturbation_monitor!(obj, variable::Symbol)
     clear_perturbation_records!(obj; variable)
