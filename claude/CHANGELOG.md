@@ -5,8 +5,8 @@
   `Dict("interval", "data")` under `records[:perturbation][var][cond][n]`. With 1,320 presentations x 13 conditions
   x several variables that is 17,160 small objects per population and variable, JLD2 files of 35-41 GB and a load
   that peaked at 83 GB (reported by SNN2AC_optim). The windows of one `(variable, condition)` are now appended to
-  one ragged store: `PerturbationStore` (dense: `N x sum(T)` Float32 kept as a flat vector, `offsets`, `tstart`,
-  `tend`, `ids`) and `PerturbationSpikeStore` (`:fire`: flat `times` and `neuron`, per-window `offsets`).
+  one ragged store: `PerturbationStore` (dense: `N x sum(T)` Float32 kept as a flat vector, CSR `offsets`, `tstart`,
+  `tend`, `ids`) and `PerturbationSpikeStore` (`:fire`: flat `times` and `neuron`, CSR `offsets`).
   Both carry a `version` field (1). See the docstrings.
 - `perturbation_record` returns bit-identical values to the old layout (same window order, clipping,
   interpolation); it reads both layouts.
@@ -19,6 +19,10 @@
   flush overwrote window 3. Window numbers (`ids`) are now never reused (`maximum + 1`); `n` in `clear_*`
   refers to that number. Also fixed for the old layout. Flushing into a condition that still holds the old layout
   converts it first, so one `(variable, condition)` never has two stores.
+- Compatibility: records that are compact (written, or converted by `compact_perturbation_records!`, with 1.9.2) cannot be read by
+  the `perturbation_record` of 1.9.1 or earlier: every process that reads such files needs >= 1.9.2. Stores carry a `version` field
+  (1); readers and writers throw an `ArgumentError` for another value. `offsets` has `length(store) + 1` entries (CSR style), so
+  objects with 0 rows and windows with 0 columns work.
 - Not changed: a window of one sample (`T = 1`, e.g. `perturbation_test(model, 1ms)` at 1 kHz) makes
   `perturbation_record` throw an `ArgumentError` from Interpolations, as before.
 

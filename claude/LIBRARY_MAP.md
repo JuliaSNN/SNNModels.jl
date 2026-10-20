@@ -780,8 +780,8 @@ Storage schema (1.9.2 / 2.0.2 and later; one ragged store per variable and condi
 ```
 obj.records[:perturbation][variable::Symbol][condition::String]
     = PerturbationStore         # dense: data::Vector{Float32} (N x sum(T), column-major),
-                                #   offsets (first column of each window), tstart, tend, ids
-    | PerturbationSpikeStore    # :fire: times::Vector{Float32}, neuron::Vector{Int32}, offsets, tstart, tend, ids
+                                #   offsets (CSR: window j = columns offsets[j]:offsets[j+1]-1), tstart, tend, ids
+    | PerturbationSpikeStore    # :fire: times::Vector{Float32}, neuron::Vector{Int32}, offsets (CSR), tstart, tend, ids
 ```
 Both have `version` (1) and `N`. Older versions stored `[condition][n] = Dict("interval", "data")` per window;
 readers accept it and `compact_perturbation_records!(model_or_obj)` converts it in place.
