@@ -1,5 +1,29 @@
 # SNNModels changelog (branch notes)
 
+## 2.0.2: compact perturbation records
+
+Compact storage of perturbation records (same change as 1.9.2).
+
+- `perturbation_test(...; add_records = cond)` stored every window as its own `Dict("interval", "data")`; with 17,160
+  windows per population and variable (1,320 presentations x 13 conditions) the JLD2 files reached 35-41 GB and loading
+  one peaked at 83 GB (SNN2AC_optim). The windows of one `(variable, condition)` now go to one ragged store,
+  `PerturbationStore` (dense: `N x sum(T)` Float32 as a flat vector with `offsets`, `tstart`, `tend`, `ids`) or
+  `PerturbationSpikeStore` (`:fire`: flat `times`, `neuron`, `offsets`). Both have a `version` field (1).
+- `perturbation_record` gives bit-identical output to the old layout and reads both layouts.
+- New exports: `perturbation_windows(obj, var, cond)` (named tuples `(tstart, tend, data)`, data a view, insertion order),
+  `compact_perturbation_records!(model_or_obj)` (in place, one variable at a time, verified bit by bit before the old
+  dictionaries are dropped, idempotent, returns windows and bytes converted per variable), `PerturbationStore`,
+  `PerturbationSpikeStore`. Code that read `entry["interval"]`, `entry["data"]` should call `perturbation_windows`;
+  `store[n]` still returns such a dictionary (a copy).
+- Bug fix: after `clear_perturbation_records!(...; n = 2)` of windows `{1,2,3}` the next flush got `n = 3` and overwrote
+  the existing window 3. Window numbers are never reused now (next is `maximum + 1`), for both layouts; `n` refers to the
+  window number. A flush into a condition that still holds the old layout converts it first.
+- Unchanged: a one-sample window (`T = 1`) makes `perturbation_record` throw (Interpolations `ArgumentError`).
+- The two structs have the same names and fields in 1.9.2 and 2.0.2. A `:data` file written by 1.9.2 is still refused by
+  `load_data` in 2.0 (its populations use the 1.9 layout); loading a store without SNNModels loaded makes JLD2 reconstruct it
+  with the arrays accessible by field name.
+
+
 ## 2.0.0 (was 1.10 during development): sparse spike lists, ring-buffer delays, always-lazy trace decay
 Faster event-driven STDP and delayed transmission: fewer scans of the spike flags, type-stable
 plasticity calls, no per-step passes over the neurons when a `SpikeTimeStimulus` drives the network.

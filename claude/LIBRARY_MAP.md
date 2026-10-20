@@ -16,7 +16,7 @@ SNNModels.jl/src/
 │   ├── main.jl         sim! / train! outer loops + innermost dispatch
 │   ├── util.jl         compose, extract_items, print_model, remove_element
 │   ├── copying.jl      modelcopy (deep copy with empty record interception)
-│   ├── perturbation.jl perturbation_test, perturbation_record, clear_perturbation_records!, clear_perturbation_monitor!
+│   ├── perturbation.jl perturbation_test, perturbation_record, perturbation_windows, compact_perturbation_records!, clear_perturbation_records!, clear_perturbation_monitor!
 │   ├── graph.jl        graph(model) → MetaDiGraph, find_id_vertex, filter_edge_props
 │   ├── record.jl       monitor!, record, firing_rate (dispatch), getvariable, clear_records!
 │   ├── io.jl           SNNsave / SNNload / SNNfolder / SNNpath (DrWatson convention)
@@ -765,12 +765,17 @@ perturbation_test(model, simtime, condition!;
 
 Creates `modelcopy(model)` (or uses `from_state`), applies `condition!`, runs sim/train, optionally flushes results into `model`'s perturbation store.
 
-Storage schema:
+Storage schema (1.9.2 / 2.0.2 and later; one ragged store per variable and condition):
 ```
-obj.records[:perturbation][variable::Symbol][condition::String][n::Int]
-    = Dict("interval" => Float32[tstart, tend],
-           "data"     => Matrix{Float32} | Spiketimes)
+obj.records[:perturbation][variable::Symbol][condition::String]
+    = PerturbationStore         # dense: data::Vector{Float32} (N x sum(T), column-major),
+                                #   offsets (first column of each window), tstart, tend, ids
+    | PerturbationSpikeStore    # :fire: times::Vector{Float32}, neuron::Vector{Int32}, offsets, tstart, tend, ids
 ```
+Both have `version` (1) and `N`. Older versions stored `[condition][n] = Dict("interval", "data")` per window;
+readers accept it and `compact_perturbation_records!(model_or_obj)` converts it in place.
+Windows: `perturbation_windows(obj, variable, condition)` returns `(tstart, tend, data)` per window in insertion order
+(dense: `N x T` view; `:fire`: `(neuron, times)` views).
 
 ### `perturbation_record`
 
