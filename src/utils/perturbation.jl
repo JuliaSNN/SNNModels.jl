@@ -191,12 +191,14 @@ abstract type AbstractPerturbationStore end
 Dense perturbation windows of one `(variable, condition)` of an object with `N` rows
 (neurons or synapses). Built by `perturbation_test(...; add_records = condition)`; fields:
 
-- `version::Int`: layout version (1); readers must refuse a larger number.
+- `version::Int`: layout version (1); readers and writers throw an `ArgumentError` ("upgrade SNNModels") for any other number.
 - `N::Int`: rows.
 - `data::Vector{Float32}`: the windows concatenated along time, column-major. Viewed as an
   `N x (sum of window lengths)` matrix, window `j` is the column block
-  `offsets[j] : offsets[j+1]-1` (the last window ends at `length(data) ÷ N`).
-- `offsets::Vector{Int}`: first column of each window (1-based).
+  `offsets[j] : offsets[j+1]-1`, i.e. `data[(offsets[j]-1)*N+1 : (offsets[j+1]-1)*N]`. Nothing divides by `N`,
+  so objects with 0 rows work.
+- `offsets::Vector{Int}`: `length(store) + 1` entries, `offsets[1] = 1`; window `j` is the columns
+  `offsets[j] : offsets[j+1]-1` (zero columns allowed; an empty store has `offsets == [1]`).
 - `tstart::Vector{Float32}`, `tend::Vector{Float32}`: absolute simulation interval (ms) of each window.
 - `ids::Vector{Int}`: window number `n` (the argument `n` of `clear_perturbation_records!`);
   increasing; a new window gets `maximum(ids) + 1`, so numbers are not reused after a deletion.
@@ -214,7 +216,7 @@ struct PerturbationStore <: AbstractPerturbationStore
     ids::Vector{Int}
 end
 PerturbationStore(N::Integer) =
-    PerturbationStore(1, Int(N), Float32[], Int[], Float32[], Float32[], Int[])
+    PerturbationStore(1, Int(N), Float32[], [1], Float32[], Float32[], Int[])
 
 """
     PerturbationSpikeStore(N)
@@ -226,8 +228,8 @@ Spike windows (variable `:fire`) of one condition of an object with `N` neurons.
 - `times::Vector{Float32}`, `neuron::Vector{Int32}`: all spikes of all windows, parallel arrays.
   Inside a window the spikes are sorted by neuron, then by time (the order of
   `spiketimes(pert_obj)` flattened neuron by neuron).
-- `offsets::Vector{Int}`: index in `times` of the first spike of each window (1-based); window `j`
-  is `offsets[j] : offsets[j+1]-1` (the last one ends at `length(times)`).
+- `offsets::Vector{Int}`: `length(store) + 1` entries, `offsets[1] = 1`; window `j` is the spikes
+  `offsets[j] : offsets[j+1]-1` of `times`/`neuron` (an empty store has `offsets == [1]`).
 - `tstart`, `tend`, `ids`: as in [`PerturbationStore`](@ref).
 """
 struct PerturbationSpikeStore <: AbstractPerturbationStore
@@ -241,10 +243,17 @@ struct PerturbationSpikeStore <: AbstractPerturbationStore
     ids::Vector{Int}
 end
 PerturbationSpikeStore(N::Integer) =
-    PerturbationSpikeStore(1, Int(N), Float32[], Int32[], Int[], Float32[], Float32[], Int[])
+    PerturbationSpikeStore(1, Int(N), Float32[], Int32[], [1], Float32[], Float32[], Int[])
 
-Base.length(s::AbstractPerturbationStore) = length(s.offsets)
-Base.isempty(s::AbstractPerturbationStore) = isempty(s.offsets)
+Base.length(s::AbstractPerturbationStore) = length(s.offsets) - 1
+Base.isempty(s::AbstractPerturbationStore) = length(s) == 0
+
+# Readers and writers refuse a layout newer than this code knows.
+function _check_version(s::AbstractPerturbationStore)
+    s.version == 1 || throw(ArgumentError(
+        "perturbation store of layout version $(s.version), but this SNNModels reads version 1 only: upgrade SNNModels"))
+    return s
+end
 Base.keys(s::AbstractPerturbationStore) = copy(s.ids)
 Base.haskey(s::AbstractPerturbationStore, n::Integer) = n in s.ids
 function Base.getindex(s::AbstractPerturbationStore, n::Integer)
@@ -255,7 +264,7 @@ function Base.getindex(s::AbstractPerturbationStore, n::Integer)
     return Dict{String,Any}("interval" => Float32[w.tstart, w.tend], "data" => data)
 end
 function Base.show(io::IO, s::PerturbationStore)
-    print(io, "PerturbationStore(N = $(s.N), $(length(s)) windows, $(length(s.data) ÷ max(s.N, 1)) columns)")
+    print(io, "PerturbationStore(N = $(s.N), $(length(s)) windows, $(s.offsets[end] - 1) columns)")
 end
 function Base.show(io::IO, s::PerturbationSpikeStore)
     print(io, "PerturbationSpikeStore(N = $(s.N), $(length(s)) windows, $(length(s.times)) spikes)")
@@ -264,42 +273,45 @@ end
 _next_id(s::AbstractPerturbationStore) = isempty(s.ids) ? 1 : maximum(s.ids) + 1
 
 function _push_window!(s::PerturbationStore, M::AbstractMatrix, tstart, tend)
+    _check_version(s)
     size(M, 1) == s.N ||
         throw(ArgumentError("perturbation window has $(size(M, 1)) rows, the store has $(s.N)"))
-    push!(s.offsets, length(s.data) ÷ s.N + 1)
     append!(s.data, M)                    # column-major, converted to Float32
+    push!(s.offsets, s.offsets[end] + size(M, 2))
     push!(s.tstart, tstart); push!(s.tend, tend)
     push!(s.ids, _next_id(s))
     return s
 end
 
 function _push_window!(s::PerturbationSpikeStore, st::AbstractVector, tstart, tend)
+    _check_version(s)
     length(st) == s.N ||
         throw(ArgumentError("perturbation window has $(length(st)) neurons, the store has $(s.N)"))
-    push!(s.offsets, length(s.times) + 1)
+    n0 = length(s.times)
     for n in eachindex(st)
         for t in st[n]
             push!(s.times, t)
             push!(s.neuron, n)
         end
     end
+    push!(s.offsets, s.offsets[end] + length(s.times) - n0)
     push!(s.tstart, tstart); push!(s.tend, tend)
     push!(s.ids, _next_id(s))
     return s
 end
 
-_window_range(s::PerturbationStore, j) =
-    ((s.offsets[j] - 1) * s.N + 1):((j < length(s) ? s.offsets[j+1] - 1 : length(s.data) ÷ s.N) * s.N)
-_window_range(s::PerturbationSpikeStore, j) =
-    s.offsets[j]:(j < length(s) ? s.offsets[j+1] - 1 : length(s.times))
+_window_range(s::PerturbationStore, j) = ((s.offsets[j] - 1) * s.N + 1):((s.offsets[j+1] - 1) * s.N)
+_window_range(s::PerturbationSpikeStore, j) = s.offsets[j]:(s.offsets[j+1] - 1)
 
 # Window j as (tstart, tend, data); data is a view (no copy).
 function _window_at(s::PerturbationStore, j)
+    _check_version(s)
     r = _window_range(s, j)
     return (tstart = s.tstart[j], tend = s.tend[j],
-            data = reshape(view(s.data, r), s.N, length(r) ÷ s.N))
+            data = reshape(view(s.data, r), s.N, s.offsets[j+1] - s.offsets[j]))
 end
 function _window_at(s::PerturbationSpikeStore, j)
+    _check_version(s)
     r = _window_range(s, j)
     return (tstart = s.tstart[j], tend = s.tend[j],
             data = (neuron = view(s.neuron, r), times = view(s.times, r)))
@@ -307,7 +319,7 @@ end
 
 # Legacy dictionary layout, same accessors.
 _window_keys(cs::AbstractDict) = sort!(collect(keys(cs)))
-_window_keys(cs::AbstractPerturbationStore) = 1:length(cs)
+_window_keys(cs::AbstractPerturbationStore) = (_check_version(cs); 1:length(cs))
 function _window_at(cs::AbstractDict, k)
     e = cs[k]
     ts, te = e["interval"]
@@ -335,10 +347,11 @@ end
 
 # Delete window with number n; returns true if it existed.
 function _delete_window!(s::PerturbationStore, n)
+    _check_version(s)
     j = findfirst(==(n), s.ids)
     isnothing(j) && return false
     r = _window_range(s, j)
-    ncol = length(r) ÷ s.N
+    ncol = s.offsets[j+1] - s.offsets[j]
     deleteat!(s.data, r)
     deleteat!(s.offsets, j)
     for i in j:length(s.offsets)
@@ -348,6 +361,7 @@ function _delete_window!(s::PerturbationStore, n)
     return true
 end
 function _delete_window!(s::PerturbationSpikeStore, n)
+    _check_version(s)
     j = findfirst(==(n), s.ids)
     isnothing(j) && return false
     r = _window_range(s, j)

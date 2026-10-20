@@ -90,6 +90,12 @@ function _build()
     return m, m_leg, perts
 end
 
+# minimal object carrying one store, to read it through the public accessor
+struct PerturbationHolder
+    records::Dict{Symbol,Any}
+end
+PerturbationHolder(s) = PerturbationHolder(Dict{Symbol,Any}(:perturbation => Dict{Symbol,Any}(:v => Dict{String,Any}("c" => s))))
+
 const _IVS = (0ms:1ms:600ms, -10ms:0.5ms:900ms, 150ms:1ms:260ms, 0ms:2ms:50ms)
 
 @testset "compact perturbation records" begin
@@ -298,6 +304,93 @@ const _IVS = (0ms:1ms:600ms, -10ms:0.5ms:900ms, 150ms:1ms:260ms, 0ms:2ms:50ms)
         @test a[:v]["c1"] isa PerturbationStore
         compact_perturbation_records!(ml)
         @test Base.summarysize(ml.pop.E.records[:perturbation]) < Base.summarysize(b) ÷ 5
+    end
+
+    @testset "CSR offsets, T = 0 windows" begin
+        s = PerturbationStore(3)
+        @test s.offsets == [1] && isempty(s) && length(s) == 0
+        SNNModels._push_window!(s, rand(Float32, 3, 4), 1f0, 2f0)
+        SNNModels._push_window!(s, zeros(Float32, 3, 0), 2f0, 3f0)      # T = 0
+        SNNModels._push_window!(s, rand(Float32, 3, 2), 3f0, 4f0)
+        @test s.offsets == [1, 5, 5, 7] && length(s) == 3
+        ws = perturbation_windows(PerturbationHolder(s), :v, "c")
+        @test [size(w.data) for w in ws] == [(3, 4), (3, 0), (3, 2)]
+        keep = copy(ws[3].data)
+        SNNModels._delete_window!(s, 1)
+        @test s.offsets == [1, 1, 3] && s.ids == [2, 3] && length(s.data) == 6
+        @test perturbation_windows(PerturbationHolder(s), :v, "c")[2].data == keep
+        SNNModels._delete_window!(s, 2); SNNModels._delete_window!(s, 3)
+        @test isempty(s) && s.offsets == [1] && isempty(s.data)
+        sp = PerturbationSpikeStore(2)
+        SNNModels._push_window!(sp, [Float32[], Float32[]], 1f0, 2f0)   # zero spikes
+        SNNModels._push_window!(sp, [Float32[1.5f0], Float32[2f0, 2.5f0]], 2f0, 3f0)
+        @test sp.offsets == [1, 1, 4] && sp.neuron == Int32[1, 2, 2]
+        SNNModels._delete_window!(sp, 1)
+        @test sp.offsets == [1, 4] && sp.ids == [2]
+    end
+
+    @testset "population with N = 0" begin
+        E0 = IF(N = 0, name = "E0")
+        m0 = compose(; E0, silent = true)
+        monitor!(m0.pop.E0, [:v, :fire]; sr = 1kHz)
+        sim!(m0, 50ms)
+        perts0 = Tuple{String,Any}[]
+        for d in (20ms, 30ms)
+            pm = perturbation_test(m0, d; train = false)
+            push!(perts0, ("c", pm))
+            SNNModels._flush_perturbation!(m0, pm, "c")
+            sim!(m0, 10ms)
+        end
+        # 0.5 ms: no dense sample, only a :fire window
+        pm = perturbation_test(m0, 0.5ms; train = false)
+        SNNModels._flush_perturbation!(m0, pm, "c"); push!(perts0, ("c", pm))
+        sim!(m0, 10ms)
+        l0 = deepcopy(m0); clear_perturbation_records!(l0)
+        for (c, pm) in perts0
+            _legacy_flush!(l0, pm, c)
+        end
+        e, l = m0.pop.E0, l0.pop.E0
+        @test e.records[:perturbation][:v]["c"] isa PerturbationStore
+        @test length(e.records[:perturbation][:v]["c"]) == 2
+        @test length(e.records[:perturbation][:fire]["c"]) == 3
+        for var in (:v, :fire)
+            @test _same_rec(perturbation_record(e, var, "c", 0ms:1ms:150ms), perturbation_record(l, var, "c", 0ms:1ms:150ms))
+            @test length(perturbation_windows(e, var, "c")) == length(perturbation_windows(l, var, "c"))
+        end
+        @test [size(w.data) for w in perturbation_windows(e, :v, "c")] == [(0, 20), (0, 30)]
+        # converter
+        compact_perturbation_records!(l0)
+        @test l.records[:perturbation][:v]["c"] isa PerturbationStore
+        @test l.records[:perturbation][:v]["c"].offsets == e.records[:perturbation][:v]["c"].offsets
+        # flush after conversion, clear
+        SNNModels._flush_perturbation!(l0, last(perts0[1]), "c")
+        @test length(l.records[:perturbation][:v]["c"]) == 3
+        clear_perturbation_records!(l0, "c"; variable = :v, n = 1)
+        @test l.records[:perturbation][:v]["c"].ids == [2, 3]
+        # JLD2
+        f = joinpath(mktempdir(), "n0.jld2")
+        JLD2.jldsave(f; model = m0)
+        r = JLD2.load(f, "model")
+        for var in (:v, :fire)
+            @test _same_rec(perturbation_record(e, var, "c", 0ms:1ms:150ms), perturbation_record(r.pop.E0, var, "c", 0ms:1ms:150ms))
+        end
+        clear_perturbation_records!(m0)
+        @test !haskey(e.records, :perturbation)
+    end
+
+    @testset "layout version" begin
+        bad = PerturbationStore(2, 3, Float32[], [1], Float32[], Float32[], Int[])
+        @test_throws ArgumentError SNNModels._push_window!(bad, rand(Float32, 3, 2), 1f0, 2f0)
+        err = try SNNModels._push_window!(bad, rand(Float32, 3, 2), 1f0, 2f0); nothing catch e; e end
+        @test occursin("version 2", err.msg) && occursin("upgrade SNNModels", err.msg)
+        mm = deepcopy(m)
+        mm.pop.E.records[:perturbation][:v]["a"] = bad
+        @test_throws ArgumentError perturbation_windows(mm.pop.E, :v, "a")
+        @test_throws ArgumentError perturbation_record(mm.pop.E, :v, "a", 0ms:1ms:100ms)
+        @test_throws ArgumentError clear_perturbation_records!(mm, "a"; variable = :v, n = 1)
+        badf = PerturbationSpikeStore(2, 2, Float32[], Int32[], [1], Float32[], Float32[], Int[])
+        mm.pop.E.records[:perturbation][:fire]["a"] = badf
+        @test_throws ArgumentError perturbation_record(mm.pop.E, :fire, "a", 0ms:1ms:100ms)
     end
 end
 

@@ -18,6 +18,10 @@ Compact storage of perturbation records (same change as 1.9.2).
 - Bug fix: after `clear_perturbation_records!(...; n = 2)` of windows `{1,2,3}` the next flush got `n = 3` and overwrote
   the existing window 3. Window numbers are never reused now (next is `maximum + 1`), for both layouts; `n` refers to the
   window number. A flush into a condition that still holds the old layout converts it first.
+- Compatibility: records that are compact (written, or converted by `compact_perturbation_records!`, with 2.0.2) cannot be read by
+  the `perturbation_record` of 2.0.1 or earlier: every process that reads such files needs >= 2.0.2. Stores carry a `version` field
+  (1); readers and writers throw an `ArgumentError` for another value. `offsets` has `length(store) + 1` entries (CSR style), so
+  objects with 0 rows and windows with 0 columns work.
 - Unchanged: a one-sample window (`T = 1`) makes `perturbation_record` throw (Interpolations `ArgumentError`).
 - The two structs have the same names and fields in 1.9.2 and 2.0.2. A `:data` file written by 1.9.2 is still refused by
   `load_data` in 2.0 (its populations use the 1.9 layout); loading a store without SNNModels loaded makes JLD2 reconstruct it
