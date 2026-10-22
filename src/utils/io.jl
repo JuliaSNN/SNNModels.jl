@@ -448,25 +448,46 @@ function get_timestamp()
 end
 
 """
-    get_git_commit_hash()
+    get_git_commit_hash(; dir = pwd(), warn = true)
 
-Get current git commit hash of the repository containing the working directory.
+Get the git commit hash (`git rev-parse HEAD`) of the repository containing `dir`
+(default: the working directory).
+
+# Arguments
+- `dir`: directory to run `git` in (any directory inside the work tree).
+- `warn = true`: emit the one-time warning when no repository is found.
 
 # Returns
-- String containing the full commit hash, or `"unknown"` when the working directory is not inside
-  a git repository or git is not available (e.g. cluster jobs run from a copied directory).
-  `write_config` records this string, so a missing repository no longer aborts the run.
+- String containing the full commit hash, or `"unknown"` when `dir` is not inside a git repository,
+  does not exist, or git is not available (e.g. cluster jobs run from a copied directory).
 
 # Note
 - Uses `git` from PATH; honours `GIT_DIR`/`GIT_WORK_TREE` if set.
+- `write_config` looks in the active project directory first, then in the working directory.
 """
-function get_git_commit_hash()
+function get_git_commit_hash(; dir::AbstractString = pwd(), warn::Bool = true)
     try
-        return readchomp(pipeline(`git rev-parse HEAD`; stderr = devnull))
+        isdir(dir) || error("not a directory: $dir")
+        return readchomp(pipeline(setenv(`git rev-parse HEAD`; dir = dir); stderr = devnull))
     catch
-        @warn "get_git_commit_hash: not inside a git repository (or git unavailable); recording \"unknown\"" maxlog = 1
+        warn && @warn "get_git_commit_hash: no git repository found from $dir (or git unavailable); recording \"unknown\"" maxlog = 1
         return "unknown"
     end
+end
+
+# Commit hash recorded by `write_config`: the repository of the active project (the code that produced the
+# run), else the one of the working directory, else "unknown" with a warning.
+function _provenance_commit_hash(commit_dir = nothing)
+    dirs = String[]
+    commit_dir === nothing || push!(dirs, String(commit_dir))
+    proj = Base.active_project()
+    proj === nothing || push!(dirs, dirname(proj))
+    push!(dirs, pwd())
+    for d in dirs
+        h = get_git_commit_hash(; dir = d, warn = false)
+        h != "unknown" && return h
+    end
+    return get_git_commit_hash(; dir = last(dirs), warn = true)
 end
 
 """
@@ -540,7 +561,7 @@ function write_value(file, key, value, indent = "", equal_sign = "=")
 end
 
 """
-    write_config(path, info; config, name="", kwargs...)
+    write_config(path, info; config, name="", commit_dir=nothing, kwargs...)
 
 Write `info` (and `config` if not `nothing`) as Julia source to a text file, preceded by the
 generation timestamp and the git commit hash (`get_git_commit_hash`, `"unknown"` outside a git
@@ -551,6 +572,8 @@ repository).
   `joinpath(path, savename(name, info, "config", connector = "-"))` instead.
 - `info`: `NamedTuple` written as `info = (...)`.
 - `config`: `NamedTuple` written as `config = (...)`, or `nothing`.
+- `commit_dir = nothing`: directory searched first for the git repository whose commit is recorded;
+  then the directory of the active project, then the working directory. `"unknown"` (with a warning) if none is in a repository.
 - `kwargs...`: accepted and ignored.
 
 # Returns
@@ -560,9 +583,9 @@ repository).
 - Entries named `study` or `models` are skipped. (Up to SNNModels 1.8.4 only `models` was
   skipped, because of operator precedence.)
 """
-function write_config(path::String, info; config, name = "", kwargs...)
+function write_config(path::String, info; config, name = "", commit_dir = nothing, kwargs...)
     timestamp = get_timestamp()
-    commit_hash = get_git_commit_hash()
+    commit_hash = _provenance_commit_hash(commit_dir)
 
     if name !== ""
         config_path = joinpath(path, savename(name, info, "config", connector = "-"))
