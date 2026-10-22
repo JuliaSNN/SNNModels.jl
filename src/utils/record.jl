@@ -367,6 +367,16 @@ end
     return times_buf, neurons_buf, length(times_buf) - alloc[:fire]
 end
 
+# Narrow the Int64 neuron ids of a :fire record saved with 2.0.2 to Int32. Only the written prefix is
+# converted: the unwritten tail of a saved buffer is uninitialised memory (arbitrary Int64 values).
+function _narrow_fire_ids(buf::AbstractVector, written::Int)
+    out = Vector{Int32}(undef, length(buf))
+    @inbounds for i in 1:clamp(written, 0, length(buf))
+        out[i] = Int32(buf[i])
+    end
+    return out
+end
+
 """
     _ensure_fire_capacity!(rec, meta, need)
 
@@ -377,7 +387,8 @@ writes). If the countdown `meta[:allocated][:fire]` is short, the buffers grow t
 function _ensure_fire_capacity!(rec, meta, need::Int)
     alloc = meta[:allocated]::Dict{Symbol,Int}
     # buffers of a record saved with 2.0.2 (Int64 ids): narrow once, values unchanged
-    rec[:neurons_buf] isa Vector{Int32} || (rec[:neurons_buf] = Vector{Int32}(rec[:neurons_buf]))
+    rec[:neurons_buf] isa Vector{Int32} ||
+        (rec[:neurons_buf] = _narrow_fire_ids(rec[:neurons_buf], length(rec[:times_buf]) - get(alloc, :fire, 0)))
     remaining = get(alloc, :fire, 0)
     remaining >= need && remaining <= length(rec[:times_buf]::Vector{Float32}) && return nothing
     _grow_fire!(rec, meta, alloc, remaining, need)
@@ -555,7 +566,8 @@ function _allocate_fire!(obj, meta, N::Int, duration::Float32)
     chunk_cap = _fire_capacity(rate, N, duration, false)
     # records saved with 2.0.2 hold Int64 ids: narrow them (values are unchanged)
     if haskey(fire, :neurons_buf) && !(fire[:neurons_buf] isa Vector{Int32})
-        fire[:neurons_buf] = Vector{Int32}(fire[:neurons_buf])
+        fire[:neurons_buf] = _narrow_fire_ids(fire[:neurons_buf],
+            haskey(fire, :times_buf) ? length(fire[:times_buf]) - get(alloc, :fire, 0) : 0)
     end
     # the subset mask is rebuilt at the first step of every sim!/train! (covers in-place edits of the indices)
     delete!(meta, :fire_mask_src)

@@ -55,6 +55,37 @@ end
     end
 end
 
+@testset "2.0.2 Int64 ids: unwritten tail outside the Int32 range is not converted" begin
+    # A saved 2.0.2 buffer keeps its unwritten tail, which is uninitialised memory: arbitrary Int64 values.
+    # Only the written prefix may be narrowed (found on a real SNN2AC model: InexactError on the tail).
+    for continue_with in (:sim, :step)
+        ref, mref = _tonic203()
+        monitor!(ref, [:fire])
+        sim!(mref, 400ms)
+
+        pop, model = _tonic203()
+        monitor!(pop, [:fire])
+        sim!(model, 200ms)
+        rec, alloc = pop.records[:fire], pop.records[:meta][:allocated]
+        written = length(rec[:times_buf]) - alloc[:fire]
+        @test alloc[:fire] > 0                                   # there is an unwritten tail
+        old = Vector{Int}(undef, length(rec[:neurons_buf]))
+        old[1:written] .= rec[:neurons_buf][1:written]
+        old[(written+1):end] .= typemax(Int64)                   # garbage that does not fit in Int32
+        rec[:neurons_buf] = old
+        if continue_with === :sim
+            sim!(model, 200ms)                                   # narrowing in _allocate_fire!
+        else
+            SNNModels._ensure_fire_capacity!(rec, pop.records[:meta], 1)   # narrowing in the per-step path
+            @test rec[:neurons_buf] isa Vector{Int32}
+            @test rec[:neurons_buf][1:written] == old[1:written]
+            sim!(model, 200ms)
+        end
+        @test rec[:neurons_buf] isa Vector{Int32} || pop.records[:fire][:neurons_buf] isa Vector{Int32}
+        @test spiketimes(pop) == spiketimes(ref)
+    end
+end
+
 @testset "clear_monitor! of a model: no warning for Time{Float32}" begin
     pop, model = _tonic203()
     monitor!(pop, [:fire])
