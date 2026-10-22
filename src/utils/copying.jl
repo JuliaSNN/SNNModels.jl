@@ -187,7 +187,7 @@ function modelcopy_internal(x::Union{Dict,IdDict}, stackdict::IdDict)
                         :time        => Vector{Float32}(),
                         :neurons     => Vector{Vector{Int}}(),
                         :times_buf   => Vector{Float32}(),
-                        :neurons_buf => Vector{Int}(),
+                        :neurons_buf => Vector{Int32}(),
                     )
                 else
                     dest[modelcopy_internal(k, stackdict)] = Vector{Float32}()

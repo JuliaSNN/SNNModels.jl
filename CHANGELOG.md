@@ -1,5 +1,28 @@
 # SNNModels changelog
 
+## 2.0.3
+
+Smaller `:fire` records, one allocation for a declared duration, provenance from outside the repository.
+
+- `:fire` COO record: neuron ids are stored as `Int32` (`records[:fire][:neurons_buf]`), 8 instead of 12 bytes per
+  spike. Spike times, `spiketimes`, `firing_rate` and `record(obj, :fire)` are bit-identical to 2.0.2 for the same
+  simulation (checked on a seeded 500-neuron E/I network, 154,824 spikes, against the 2.0.2 code). `_allocate_fire!`
+  throws an `ArgumentError` if `N > typemax(Int32)`.
+- Files saved with 2.0.2 (`Int64` ids) load unchanged and are read as they are (the readers index with any integer
+  type). The next `sim!`/`train!` (or a buffer growth) narrows the loaded buffer to `Int32` before writing to it, so
+  a loaded model can continue recording. Nothing is converted at load time.
+- `monitor!(...; monitor_time = T)` now sizes the `:fire` buffer at the first allocation, like the dense records:
+  `monitor_rate * N * T` spike slots plus a 10 % margin (`monitor_rate` default 20 Hz). In 2.0.2 `:fire` ignored
+  `monitor_time` and was sized from the first `sim!` call. For both `:fire` and dense records a later chunk now
+  only needs room for its own duration, so a run split into many `sim!`/`train!` chunks allocates once (2.0.2: dense
+  records with `monitor_time` extended at every chunk, as less than the whole phase was left). Geometric growth
+  with its one warning remains the fallback when no `monitor_time` is given or the estimate is exceeded.
+  `clear_records!` starts a new phase.
+- `clear_monitor!(::NamedTuple)` skips `Time{Float32}` (`obj isa Time`), no more "Could not clear monitor for Time".
+- `get_git_commit_hash(; dir = pwd(), warn = true)` runs git in `dir`. `write_config` (so `save_model`/`SNNsave`)
+  records the commit of `commit_dir` if given, else of the active project directory, else of the working directory,
+  else `"unknown"` with the warning; processes started outside the repository no longer lose provenance.
+
 ## 2.0.2
 
 Compact storage of perturbation records (same change as 1.9.2).

@@ -312,7 +312,7 @@ function _write_fire_list!(rec, meta, alloc::Dict{Symbol,Int}, L::AbstractVector
     times_buf, neurons_buf, wp = _fire_slots!(rec, meta, alloc, k)
     @inbounds for q in 1:k
         times_buf[wp+q] = t
-        neurons_buf[wp+q] = Int(L[q])
+        neurons_buf[wp+q] = L[q]
     end
     alloc[:fire] -= k
     return nothing
@@ -332,7 +332,7 @@ function _write_fire_masked!(rec, meta, alloc::Dict{Symbol,Int}, L::AbstractVect
         if mask[i]
             j += 1
             times_buf[j] = t
-            neurons_buf[j] = i
+            neurons_buf[j] = Int32(i)
         end
     end
     alloc[:fire] -= m
@@ -352,7 +352,7 @@ function _write_fire_ordered!(rec, meta, alloc::Dict{Symbol,Int}, fire::Abstract
         if fire[i]
             j += 1
             @inbounds times_buf[j] = t
-            @inbounds neurons_buf[j] = i
+            @inbounds neurons_buf[j] = Int32(i)
         end
     end
     alloc[:fire] -= m
@@ -363,8 +363,18 @@ end
 @inline function _fire_slots!(rec, meta, alloc::Dict{Symbol,Int}, need::Int)
     _ensure_fire_capacity!(rec, meta, need)
     times_buf = rec[:times_buf]::Vector{Float32}
-    neurons_buf = rec[:neurons_buf]::Vector{Int}
+    neurons_buf = rec[:neurons_buf]::Vector{Int32}
     return times_buf, neurons_buf, length(times_buf) - alloc[:fire]
+end
+
+# Narrow the Int64 neuron ids of a :fire record saved with 2.0.2 to Int32. Only the written prefix is
+# converted: the unwritten tail of a saved buffer is uninitialised memory (arbitrary Int64 values).
+function _narrow_fire_ids(buf::AbstractVector, written::Int)
+    out = Vector{Int32}(undef, length(buf))
+    @inbounds for i in 1:clamp(written, 0, length(buf))
+        out[i] = Int32(buf[i])
+    end
+    return out
 end
 
 """
@@ -376,6 +386,9 @@ writes). If the countdown `meta[:allocated][:fire]` is short, the buffers grow t
 """
 function _ensure_fire_capacity!(rec, meta, need::Int)
     alloc = meta[:allocated]::Dict{Symbol,Int}
+    # buffers of a record saved with 2.0.2 (Int64 ids): narrow once, values unchanged
+    rec[:neurons_buf] isa Vector{Int32} ||
+        (rec[:neurons_buf] = _narrow_fire_ids(rec[:neurons_buf], length(rec[:times_buf]) - get(alloc, :fire, 0)))
     remaining = get(alloc, :fire, 0)
     remaining >= need && remaining <= length(rec[:times_buf]::Vector{Float32}) && return nothing
     _grow_fire!(rec, meta, alloc, remaining, need)
@@ -384,12 +397,12 @@ end
 
 @noinline function _grow_fire!(rec, meta, alloc::Dict{Symbol,Int}, remaining::Int, need::Int)
     times_buf = rec[:times_buf]::Vector{Float32}
-    neurons_buf = rec[:neurons_buf]::Vector{Int}
+    neurons_buf = rec[:neurons_buf]::Vector{Int32}
     cap = length(times_buf)
     written = clamp(cap - remaining, 0, cap)   # a countdown larger than the buffer (copied model): nothing written
     new_cap = max(2 * cap, written + need, 1)
     new_times = Vector{Float32}(undef, new_cap)
-    new_neurons = Vector{Int}(undef, new_cap)
+    new_neurons = Vector{Int32}(undef, new_cap)
     copyto!(new_times, 1, times_buf, 1, written)
     copyto!(new_neurons, 1, neurons_buf, 1, written)
     rec[:times_buf] = new_times
@@ -496,6 +509,9 @@ function _allocate_keys!(obj, records, meta, ctx::Base.RefValue{Tuple{Float32,Fl
         end
         zero_sample = (!allocated_buffer || dt_changed) ? 1 : 0
         chunk_capacity = floor(Int, floor(Int, hint_ms / dt) / period) + zero_sample
+        # With a declared monitor_time the whole phase is allocated once; a later chunk only needs room for its own
+        # duration (otherwise every chunk would find less than the full phase left and extend).
+        call_capacity = haskey(monitor_time, key) ? floor(Int, floor(Int, duration / dt) / period) : chunk_capacity
 
         if !allocated_buffer || dt_changed
             # First allocation (or dt mismatch → fresh buffer).
@@ -507,8 +523,8 @@ function _allocate_keys!(obj, records, meta, ctx::Base.RefValue{Tuple{Float32,Fl
             # Existing buffer persists across chunks. Ensure room for this chunk;
             # extend in place if the remaining countdown is insufficient.
             remaining = get(alloc, key, 0)
-            if remaining < chunk_capacity
-                _extend_dense!(records, meta, key, chunk_capacity - remaining)
+            if remaining < call_capacity
+                _extend_dense!(records, meta, key, call_capacity - remaining)
             end
         end
     end
@@ -534,20 +550,33 @@ function _extend_dense!(records, meta, key::Symbol, extra::Int)
     return
 end
 
+# Spike slots expected in `ms` milliseconds: rate (Hz) * N * ms, plus a 10 % margin when `margin`.
+_fire_capacity(rate::Float32, N::Int, ms::Float32, margin::Bool) =
+    max(1, ceil(Int, Float64(rate) * max(N, 1) * (Float64(ms) / 1000) * (margin ? 1.1 : 1.0)))
+
 function _allocate_fire!(obj, meta, N::Int, duration::Float32)
+    N <= typemax(Int32) || throw(ArgumentError("cannot record :fire of $(obj.name): N = $N exceeds typemax(Int32); neuron ids are stored as Int32"))
     fire = obj.records[:fire]::Dict{Symbol,AbstractVector}
     alloc = meta[:allocated]::Dict{Symbol,Int}
     rate = get(meta[:monitor_rate]::Dict{Symbol,Float32}, :fire, 20f0)  # Hz; conservative default
-    dur_s = duration / 1000f0
-    chunk_cap = max(1, ceil(Int, rate * max(N, 1) * dur_s))
+    mt = get(meta[:monitor_time]::Dict{Symbol,Float32}, :fire, nothing)
+    # monitor_time (ms, total expected duration) sizes the first allocation, as for dense records; later chunks
+    # only need room for their own duration. Without it: the duration of the call.
+    first_cap = mt === nothing ? _fire_capacity(rate, N, duration, false) : _fire_capacity(rate, N, mt, true)
+    chunk_cap = _fire_capacity(rate, N, duration, false)
+    # records saved with 2.0.2 hold Int64 ids: narrow them (values are unchanged)
+    if haskey(fire, :neurons_buf) && !(fire[:neurons_buf] isa Vector{Int32})
+        fire[:neurons_buf] = _narrow_fire_ids(fire[:neurons_buf],
+            haskey(fire, :times_buf) ? length(fire[:times_buf]) - get(alloc, :fire, 0) : 0)
+    end
     # the subset mask is rebuilt at the first step of every sim!/train! (covers in-place edits of the indices)
     delete!(meta, :fire_mask_src)
     allocated_buffer = haskey(fire, :times_buf) && !isempty(fire[:times_buf])
     if !allocated_buffer
         # First allocation.
-        fire[:times_buf] = Vector{Float32}(undef, chunk_cap)
-        fire[:neurons_buf] = Vector{Int}(undef, chunk_cap)
-        alloc[:fire] = chunk_cap
+        fire[:times_buf] = Vector{Float32}(undef, first_cap)
+        fire[:neurons_buf] = Vector{Int32}(undef, first_cap)
+        alloc[:fire] = first_cap
     else
         # Extend across chunks if remaining room is insufficient for this chunk.
         remaining = get(alloc, :fire, 0)
@@ -563,7 +592,7 @@ function _extend_fire!(fire, meta, extra::Int)
     # Geometric growth: chunked runs reallocate O(log n) times instead of once per chunk.
     new_cap = max(old_cap + extra, 2 * old_cap)
     new_times = Vector{Float32}(undef, new_cap)
-    new_neurons = Vector{Int}(undef, new_cap)
+    new_neurons = Vector{Int32}(undef, new_cap)
     write_ptr > 0 && copyto!(new_times, 1, fire[:times_buf], 1, write_ptr)
     write_ptr > 0 && copyto!(new_neurons, 1, fire[:neurons_buf], 1, write_ptr)
     fire[:times_buf] = new_times
@@ -730,9 +759,12 @@ here.
   rule are recorded at their value at the sampling time, read through `plasticity_value` (lazily decayed
   traces are not stored at that value; reading the field directly returns the stored value). Recording never
   changes the state. A lazily stored variable without a `plasticity_value` method is an `ArgumentError`.
-- `monitor_time`: capacity hint in ms used to size the buffers (default: the duration of the
-  `sim!` call, at least 1 s). Recording beyond the capacity is still correct: the buffer is
-  doubled with a one-time warning.
+- `monitor_time`: total expected recording duration in ms, used to size the buffers once, at the
+  first allocation: dense variables get `monitor_time / dt / period` samples, `:fire` gets
+  `monitor_rate * N * monitor_time` spike slots plus a 10 % margin. Later `sim!`/`train!` chunks
+  reuse the buffer without reallocating (clear the records to start a new phase). Without it the
+  buffers are sized from the duration of the `sim!` call (dense: at least 1 s). Recording beyond the
+  capacity is still correct: the buffer is doubled with a one-time warning.
 - `monitor_rate`: expected maximum firing rate, with units (e.g. `50Hz`), used to size the
   `:fire` buffers (default `20Hz`). A plain number (any value above `1kHz`) is an `ArgumentError`.
 - `verbose = false`: warn about keys already monitored or not found.
@@ -795,7 +827,7 @@ function monitor!(
                 :time => Vector{Float32}(),
                 :neurons => Vector{Vector{Int}}(),
                 :times_buf => Vector{Float32}(),
-                :neurons_buf => Vector{Int}(),
+                :neurons_buf => Vector{Int32}(),
             )
             obj.records[:start_time][:fire] = NaN32
             !isempty(ind) && (obj.records[:indices][:fire] = collect(Int, ind))
@@ -804,6 +836,7 @@ function monitor!(
             meta[:step_count][:fire] = 0
             meta[:grew][:fire] = false
             monitor_rate !== nothing && (meta[:monitor_rate][:fire] = _rate_Hz(monitor_rate))
+            monitor_time !== nothing && (meta[:monitor_time][:fire] = Float32(monitor_time))
             @debug "Monitoring :fire in $(obj.name)"
             :fire ∉ obj.records[:data] && push!(obj.records[:data], :fire)
             continue
@@ -1243,7 +1276,7 @@ function _clear(z)
         if get(mode, key, :legacy) === :dense
             if key === :fire && isa(val, Dict)
                 haskey(val, :times_buf) && (val[:times_buf] = Vector{Float32}())
-                haskey(val, :neurons_buf) && (val[:neurons_buf] = Vector{Int}())
+                haskey(val, :neurons_buf) && (val[:neurons_buf] = Vector{Int32}())
                 haskey(val, :time) && empty!(val[:time])
                 haskey(val, :neurons) && empty!(val[:neurons])
             else
@@ -1278,7 +1311,7 @@ function clear_records!(obj, sym::Symbol)
         if get(mode, key, :legacy) === :dense
             if key === :fire && isa(val, Dict)
                 haskey(val, :times_buf) && (val[:times_buf] = Vector{Float32}())
-                haskey(val, :neurons_buf) && (val[:neurons_buf] = Vector{Int}())
+                haskey(val, :neurons_buf) && (val[:neurons_buf] = Vector{Int32}())
                 haskey(val, :time) && empty!(val[:time])
                 haskey(val, :neurons) && empty!(val[:neurons])
             else
@@ -1322,8 +1355,8 @@ function clear_monitor!(objs::NamedTuple)
         try
             clear_monitor!(obj)
         catch
-            typeof(obj) == String && continue
-            typeof(obj) == Time && continue
+            obj isa String && continue
+            obj isa Time && continue
             @warn "Could not clear monitor for $(nameof(typeof(obj))): $obj"
         end
     end
