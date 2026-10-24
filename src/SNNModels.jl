@@ -31,6 +31,7 @@ using Graphs, MetaGraphs
 include("utils/macros.jl")
 include("utils/unit.jl")
 include("utils/structs.jl")
+include("utils/exp_approx.jl")
 include("utils/threading.jl")
 include("utils/subnormals.jl")
 include("populations/populations.jl")

@@ -3,7 +3,7 @@ abstract type AbstractReceptorVariable <: AbstractSynapseVariable end
 
 @doc raw"""
     ReceptorSynapse(; syn = SomaReceptors, NMDA = NMDAVoltageDependency(),
-                      glu_receptors = [1, 2], gaba_receptors = [3, 4])
+                      glu_receptors = [1, 2], gaba_receptors = [3, 4], decay = 64)
     ReceptorSynapse(syn::ReceptorArray, NMDA::NMDAVoltageDependency{Float32}; kwargs...)
 
 Conductance-based synapse built from an arbitrary list of receptors (`Receptor`), each with its
@@ -30,9 +30,12 @@ B_r(V) = \begin{cases} 1 & \text{if } nmda_r = 0 \\
 where ``b``, ``k`` and ``[\mathrm{Mg}]`` are the fields of the `NMDAVoltageDependency` stored in `NMDA`.
 
 # Integration
-Exact exponential decay over one step (exponential Euler), receptor by receptor:
-`h += α w`; `g = exp(-dt/τd) (g + dt h)`; `h = exp(-dt/τr) h`. The receptor buffers are then
-zeroed. The current is computed with the membrane potential at the beginning of the step.
+Exponential-Euler update of the conductances over one step, receptor by receptor:
+`h += α w`; `g = E(-dt/τd) (g + dt h)`; `h = E(-dt/τr) h`, where `E` is the power-law approximation
+``(1 + x/64)^{64}`` of the exponential (`exp64`; accurate to about 1 % of the decay for `|dt/τ| < 0.4`, not exact), or the one
+selected by `decay`. The receptor buffers are then zeroed. The current is evaluated by the dendritic and point models with
+the potential of the integration stage being computed: for `Tripod` and `BallAndStick` the stage potentials of the Heun method (the
+Euler-predicted potential at the second stage), for the point-neuron models the potential at the beginning of the step.
 
 # Fields
 - `syn::ST = SomaReceptors`: vector of `Receptor` (a `ReceptorArray`); the default is the
@@ -41,6 +44,9 @@ zeroed. The current is computed with the membrane potential at the beginning of 
   ``k = -0.077`` 1/mV, ``[\mathrm{Mg}] = 1`` mM).
 - `glu_receptors::VIT = [1, 2]`: indices in `syn` driven by the `glu` input.
 - `gaba_receptors::VIT = [3, 4]`: indices in `syn` driven by the `gaba` input.
+- `decay::Int = 64`: exponential used in the conductance update: `64` (default, as in every release up to 2.0), `32`
+  (`exp32o`, the `exp32` of the published Tripod code, which maps inputs below -10 to 0), `256`, or `0` (exact `exp`).
+  Not available in `MultiReceptorSynapse`.
 
 Type parameters: `VIT = Vector{Int}`, `ST = Vector{Receptor{Float32}}`,
 `NMDAT = NMDAVoltageDependency{Float32}`. State variables: `ReceptorSynapseVars`. Input
@@ -69,7 +75,10 @@ ReceptorSynapse
     NMDA::NMDAT = NMDAVoltageDependency()
     glu_receptors::VIT = [1, 2]
     gaba_receptors::VIT = [3, 4]
+    decay::Int = 64
 end
+
+snn_kw_finalize(::Type{<:ReceptorSynapse}, f::NamedTuple) = (_check_exp_approx("ReceptorSynapse decay", f.decay); f)
 
 ReceptorSynapse(syn::ReceptorArray, NMDA::NMDAVoltageDependency{Float32}; kwargs...) =
     ReceptorSynapse(; kwargs..., syn = syn, NMDA = NMDA)
@@ -91,12 +100,12 @@ function convert_precision(n::NMDAVoltageDependency{S}, ::Type{T}) where {S,T<:A
     S === T && return n
     d = _from_definition(n, T)
     d === nothing || return d::NMDAVoltageDependency{T}
-    return NMDAVoltageDependency{T}(T(n.b), T(n.k), T(n.mg))
+    return NMDAVoltageDependency{T}(T(n.b), T(n.k), T(n.mg), n.approx)
 end
 function convert_precision(x::ReceptorSynapse, ::Type{T}) where {T<:AbstractFloat}
     _float_type(typeof(x)) === T && return x
     syn, NMDA = _convert_receptors(x.syn, T), convert_precision(x.NMDA, T)
-    return ReceptorSynapse{typeof(x.glu_receptors),typeof(syn),typeof(NMDA)}(syn, NMDA, x.glu_receptors, x.gaba_receptors)
+    return ReceptorSynapse{typeof(x.glu_receptors),typeof(syn),typeof(NMDA)}(syn, NMDA, x.glu_receptors, x.gaba_receptors, x.decay)
 end
 
 
@@ -132,9 +141,10 @@ B_r(V) = \begin{cases} 1 & \text{if } nmda_r = 0 \\
 where ``b``, ``k`` and ``[\mathrm{Mg}]`` are the fields of the `NMDAVoltageDependency` stored in `NMDA`.
 
 # Integration
-Exact exponential decay over one step (exponential Euler), receptor by receptor:
-`h += α w`; `g = exp(-dt/τd) (g + dt h)`; `h = exp(-dt/τr) h`. The receptor buffers are then
-zeroed. The current is computed with the membrane potential at the beginning of the step.
+Exponential-Euler update of the conductances over one step, receptor by receptor:
+`h += α w`; `g = exp64(-dt/τd) (g + dt h)`; `h = exp64(-dt/τr) h`, with the power-law approximation
+``(1 + x/64)^{64}`` of the exponential (not exact). The receptor buffers are then zeroed. The current is evaluated with the
+potential of the integration stage being computed (see `ReceptorSynapse`).
 
 # Fields
 - `syn::ST = SomaReceptors`: vector of `Receptor`.
@@ -236,29 +246,43 @@ end
     dt::AbstractFloat,
     rng::UnitRange{Int},
 ) where {P<:AbstractPopulation,RECT<:NamedTuple}
+    @unpack glu_receptors, gaba_receptors, decay = synapse
+    @unpack glu, gaba = receptors
+    # the exponential is chosen by `decay`: one compiled method per approximation, selected by a branch (no dynamic dispatch)
+    if decay == 64
+        _decay_receptors!(Val(64), synapse, synvars, glu, gaba, dt, rng)
+    elseif decay == 32
+        _decay_receptors!(Val(32), synapse, synvars, glu, gaba, dt, rng)
+    elseif decay == 256
+        _decay_receptors!(Val(256), synapse, synvars, glu, gaba, dt, rng)
+    else
+        _decay_receptors!(Val(0), synapse, synvars, glu, gaba, dt, rng)
+    end
+    z = zero(eltype(glu))
+    @inbounds for i in rng
+        glu[i] = z
+        gaba[i] = z
+    end
+end
+
+@inline function _decay_receptors!(::Val{N}, synapse, synvars, glu, gaba, dt, rng) where {N}
     @unpack glu_receptors, gaba_receptors = synapse
     @unpack g, h = synvars
-    @unpack glu, gaba = receptors
     @inbounds for n in glu_receptors
         @unpack τr⁻, τd⁻, α = synapse.syn[n]
         @turbo for i ∈ rng
             h[i, n] += glu[i] * α
-            g[i, n] = exp64(-dt * τd⁻) * (g[i, n] + dt * h[i, n])
-            h[i, n] = exp64(-dt * τr⁻) * (h[i, n])
+            g[i, n] = _expapprox(Val(N), -dt * τd⁻) * (g[i, n] + dt * h[i, n])
+            h[i, n] = _expapprox(Val(N), -dt * τr⁻) * (h[i, n])
         end
     end
     @simd for n in gaba_receptors
         @unpack τr⁻, τd⁻, α = synapse.syn[n]
         @turbo for i ∈ rng
             h[i, n] += gaba[i] * α
-            g[i, n] = exp64(-dt * τd⁻) * (g[i, n] + dt * h[i, n])
-            h[i, n] = exp64(-dt * τr⁻) * (h[i, n])
+            g[i, n] = _expapprox(Val(N), -dt * τd⁻) * (g[i, n] + dt * h[i, n])
+            h[i, n] = _expapprox(Val(N), -dt * τr⁻) * (h[i, n])
         end
-    end
-    z = zero(eltype(glu))
-    @inbounds for i in rng
-        glu[i] = z
-        gaba[i] = z
     end
 end
 
@@ -367,7 +391,7 @@ end
 @inline function _synaptic_current_rng!(synapse, synvars, v, syncurr, rng::UnitRange{Int})
     @unpack g, h = synvars
     @unpack syn, NMDA = synapse
-    @unpack mg, b, k = NMDA
+    @unpack mg, b, k, approx = NMDA
     mgb = mg / b    # loop invariant
     # Receptor by receptor, so every neuron accumulates in receptor order; the NMDA factor is evaluated only for NMDA receptors.
     for n in eachindex(syn)
@@ -376,15 +400,26 @@ end
             @inbounds @simd for neuron ∈ rng
                 syncurr[neuron] += gsyn * g[neuron, n] * (v[neuron] - E_rev)
             end
+        elseif approx == 256
+            _nmda_current!(Val(256), syncurr, g, v, n, gsyn, E_rev, k, mgb, rng)
+        elseif approx == 32
+            _nmda_current!(Val(32), syncurr, g, v, n, gsyn, E_rev, k, mgb, rng)
+        elseif approx == 64
+            _nmda_current!(Val(64), syncurr, g, v, n, gsyn, E_rev, k, mgb, rng)
         else
-            @inbounds @simd for neuron ∈ rng
-                syncurr[neuron] +=
-                    gsyn *
-                    g[neuron, n] *
-                    (v[neuron] - E_rev) *
-                    (1 / (one(mgb) + mgb * exp256(k * v[neuron])))
-            end
+            _nmda_current!(Val(0), syncurr, g, v, n, gsyn, E_rev, k, mgb, rng)
         end
+    end
+end
+
+# current of one NMDA receptor (with the magnesium block, exponential `_expapprox(Val(N), ·)`) added to `syncurr` on `rng`
+@inline function _nmda_current!(::Val{N}, syncurr, g, v, n, gsyn, E_rev, k, mgb, rng) where {N}
+    @inbounds @simd for neuron ∈ rng
+        syncurr[neuron] +=
+            gsyn *
+            g[neuron, n] *
+            (v[neuron] - E_rev) *
+            (1 / (one(mgb) + mgb * _expapprox(Val(N), k * v[neuron])))
     end
 end
 
