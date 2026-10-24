@@ -43,7 +43,7 @@ MouseNMDA = _predefined(NMDAVoltageDependency; mg = 1.0, b = 3.57, k = -0.062)
 # Before 2.1.0 the library used E_rev -70 mV (soma and dendrite) and a somatic τr of 0.1 ms.
 MilesGabaSoma = _predefined(Receptor; E_rev = -75.0, τr = 0.3, τd = 15.0, g0 = 0.38, target = :gaba)
 
-DuarteGluSoma = _predefined(Receptor; E_rev = 0.0, τr = 0.26, τd = 2.0, g0 = 0.73, target = :glu)
+DuarteGluSoma = _predefined(Receptor; E_rev = 0.0, τr = 0.25, τd = 2.0, g0 = 0.73, target = :glu)   # original synapses.jl:133
 
 EyalGluDend = Glutamatergic(
     AMPA = _predefined(Receptor; E_rev = 0.0, τr = 0.26, τd = 2.0, g0 = 0.73, target = :glu),
@@ -83,10 +83,9 @@ DuarteGluDend = Glutamatergic(
 )
 TripodDendReceptorsMouse = Receptors(DuarteGluDend, MilesGabaDend)
 
-# Receptors of the published Tripod code (8698e1a). Since 2.1.0 the library GABA receptors are those of the code
-# (`MilesGabaSoma`, `MilesGabaDend`), so the Paper names are aliases; the only receptor that still differs is the somatic
-# AMPA τr 0.25 ms (library 0.26; `DuarteGluSoma` at synapses.jl:133 of the original).
-PaperGluSoma = _predefined(Receptor; E_rev = 0.0, τr = 0.25, τd = 2.0, g0 = 0.73, target = :glu)
+# Receptors of the published Tripod code (8698e1a). Since 2.1.0 the library defaults are those of the code
+# (`MilesGabaSoma`, `MilesGabaDend`, `DuarteGluSoma`), so the Paper names are aliases.
+PaperGluSoma = DuarteGluSoma
 PaperGabaSoma = MilesGabaSoma
 PaperGabaDend = MilesGabaDend
 
@@ -98,15 +97,15 @@ Default somatic synapse of `Tripod` and `BallAndStick`: a `ReceptorSynapse` with
 
 | Receptor | E_rev (mV) | τr (ms) | τd (ms) | g0 (nS) |
 |:---------|-----------:|--------:|--------:|--------:|
-| AMPA (`DuarteGluSoma`) | 0 | 0.26 | 2.0 | 0.73 |
+| AMPA (`DuarteGluSoma`) | 0 | 0.25 | 2.0 | 0.73 |
 | GABAa (`MilesGabaSoma`) | -75 | 0.3 | 15.0 | 0.38 |
 
 The GABA parameters are those of the published Tripod code (`aquaresima/tripod_neuron` at 8698e1a,
 `src/TripodNeuron.jl/src/model/synapses.jl:123-126`, `MilesGabaSoma`: E_rev -75.0, τr 0.3, τd 15.0, g0 0.38), which cites Miles
 et al. (1996), Neuron 16(4):815-823. Until 2.0 the library used E_rev -70 mV and τr 0.1 ms; the change in 2.1.0 alters the
 results of models with the default synapses. The AMPA parameters are attributed to Duarte and Morrison (bioRxiv 2017,
-doi:10.1101/230821; the Tripod paper cites it as Duarte and Morrison 2019); the published code uses AMPA τr 0.25 ms
-(`DuarteGluSoma`, `synapses.jl:132-134`) instead of 0.26 ms, kept in `TripodSomaSynapsePaper`.
+doi:10.1101/230821; the Tripod paper cites it as Duarte and Morrison 2019); τr 0.25 ms as in the published code
+(`DuarteGluSoma`, `synapses.jl:132-134`; until 2.0 the library used 0.26 ms).
 """
 TripodSomaSynapse = ReceptorSynapse(
     glu_receptors = [1],

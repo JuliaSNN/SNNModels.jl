@@ -415,8 +415,8 @@ end
     d = TripodDendSynapse.syn
     @test (d[3].E_rev, d[3].τr, d[3].τd, d[3].g0) == (-75f0, 4.8f0, 29f0, 0.27f0)
     @test (d[4].E_rev, d[4].τr, d[4].τd, d[4].g0) == (-90f0, 30f0, 400f0, 0.006f0)
-    # the somatic AMPA of the library keeps τr 0.26 ms (the original has 0.25 ms: TripodSomaSynapsePaper)
-    @test TripodSomaSynapse.syn[1].τr == 0.26f0 && TripodSomaSynapsePaper.syn[1].τr == 0.25f0
+    # the somatic AMPA default follows the original (τr 0.25 ms, synapses.jl:133)
+    @test TripodSomaSynapse.syn[1].τr == 0.25f0 && TripodSomaSynapsePaper.syn[1].τr == 0.25f0
     @test TripodSomaSynapsePaper.syn[2] === TripodSomaSynapse.syn[2] || TripodSomaSynapsePaper.syn[2] == TripodSomaSynapse.syn[2]
     @test [r.E_rev for r in TripodDendSynapsePaper.syn] == [r.E_rev for r in TripodDendSynapse.syn]
 end
