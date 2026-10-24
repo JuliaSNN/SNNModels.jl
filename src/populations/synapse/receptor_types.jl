@@ -38,7 +38,10 @@ MouseNMDA = _predefined(NMDAVoltageDependency; mg = 1.0, b = 3.57, k = -0.062)
 #     layer 2/3 cortical microcircuits, bioRxiv, doi:10.1101/230821 (somatic AMPA, mouse dendritic AMPA/NMDA; the Tripod
 #     paper cites it as Duarte and Morrison 2019).
 ## Tripod
-MilesGabaSoma = _predefined(Receptor; E_rev = -70.0, τr = 0.1, τd = 15.0, g0 = 0.38, target = :gaba)
+# GABAa of the soma and dendrite follow the original Tripod code (aquaresima/tripod_neuron, 8698e1a,
+# src/TripodNeuron.jl/src/model/synapses.jl): `MilesGabaSoma` at line 124, `MilesGabaDend` at lines 119-120.
+# Before 2.1.0 the library used E_rev -70 mV (soma and dendrite) and a somatic τr of 0.1 ms.
+MilesGabaSoma = _predefined(Receptor; E_rev = -75.0, τr = 0.3, τd = 15.0, g0 = 0.38, target = :gaba)
 
 DuarteGluSoma = _predefined(Receptor; E_rev = 0.0, τr = 0.26, τd = 2.0, g0 = 0.73, target = :glu)
 
@@ -54,7 +57,7 @@ EyalGluDend = Glutamatergic(
     ),
 )
 MilesGabaDend = GABAergic(
-    _predefined(Receptor; E_rev = -70.0, τr = 4.8, τd = 29.0, g0 = 0.27, target = :gaba),
+    _predefined(Receptor; E_rev = -75.0, τr = 4.8, τd = 29.0, g0 = 0.27, target = :gaba),
     _predefined(Receptor; E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.006, target = :gaba), # τd = 100.0
 )
 
@@ -80,14 +83,12 @@ DuarteGluDend = Glutamatergic(
 )
 TripodDendReceptorsMouse = Receptors(DuarteGluDend, MilesGabaDend)
 
-# Receptors of the published Tripod code (8698e1a) that differ from the library ones: GABAa reversal -75 mV on soma and
-# dendrite (the library uses -70 mV), somatic GABAa τr 0.3 ms (0.1), somatic AMPA τr 0.25 ms (0.26).
+# Receptors of the published Tripod code (8698e1a). Since 2.1.0 the library GABA receptors are those of the code
+# (`MilesGabaSoma`, `MilesGabaDend`), so the Paper names are aliases; the only receptor that still differs is the somatic
+# AMPA τr 0.25 ms (library 0.26; `DuarteGluSoma` at synapses.jl:133 of the original).
 PaperGluSoma = _predefined(Receptor; E_rev = 0.0, τr = 0.25, τd = 2.0, g0 = 0.73, target = :glu)
-PaperGabaSoma = _predefined(Receptor; E_rev = -75.0, τr = 0.3, τd = 15.0, g0 = 0.38, target = :gaba)
-PaperGabaDend = GABAergic(
-    _predefined(Receptor; E_rev = -75.0, τr = 4.8, τd = 29.0, g0 = 0.27, target = :gaba),
-    _predefined(Receptor; E_rev = -90.0, τr = 30, τd = 400.0, g0 = 0.006, target = :gaba),
-)
+PaperGabaSoma = MilesGabaSoma
+PaperGabaDend = MilesGabaDend
 
 """
     TripodSomaSynapse :: ReceptorSynapse
@@ -98,12 +99,14 @@ Default somatic synapse of `Tripod` and `BallAndStick`: a `ReceptorSynapse` with
 | Receptor | E_rev (mV) | τr (ms) | τd (ms) | g0 (nS) |
 |:---------|-----------:|--------:|--------:|--------:|
 | AMPA (`DuarteGluSoma`) | 0 | 0.26 | 2.0 | 0.73 |
-| GABAa (`MilesGabaSoma`) | -70 | 0.1 | 15.0 | 0.38 |
+| GABAa (`MilesGabaSoma`) | -75 | 0.3 | 15.0 | 0.38 |
 
-The GABA parameters are attributed to Miles et al. (1996), Neuron 16(4):815-823; the AMPA
-parameters to Duarte and Morrison (bioRxiv 2017, doi:10.1101/230821; the Tripod paper cites it as Duarte and
-Morrison 2019). The published Tripod code uses AMPA τr 0.25 ms and GABAa E_rev -75 mV, τr 0.3 ms
-(`TripodSomaSynapsePaper`).
+The GABA parameters are those of the published Tripod code (`aquaresima/tripod_neuron` at 8698e1a,
+`src/TripodNeuron.jl/src/model/synapses.jl:123-126`, `MilesGabaSoma`: E_rev -75.0, τr 0.3, τd 15.0, g0 0.38), which cites Miles
+et al. (1996), Neuron 16(4):815-823. Until 2.0 the library used E_rev -70 mV and τr 0.1 ms; the change in 2.1.0 alters the
+results of models with the default synapses. The AMPA parameters are attributed to Duarte and Morrison (bioRxiv 2017,
+doi:10.1101/230821; the Tripod paper cites it as Duarte and Morrison 2019); the published code uses AMPA τr 0.25 ms
+(`DuarteGluSoma`, `synapses.jl:132-134`) instead of 0.26 ms, kept in `TripodSomaSynapsePaper`.
 """
 TripodSomaSynapse = ReceptorSynapse(
     glu_receptors = [1],
@@ -122,11 +125,13 @@ receptors, `glu_receptors = [1, 2]`, `gaba_receptors = [3, 4]`, `NMDA = EyalNMDA
 |:---------|-----------:|--------:|--------:|--------:|:----------:|
 | AMPA  | 0   | 0.26 | 2.0   | 0.73  | no  |
 | NMDA  | 0   | 8    | 35.0  | 1.31  | yes |
-| GABAa | -70 | 4.8  | 29.0  | 0.27  | no  |
+| GABAa | -75 | 4.8  | 29.0  | 0.27  | no  |
 | GABAb | -90 | 30   | 400.0 | 0.006 | no  |
 
 AMPA/NMDA parameters attributed to Eyal et al. (2018), Front. Cell. Neurosci. 12,
-doi:10.3389/fncel.2018.00181; GABA parameters to Miles et al. (1996), Neuron 16(4):815-823.
+doi:10.3389/fncel.2018.00181 (`EyalGluDend`, `synapses.jl:109-112` of the original); GABA parameters are those of the published
+Tripod code (`MilesGabaDend`, `synapses.jl:118-121`: GABAa -75 mV, 4.8, 29, 0.27; GABAb -90 mV, 30, 400, 0.006), which cites
+Miles et al. (1996), Neuron 16(4):815-823. Until 2.0 the GABAa reversal potential was -70 mV.
 """
 TripodDendSynapse = ReceptorSynapse(
     glu_receptors = [1, 2],
@@ -171,8 +176,8 @@ TripodSomaSynapsePaper = ReceptorSynapse(
 """
     TripodDendSynapsePaper :: ReceptorSynapse
 
-Human dendritic synapse of the published Tripod code (8698e1a): the receptors of `TripodDendSynapse` with GABAa E_rev -75 mV
-(`PaperGabaDend`), the Mg block of that code (`EyalNMDA32`, exponential `(1 + x/32)^32`) and `decay = 32`.
+Human dendritic synapse of the published Tripod code (8698e1a): the receptors of `TripodDendSynapse` (identical to it for GABA
+since 2.1.0; `PaperGabaDend` is an alias of `MilesGabaDend`), the Mg block of that code (`EyalNMDA32`, exponential `(1 + x/32)^32`) and `decay = 32`.
 """
 TripodDendSynapsePaper = ReceptorSynapse(
     glu_receptors = [1, 2],

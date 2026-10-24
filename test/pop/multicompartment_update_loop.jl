@@ -255,6 +255,7 @@ const _TRIPOD_POT = (:v_s, :w_s, :v_d1, :v_d2, :θ)              # state after t
 const _BAS_POT = (:v_s, :w_s, :v_d, :θ)
 _mc_synvars(T) = T === Tripod ? (:synvars_s, :synvars_d1, :synvars_d2) : (:synvars_s, :synvars_d)
 const _STAGE_ULPS = 4          # other targets: |Δv - Δv_ref| <= 4 ulp of the magnitude of the terms of the derivative
+const _STATE_ATOL = 1f-5       # mV: floor for potentials that cross 0 mV, where a purely relative bound is meaningless (a 1e-7 mV difference at -3.5e-4 mV)
 const _STATE_RTOL = 3f-5       # other targets: potentials within 3e-5 relative after one whole step from the same state
 # x86-64 with hardware FMA: the target on which the `muladd` order of `update_neuron!` is the compiled order of the `@fastmath`
 # reference (checked on Sapphire Rapids, Julia 1.12), so the comparison is bit for bit.
@@ -326,7 +327,7 @@ function _stage_ulps(q, T, dt)
     return us[1], us[2], same, bits
 end
 
-_rclose(x, y, rtol) = size(x) == size(y) && all(i -> x[i] == y[i] || abs(x[i] - y[i]) <= rtol * max(abs(x[i]), abs(y[i])), eachindex(x))
+_rclose(x, y, rtol, atol = 0) = size(x) == size(y) && all(i -> x[i] == y[i] || abs(x[i] - y[i]) <= rtol * max(abs(x[i]), abs(y[i])) + atol, eachindex(x))
 _maxrel(x, y) = isempty(x) ? 0.0 : maximum(i -> x[i] == y[i] ? 0.0 : Float64(abs(x[i] - y[i]) / max(abs(x[i]), abs(y[i]))), eachindex(x))
 
 # copy the state of `q` into `p` (state fields and synaptic variables)
@@ -392,7 +393,7 @@ function _mc_pair(T, N; nsteps = 150, seed = 1, dt = 0.1f0, spike = PostSpike(τ
         loop_state_equal(p, q, exact) || return fail(s, loop_first_diff(p, q, exact))
         for f in pot
             _BITWISE && !loop_same(getfield(p, f), getfield(q, f)) && return fail(s, f)
-            _rclose(getfield(p, f), getfield(q, f), _STATE_RTOL) || return fail(s, f)
+            _rclose(getfield(p, f), getfield(q, f), _STATE_RTOL, _STATE_ATOL) || return fail(s, f)
             rel = max(rel, _maxrel(getfield(p, f), getfield(q, f)))
         end
         nspk += count(p.fire); nbp += count(>(n_abs), p.tabs); nrf += count(t -> 0 < t <= n_abs, p.tabs); nfree += count(<=(0), p.tabs)

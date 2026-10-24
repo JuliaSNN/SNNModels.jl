@@ -20,6 +20,17 @@ period) in both stages, `w_s` stays frozen, and the dendrites still hold on the 
     0.3 %. The effect grows with the NMDA drive and with the length of the clamped window (`up + τabs`, 2 ms by default).
   Results of Tripod/BallAndStick simulations with spikes are not reproducible bit for bit across 2.0.x and 2.1.0.
 
+**Results change (GABA defaults).** The default somatic and dendritic GABA_A of Tripod/BallAndStick changed to the original Tripod
+code (`aquaresima/tripod_neuron` at 8698e1a, `src/TripodNeuron.jl/src/model/synapses.jl:119` and `:124`): E_rev -70 -> -75 mV (soma
+and dendrite), somatic τr 0.1 -> 0.3 ms; results change for models using the default synapses (`MilesGabaSoma`, `MilesGabaDend`,
+`TripodSomaSynapse`, `TripodDendSynapse`, `TripodDendSynapseMouse`). Unchanged: τd and g0 of both, dendritic GABA_A τr 4.8 / τd 29 /
+g0 0.27, dendritic GABA_B (-90 mV, 30, 400, 0.006), all AMPA/NMDA (the somatic AMPA default keeps τr 0.26 ms; the original has
+0.25 ms, in `TripodSomaSynapsePaper`). `TripodPaper` is unchanged (`PaperGabaSoma`, `PaperGabaDend` are now aliases of the defaults).
+Standard network (`rate_net.jl`, seeds 7 / 8, soma-clamp-fixed 2.1.0 before -> with the GABA change): Tripod mu_e 0.15: 0.046 / 0.079 ->
+0 / 0 Hz; 0.2: 26.34 / 25.81 -> 23.78 / 23.19 Hz (-10 %); 0.3: 55.75 / 55.91 -> 55.31 / 55.43 Hz (-0.8 %); BallAndStick 0.3: 13.90 /
+14.19 -> 14.05 / 14.34; 0.4: 22.72 / 22.92 -> 23.10 / 23.32; 0.6: 34.99 / 35.09 -> 35.41 / 35.49 Hz (about +1 %). Tests that encoded the old
+values: `precision_populations.jl` (receptor table of the default synapses).
+
 Other changes (no change of results unless stated):
 - Dendrite diameter: `d` (default `4um`) in `DendNeuronParameter`, `TripodParameter`, `BallAndStickParameter`, passed to
   `create_dendrite` (`g_ax` ~ d^2, `g_m` ~ d, `C` ~ d). The default reproduces 2.0 exactly.
