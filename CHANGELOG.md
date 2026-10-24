@@ -1,5 +1,67 @@
 # SNNModels changelog
 
+## 2.1.0
+
+Tripod / BallAndStick: soma-clamp fix (RESULTS CHANGE), dendrite diameter, fixed paper configurations, mouse synapses, and
+`TripodPaper`, the configuration that reproduces the published Tripod code.
+
+**Results change.** During the somatic back-propagating spike (`up`) and the absolute refractory period (`τabs`) the dendrites of
+`Tripod` and `BallAndStick` only relaxed axially towards the clamped soma (forward Euler), without leak and without any synaptic
+current, NMDA included. One somatic spike could therefore end an NMDA plateau. Both periods now integrate the full dendritic
+derivative (leak, all synaptic currents, axial current to the clamped soma, external current) with the same Heun scheme as free
+integration; the soma is held at its clamp value (`AP_membrane` during the back-propagation, `adex.Vr` during the refractory
+period) in both stages, `w_s` stays frozen, and the dendrites still hold on the spike step itself. Free integration is unchanged
+(same arithmetic, same speed, bit-identical to the reference loops of the tests). Measured effects:
+  - paper Fig. 8 protocol (one NMDA event of weight 100 on d1, both dendrites 250 um, original parameters): plateau (time with
+    V_d1 >= -60 mV) 28.7 ms in 2.0.3, 54.2 ms in 2.1.0 (the original code gives 58.4 ms with its own exp32 Mg block); 400 um: 67.2
+    ms unchanged (no spike); 150 um: 13.2 -> 13.7 ms.
+  - default `Tripod(N = 200)` under Poisson noise on d1, d2, soma (5 s, two seeds, `rate_net.jl` of the audit): mean rate 25.7 ->
+    26.1 Hz at the intermediate drive (+1.5 %), 54.7 -> 55.8 Hz at the strongest (+2.1 %); default `BallAndStick`: changes below
+    0.3 %. The effect grows with the NMDA drive and with the length of the clamped window (`up + τabs`, 2 ms by default).
+  Results of Tripod/BallAndStick simulations with spikes are not reproducible bit for bit across 2.0.x and 2.1.0.
+
+Other changes (no change of results unless stated):
+- Dendrite diameter: `d` (default `4um`) in `DendNeuronParameter`, `TripodParameter`, `BallAndStickParameter`, passed to
+  `create_dendrite` (`g_ax` ~ d^2, `g_m` ~ d, `C` ~ d). The default reproduces 2.0 exactly.
+- Fixed configurations of the paper as `ds` presets: `distal_distal` (400, 400 um), `proximal_proximal` (150, 150), `proximal_distal`
+  (150, 400), `distal_proximal` (400, 150: the default of the published code, whose protocols stimulate d1), `soma_only`
+  (both dendrites disconnected). **Renamed presets (behaviour change for the old names):** `proximal_distal` (random 150-400 um) is now
+  `random_proximal_distal`, `proximal_proximal` (random 150-300 um) is now `random_proximal_proximal`; the old names give the fixed
+  lengths above. `proximal` and `all_lengths` are unchanged.
+- `create_dendrite`: the 500 um length bound (added without a documented reason in the 2025 import, probably a guard against a length
+  given without unit) is replaced by a guard at 1000 um with a message about units; paper Fig. 3 uses 550 um dendrites.
+- Mouse synapses: `DuarteGluDend` (dendritic AMPA E 0, tau_r 0.25, tau_d 2 ms, g0 0.73 nS; NMDA tau_r 0.99, tau_d 100 ms, g0 0.159 nS,
+  as `DuarteGluDend` of the published code), `TripodDendSynapseMouse` (selected with `dend_syn =`; the default `dend_syn` of `Tripod`
+  is unchanged), `MouseNMDA` (b 3.57, k -0.062, the mouse values printed in the paper; the published code does not use them and runs the
+  mouse with the human block 3.36 / -0.077, which `TripodDendSynapseMouse` follows).
+- NMDA block option `NMDAVoltageDependency(approx = 256)` (default unchanged): `32` is the `exp32` of the published code (block
+  0.0225 at -70 mV instead of 0.0160), `64`, or `0` for the exact exponential; `EyalNMDA32` is predefined. Receptor decay option
+  `ReceptorSynapse(decay = 64)` (default unchanged): `32`, `256`, `0`. New internal `exp32o` (inputs below -10 give exactly 0 as in
+  the original).
+- `TripodPaper(; N, physiology = :human | :mouse, config = :distal_proximal, d, VFT, kwargs...)`: a `Tripod` with the parameters of
+  `aquaresima/tripod_neuron` at 8698e1a written out in its docstring (AdEx 281 pF / 40 nS / -70.6 / 2 / -50.4 / 4 / 80.5 / 144; spike
+  test `V_s >= -50.4 mV` on the potential at the start of the step; 21 mV spike step, 20 mV for 9 steps, 21 refractory steps
+  (`up = 1 ms`, `τabs = 2.1 ms` at dt 0.1 ms); initial state at E_L; GABAa -75 mV, soma AMPA tau_r 0.25 / GABAa 0.3 ms; exp32 Mg
+  block and synaptic decay; dendritic synaptic current clamped to +-1500 pA). The integration is the split scheme of that code
+  (`scheme = PaperScheme()`, new `Tripod` field, default `HeunScheme()`): external current as a kick, axial currents frozen over
+  the step, dendrites two-stage with frozen axial current, forward-Euler `w`, soma two-stage with the new `w`, dendrites integrated
+  against the stored soma potential during the clamp. Use `dt = 0.1ms` (a warning is issued once for another step). Predefined
+  receptor sets of the original: `TripodSomaSynapsePaper`, `TripodDendSynapsePaper`, `TripodDendSynapsePaperMouse`. Against the original
+  code on the audit protocols (dt 0.1 ms, identical inputs): subthreshold step and EPSP max |dV| < 1e-3 mV, 1200 pA step 15/15 spikes
+  at identical times, frozen Poisson input 35/35 spikes at identical times, Fig. 8 plateaus 71.1 / 58.4 / 28.7 ms (400 / 250 / 150 um)
+  identical to the original. Not implemented: `soma_only` routing of dendritic inputs to the soma, `ampa_equivalent`, `BAP_gax`
+  (default 1 in the original, 2 only in a revision-figure script).
+- Documentation fixes: `ReceptorSynapse`/`MultiReceptorSynapse` (the decay is the `exp64` approximation, not exact; the current uses the
+  stage potentials of the Heun method in `Tripod`/`BallAndStick`), `Tripod` (Eq. 1 of the preprint has no g_L on the exponential
+  term while the code and the model have it; `Vspike = adex.Vt` does not reproduce the original spike rule), references of the cable
+  constants (Eyal et al. 2016, Dasika et al. 2007), of the receptors (Eyal et al. 2018, Miles et al. 1996, Duarte and Morrison) as given
+  in the original code.
+- Tests: `test/pop/tripod_21.jl` (all of the above, with small reference traces of the original code in `test/data`); the TripodPaper
+  case in `threading_synapses.jl`; the reference loops of `multicompartment_update_loop.jl` follow the new clamped period (they were
+  the bug-for-bug reference of the axial-only Euler step).
+- Validation: `papers/JuliaSNN_publication/validation/tripod_audit` of the JuliaSNN repository (audit, `tripodpaper_check.jl`).
+- Test suite: 78323 pass, 1 broken (the `@test_skip` of 2.0.3; 78092 + 1 before: +181 in `tripod_21.jl`, +50 TripodPaper cases in the threading test).
+
 ## 2.0.3
 
 Smaller `:fire` records, one allocation for a declared duration, provenance from outside the repository.
