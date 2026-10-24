@@ -1,3 +1,47 @@
+"""
+    AbstractTripodScheme
+
+Integration scheme of `Tripod`, the `scheme` field: `HeunScheme()` (default, Heun method on the full state) or
+`PaperScheme()` (the split two-stage scheme and spike rules of the published Tripod code, see `TripodPaper`).
+"""
+abstract type AbstractTripodScheme end
+
+"""
+    HeunScheme()
+
+Default integration scheme of `Tripod`: Heun (explicit trapezoidal) method on the whole state, see the Integration section
+of `Tripod`.
+"""
+struct HeunScheme <: AbstractTripodScheme end
+
+"""
+    PaperScheme(; AP_spike = 21mV)
+
+Integration scheme that reproduces the published Tripod code (`aquaresima/tripod_neuron`, commit 8698e1a,
+`simulator/simulation.jl`) step by step; selected by `TripodPaper`. It differs from `HeunScheme` in the following (all of them
+checked against that code, see `validation/tripod_audit` of the JuliaSNN publication repository):
+- order of operations in a step: external currents added as an Euler kick `dt I / C` to the potentials; synapses advanced;
+  then, per neuron, the spike test `V_s >= Vspike` on the potential at the start of the step (not on a prediction);
+- free integration: the axial currents are computed once from the potentials at the start of the step and kept fixed in
+  both stages; each dendrite takes a two-stage Heun step with them; `w_s` takes a forward-Euler step with the old `V_s`;
+  then the soma takes a two-stage Heun step with the new `w_s` and the fixed axial currents; the exponential term uses
+  `exp32o`; the somatic synaptic current is not clamped (the dendritic ones are, at ±1500 pA);
+- spike: `V_s` is set to `AP_spike`, `w_s += b`, the dendrites are not integrated in the spike step;
+- backpropagation and refractory period: the dendrites are integrated in full against the somatic potential stored from the
+  previous step (so the clamp acts with one step of delay, as in the original), then `V_s` is set to `spike.AP_membrane`
+  (backpropagation) or `adex.Vr` (refractory);
+- `Vspike` is the threshold of the spike test (the original uses the exponential-term threshold, `adex.Vt`).
+With `spike = PostSpike(up = 1ms, τabs = 2.1ms)` and `dt = 0.1 ms` the spike step, 9 backpropagation steps and 21 refractory steps
+of the original are obtained. The scheme is tuned to `dt = 0.1 ms`; other steps give a warning (once).
+
+# Field
+- `AP_spike::Float32 = 21mV`: somatic potential on the spike step (the following backpropagation steps use `spike.AP_membrane`,
+  20 mV in `TripodPaper`).
+"""
+Base.@kwdef struct PaperScheme <: AbstractTripodScheme
+    AP_spike::Float32 = 21.0f0
+end
+
 @doc raw"""
     Tripod(; N = 100, param = TripodParameter(), adex = AdExParameter(),
              soma_syn = TripodSomaSynapse, dend_syn = TripodDendSynapse, spike = PostSpike(), ...)
@@ -28,7 +72,9 @@ C_{d,k} \frac{dV_{d,k}}{dt} &= g_{m,k} (E_{L,k} - V_{d,k}) - I_{syn,d,k}
 ``\pm 1500`` pA (`Tripod`) or ``\pm 1000`` pA (`BallAndStick`). ``C_{d,k}``, ``g_{m,k}``,
 ``g_{ax,k}`` and the dendritic leak reversal ``E_{L,k}`` come from the `Dendrite` structs (see
 `create_dendrite`); by default ``E_{L,k}`` is the somatic ``E_L`` (`adex.El`). The exponential term is multiplied by ``g_L``, as in
-the AdEx model (Brette and Gerstner 2005) and in the published Tripod model (Quaresima et al. 2023, Eq. 1).
+the AdEx model (Brette and Gerstner 2005) and in the code of the published Tripod model (`equations.jl` of
+`aquaresima/tripod_neuron`: `gl * (-v + Er + ΔT * exp(...))`). Eq. 1 of the bioRxiv preprint of that paper (Quaresima et al.
+2023, J. Physiol.) prints the exponential term without ``g_L``, which is not the equation the code integrates.
 
 Spike: when the predicted somatic potential ``V_s + dt\,\dot V_s`` reaches `Vspike`
 (population field, default ``-10`` mV; `adex.Vt` is only the resting value of ``\theta``), the
@@ -36,11 +82,15 @@ neuron fires: ``V_s \leftarrow`` `AP_membrane`,
 ``w_s \leftarrow w_s + b``, ``\theta \leftarrow \theta + A_t``, and the refractory counter is set
 to `n_up + n_abs` steps, with `n_up = max(1, round(up/dt))` and `n_abs = max(1, round(τabs/dt))`.
 The soma is clamped at `AP_membrane` until the counter reaches `n_abs` (back-propagation
-period; the spike step itself counts as one), then at `adex.Vr` for `n_abs` steps; in both periods the
-dendrites only relax towards the soma through the axial term (forward Euler) and `w_s` is not
-integrated. ``\theta`` relaxes to `adex.Vt` at every step (forward Euler). The published Tripod
-code (TripodNeuron.jl) detects spikes at ``V_s \ge V_T``; `Vspike = adex.Vt` reproduces that
-rule.
+period; the spike step itself counts as one), then at `adex.Vr` for `n_abs` steps. In both periods
+``w_s`` is not integrated, and the dendrites are integrated in full (leak, all synaptic currents including NMDA, axial
+current, external current) with the same Heun scheme as in free integration, the soma being held at its clamp value in both
+stages; the dendrites do not move on the spike step itself. (Up to SNNModels 2.0 the dendrites only relaxed axially towards
+the clamped soma in these periods, without leak and synaptic currents, so that a somatic spike could end an NMDA plateau; see
+the changelog of 2.1.0.) ``\theta`` relaxes to `adex.Vt` at every step (forward Euler). The published Tripod code
+(`TripodNeuron.jl`) detects spikes differently: it fires when ``V_s \ge V_T`` on the potential at the start of the step, before
+integrating, so that `Vspike = adex.Vt` does not reproduce it (this model fires about one step earlier). The rule, the
+refractory sequence and the numerics of the published code are available as `scheme = PaperScheme()` (see `TripodPaper`).
 
 # Integration
 Heun (explicit trapezoidal) method on ``x = (V_s, V_{d,k}, w_s)``. Synaptic conductances are
@@ -49,20 +99,26 @@ current state (stored in `Δv_temp`) and ``k_2 = f(x_n + dt\,k_1)`` at the Euler
 (stored in `Δv`); every term of ``f``, including the synaptic currents, the axial currents and
 the adaptation current in the somatic equation, is evaluated at the same stage state. The state
 is advanced by ``x_{n+1} = x_n + \frac{dt}{2}(k_1 + k_2)``. The scheme is second-order accurate
-between spikes.
+between spikes. During the backpropagation and refractory periods the soma is set to its clamp value before the first stage
+and does not move in the Euler prediction of the second, and the dendrites follow the same Heun update.
+The synaptic currents are evaluated at the stage potentials (the Euler-predicted potentials at the second stage), and the
+conductances are advanced with the `exp64` approximation of the exponential decay (see `ReceptorSynapse`).
 
 # Fields
 ## Population info
 - `id::String = randstring(12)`, `name::String = "Tripod"`, `N::IT = 100`, `records::Dict`.
 
 ## Parameters
-- `param::DendNeuronParameter = TripodParameter()`: morphology (`ds`, `physiology`).
+- `param::DendNeuronParameter = TripodParameter()`: morphology (`ds`, `physiology`, diameter `d`).
 - `adex::SOMAT = AdExParameter()`: somatic parameters; uses `C`, `gl`, `El`, `ΔT`, `Vt`
   (resting value of the threshold ``\theta``), `Vr`, `a`, `b`, `τw`.
 - `soma_syn::SYNS = TripodSomaSynapse`, `dend_syn::SYND = TripodDendSynapse`: synapse models.
 - `spike::PST = PostSpike()`: `AP_membrane`, `up`, `τabs`, `At`, `τA`.
-- `d1::VDT`, `d2::VDT`: `Dendrite`s built with `create_dendrite(N, param.ds[k]; El = adex.El, FT = eltype(VFT), physiology = param.physiology)`.
-- `Vspike::Float32 = -10mV`: spike detection threshold on the predicted somatic potential (`Float32` in both precisions).
+- `d1::VDT`, `d2::VDT`: `Dendrite`s built with `create_dendrite(N, param.ds[k]; El = adex.El, FT = eltype(VFT), physiology = param.physiology, d = param.d)`.
+- `Vspike::Float32 = -10mV`: spike detection threshold on the predicted somatic potential (`Float32` in both precisions);
+  with `PaperScheme` the threshold of the test on the potential at the start of the step.
+- `scheme::AbstractTripodScheme = HeunScheme()`: integration scheme, `HeunScheme()` (this page) or `PaperScheme()` (the published
+  code, see `TripodPaper`).
 
 ## State variables
 - `v_s`, `v_d1`, `v_d2::VFT`: compartment potentials (mV), initialised uniformly in `[Vr, Vt]`.
@@ -86,7 +142,8 @@ between spikes.
 
 # References
 Quaresima A. et al. (2023), "The Tripod neuron: a minimal structural reduction of the
-dendritic tree", J. Physiol. Receptor parameters: see `TripodSomaSynapse` and `TripodDendSynapse`.
+dendritic tree", J. Physiol. (preprint bioRxiv 10.1101/2022.09.05.506197). Receptor parameters: see `TripodSomaSynapse`
+and `TripodDendSynapse`; the configuration of the published code: `TripodPaper`.
 
 # Example
 ```julia
@@ -113,6 +170,7 @@ Tripod
     PST<:AbstractSpikeParameter,
     RECTS<:NamedTuple,
     RECTD<:NamedTuple,
+    SCH<:AbstractTripodScheme,
     IT = Int32,
 } <: AbstractDendriteIF
     id::String = randstring(12)
@@ -125,8 +183,9 @@ Tripod
     dend_syn::SYND = convert_precision(TripodDendSynapse, eltype(VFT))
     spike::PST = PostSpike(FT = eltype(VFT))
     Vspike::Float32 = -10mV
-    d1::VDT = create_dendrite(N, param.ds[1]; El = adex.El, FT = eltype(VFT), physiology = param.physiology)
-    d2::VDT = create_dendrite(N, param.ds[2]; El = adex.El, FT = eltype(VFT), physiology = param.physiology)
+    scheme::SCH = HeunScheme()
+    d1::VDT = create_dendrite(N, param.ds[1]; El = adex.El, FT = eltype(VFT), physiology = param.physiology, d = param.d)
+    d2::VDT = create_dendrite(N, param.ds[2]; El = adex.El, FT = eltype(VFT), physiology = param.physiology, d = param.d)
 
     # Membrane potential and adaptation
     v_s::VFT = rand_value(N, adex.Vt, adex.Vr)
@@ -183,6 +242,8 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt_::AbstractFloat)
         foreach_chunk_c(N) do c, rng
             _tripod_chunk!(p, param, dt, rng, n_abs, n_ref)
         end
+    elseif !(p.scheme isa HeunScheme)
+        throw(ArgumentError("Tripod with $(nameof(typeof(p.scheme))) needs receptor synapse models with chunk methods (ReceptorSynapse)"))
     else
         # synapse models without chunk methods: the stages one after the other over the whole population
         _tripod_serial!(p, param, dt, n_abs, n_ref)
@@ -190,7 +251,10 @@ function integrate!(p::Tripod, param::DendNeuronParameter, dt_::AbstractFloat)
 end
 
 # one chunk: synapses, the two Heun stages and the state update of the neurons `rng`
-function _tripod_chunk!(p::Tripod, param::DendNeuronParameter, dt::AbstractFloat, rng::UnitRange{Int}, n_abs::Int, n_ref::Int)
+_tripod_chunk!(p::Tripod, param::DendNeuronParameter, dt::AbstractFloat, rng::UnitRange{Int}, n_abs::Int, n_ref::Int) =
+    _tripod_chunk!(p.scheme, p, param, dt, rng, n_abs, n_ref)
+
+function _tripod_chunk!(::HeunScheme, p::Tripod, param::DendNeuronParameter, dt::AbstractFloat, rng::UnitRange{Int}, n_abs::Int, n_ref::Int)
     @unpack Δv, Δv_temp, fire = p
     @unpack soma_syn, dend_syn = p
     update_synapses!(p, soma_syn, p.receptors_s, p.synvars_s, dt, rng)
@@ -205,14 +269,36 @@ function _tripod_chunk!(p::Tripod, param::DendNeuronParameter, dt::AbstractFloat
     @inbounds for i in rng
         fire[i] = false
     end
+    _tripod_clamp_soma!(p, rng, n_abs)
     update_neuron!(p, param, Δv, dt, rng)
     @inbounds for k in 1:4
         @simd ivdep for i in rng
             Δv_temp[i, k] = Δv[i, k]
         end
     end
+    _tripod_hold_soma!(p, rng, n_abs)
     update_neuron!(p, param, Δv, dt, rng)
     _tripod_state!(p, dt, rng, n_abs, n_ref)
+end
+
+# Neurons in the backpropagation or refractory period (counter after this step `tabs - 1 > 0`): the soma is held at its clamp value
+# for the whole step, so that both Heun stages of the dendrites see it (the dendritic equations are integrated in full).
+function _tripod_clamp_soma!(p::Tripod, rng::UnitRange{Int}, n_abs::Int)
+    @unpack v_s, tabs, spike, adex = p
+    AP, Vr = spike.AP_membrane, adex.Vr
+    nabs_f = convert(eltype(tabs), n_abs)
+    @inbounds @simd ivdep for i ∈ rng
+        t1 = tabs[i] - 1
+        v_s[i] = ifelse(t1 > nabs_f, AP, ifelse(t1 > 0, Vr, v_s[i]))
+    end
+end
+
+# Between the two Heun stages: a clamped soma does not move in the Euler prediction.
+function _tripod_hold_soma!(p::Tripod, rng::UnitRange{Int}, n_abs::Int)
+    @unpack Δv, tabs = p
+    @inbounds @simd ivdep for i ∈ rng
+        Δv[i, 1] = ifelse(tabs[i] - 1 > 0, zero(eltype(Δv)), Δv[i, 1])
+    end
 end
 
 # the same stages over the whole population, for synapse models that have no chunk methods
@@ -225,10 +311,13 @@ function _tripod_serial!(p::Tripod, param::DendNeuronParameter, dt::AbstractFloa
     fill!(Δv, zero(eltype(Δv)))
     fill!(Δv_temp, zero(eltype(Δv_temp)))
     fill!(fire, false)
+    rng = 1:Int(p.N)
+    _tripod_clamp_soma!(p, rng, n_abs)
     update_neuron!(p, param, Δv, dt)
     Δv_temp .= Δv
+    _tripod_hold_soma!(p, rng, n_abs)
     update_neuron!(p, param, Δv, dt)
-    _tripod_state!(p, dt, 1:Int(p.N), n_abs, n_ref)
+    _tripod_state!(p, dt, rng, n_abs, n_ref)
 end
 
 # state update after the Heun stages (spike detection, refractoriness, clamping), neurons `rng`
@@ -237,7 +326,6 @@ function _tripod_state!(p::Tripod, dt::AbstractFloat, rng::UnitRange{Int}, n_abs
     @unpack spike, adex, Vspike = p
     @unpack AP_membrane, At, τA = spike
     @unpack Vr, Vt, b = adex
-    gax1, C1, gax2, C2 = d1.gax, d1.C, d2.gax, d2.C
     nabs_f = convert(eltype(tabs), n_abs)    # the counters are floats: compare and store without mixing types
     FT = eltype(v_s)
     nref_f = convert(eltype(tabs), n_ref)
@@ -256,10 +344,8 @@ function _tripod_state!(p::Tripod, dt::AbstractFloat, rng::UnitRange{Int}, n_abs
         ws0 = w_s[i]
         dv1 = Δv[i, 1]
 
-        # bp or rf: the soma is clamped, the dendrites relax towards it
+        # bp or rf: the soma is clamped (the Heun stages already integrated the dendrites against the clamped soma)
         vsc = ifelse(bp, AP_membrane, Vr)
-        vd1c = vd1 + dt * (vsc - vd1) * gax1[i] / C1[i]
-        vd2c = vd2 + dt * (vsc - vd2) * gax2[i] / C2[i]
 
         # act: spike or Heun update
         spk = act & (vs0 + dv1 * dt >= Vspike)
@@ -273,8 +359,9 @@ function _tripod_state!(p::Tripod, dt::AbstractFloat, rng::UnitRange{Int}, n_abs
         fire[i] = spk
         Δv[i, 1] = ifelse(spk, AP_membrane - vs0, dv1)
         v_s[i] = ifelse(clamped, vsc, ifelse(spk, AP_membrane, ifelse(keep, vs_h, vs0)))
-        v_d1[i] = ifelse(clamped, vd1c, ifelse(keep, vd1_h, vd1))
-        v_d2[i] = ifelse(clamped, vd2c, ifelse(keep, vd2_h, vd2))
+        # dendrites: Heun update, also while the soma is clamped; they hold on the spike step
+        v_d1[i] = ifelse(spk, vd1, vd1_h)
+        v_d2[i] = ifelse(spk, vd2, vd2_h)
         w_s[i] = ifelse(spk, ws0 + b, ifelse(keep, ws_h, ws0))
         θ[i] = ifelse(spk, th1 + At, th1)
         tabs[i] = ifelse(spk, nref_f, t1)
@@ -353,6 +440,8 @@ end
 function snn_kw_finalize(::Type{T}, f::NamedTuple) where {T<:Tripod}
     _check_precision("Tripod", _state_float(T, :v_s), "adex" => f.adex, "soma_syn" => f.soma_syn, "dend_syn" => f.dend_syn,
                      "spike" => f.spike)
+    f.scheme isa PaperScheme && !(f.soma_syn isa ReceptorSynapse && f.dend_syn isa ReceptorSynapse) &&
+        throw(ArgumentError("Tripod with PaperScheme needs `ReceptorSynapse` models for `soma_syn` and `dend_syn`"))
     return f
 end
 

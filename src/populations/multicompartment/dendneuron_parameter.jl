@@ -5,7 +5,7 @@ struct TripodNeuron <: AbstractDendriticTree end
 struct BallAndStickNeuron <: AbstractDendriticTree end
 
 """
-    DendNeuronParameter(; ds = [(200um, 400um), (200um, 400um)], physiology = human_dend,
+    DendNeuronParameter(; ds = [(200um, 400um), (200um, 400um)], physiology = human_dend, d = 4um,
                           geometry = [(:s=>:d1), (:s=>:d2)], type = <from length(ds)>)
 
 Parameter struct of the multicompartment dendritic populations (`Tripod`, `BallAndStick`). It
@@ -19,6 +19,8 @@ carries the morphology only; the somatic parameters are in the population field 
 - `ds::DT = [(200um, 400um), (200um, 400um)]`: one entry per dendrite, either a length (cm)
   or a `(min, max)` range from which `create_dendrite` draws the length of each neuron.
 - `physiology::PT = human_dend`: cable properties (`Physiology`: `Ri`, `Rd`, `Cd`), used by `Tripod` and `BallAndStick` to build their dendrites.
+- `d::Float32 = 4um`: dendrite diameter (cm), common to all dendrites of the neuron. It enters the cable formulas of
+  `create_dendrite`: `g_ax ∝ d²`, `g_m ∝ d` and `C ∝ d` at fixed length. The default is the 4 um of the published model.
 - `geometry::GT = [(:s=>:d1), (:s=>:d2)]`: connectivity of the compartments. Stored for
   bookkeeping; `Tripod` and `BallAndStick` hard-code soma-dendrite coupling.
 - `type::NT`: `BallAndStickNeuron()` if `length(ds) == 1`, `TripodNeuron()` if
@@ -26,8 +28,6 @@ carries the morphology only; the somatic parameters are in the population field 
 
 Type parameters: `DT = Vector{DendLength}` (`DendLength = Union{Float32,Tuple}`),
 `GT = Vector{Pair{Symbol,Symbol}}`, `PT = Physiology{Float32}`, `NT<:AbstractDendriticTree`.
-
-The dendrite diameter is the `create_dendrite` default, `d = 4um`.
 
 # Example
 ```julia
@@ -48,6 +48,7 @@ DendNeuronParameter
     ## Dend parameters
     ds::DT = [(200um, 400um), (200um, 400um)] ## Dendritic segment lengths
     physiology::PT = human_dend
+    d::Float32 = 4um  ## Dendrite diameter (cm)
     geometry::GT = [(:s=>:d1), (:s=>:d2)]  ## Geometry between soma and dendrites
     type::NT = begin
         if length(ds) == 1
@@ -63,32 +64,34 @@ DendNeuronParameter
 end
 
 """
-    TripodParameter(; ds = [(200um, 400um), (200um, 400um)], physiology = human_dend,
+    TripodParameter(; ds = [(200um, 400um), (200um, 400um)], physiology = human_dend, d = 4um,
                       geometry = [(:s=>:d1), (:s=>:d2)]) -> DendNeuronParameter
 
-Morphology of a `Tripod` neuron: soma plus two dendrites with lengths `ds[1]`, `ds[2]`.
-`ds` must have two entries.
+Morphology of a `Tripod` neuron: soma plus two dendrites with lengths `ds[1]`, `ds[2]` and diameter `d`.
+`ds` must have two entries; the fixed paper configurations `distal_distal`, `proximal_proximal`, `proximal_distal`,
+`distal_proximal` and the random presets `random_proximal_distal`, `random_proximal_proximal` can be given as `ds`.
 
 # Example
 ```julia
 using SpikingNeuralNetworks
 SNN.@load_units
-T = SNN.Tripod(N = 10, param = SNN.TripodParameter(ds = SNN.proximal_distal))
+T = SNN.Tripod(N = 10, param = SNN.TripodParameter(ds = SNN.distal_proximal, d = 3um))
 ```
 """
 function TripodParameter(;
     ds = [(200um, 400um), (200um, 400um)],
     physiology = human_dend,
+    d = 4um,
     geometry = [(:s=>:d1), (:s=>:d2)],
 )
-    return DendNeuronParameter(ds = ds, physiology = physiology, geometry = geometry)
+    return DendNeuronParameter(ds = ds, physiology = physiology, d = d, geometry = geometry)
 end
 
 """
-    BallAndStickParameter(; ds = [(150um, 400um)], physiology = human_dend,
+    BallAndStickParameter(; ds = [(150um, 400um)], physiology = human_dend, d = 4um,
                             geometry = [(:s=>:d)]) -> DendNeuronParameter
 
-Morphology of a `BallAndStick` neuron: soma plus one dendrite of length `ds[1]`.
+Morphology of a `BallAndStick` neuron: soma plus one dendrite of length `ds[1]` and diameter `d`.
 `ds` must have one entry.
 
 # Example
@@ -101,9 +104,10 @@ B = SNN.BallAndStick(N = 10, param = SNN.BallAndStickParameter(ds = [300um]))
 function BallAndStickParameter(;
     ds = [(150um, 400um)],
     physiology = human_dend,
+    d = 4um,
     geometry = [(:s=>:d)],
 )
-    return DendNeuronParameter(ds = ds, physiology = physiology, geometry = geometry)
+    return DendNeuronParameter(ds = ds, physiology = physiology, d = d, geometry = geometry)
 end
 
 """

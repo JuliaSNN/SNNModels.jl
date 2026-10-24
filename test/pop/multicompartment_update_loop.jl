@@ -5,6 +5,9 @@
 # bit-identical to the reference, and so is the whole step. On other targets (aarch64, x86-64 without FMA) LLVM may contract or
 # reassociate the `@fastmath` reference differently, so the stage is compared within `_STAGE_ULPS` ulp of the terms and the state
 # within `_STATE_RTOL`. Both populations restart from the same state at every step.
+# Since 2.1.0 the reference integrates the dendrites in full while the soma is clamped (backpropagation and refractory period): the
+# soma is set to its clamp value before the first stage (`_ref_clamp!`), does not move in the second stage (`_ref_hold!`), and the state
+# stage applies the Heun update to the dendrites in every period but the spike step (before: axial-only forward Euler towards the soma).
 # Standalone: `julia --project=test test/pop/multicompartment_update_loop.jl`.
 using Test, Random
 using SNNModels
@@ -88,16 +91,33 @@ function _ref_update_neuron!(p::Tripod, param, Δv, dt)
     end
 end
 
+# reference (2.1.0): soma of the neurons in the backpropagation / refractory period at its clamp value before the first stage ...
+function _ref_clamp!(p, n_abs)
+    (; N, v_s, tabs, spike, adex) = p
+    for i ∈ 1:N
+        t1 = tabs[i] - 1
+        t1 > n_abs && (v_s[i] = spike.AP_membrane)
+        (t1 <= n_abs && t1 > 0) && (v_s[i] = adex.Vr)
+    end
+end
+# ... and not moving in the Euler prediction of the second stage
+function _ref_hold!(p, n_abs)
+    (; N, Δv, tabs) = p
+    for i ∈ 1:N
+        tabs[i] - 1 > 0 && (Δv[i, 1] = 0)
+    end
+end
+
 function _ref_integrate!(p::Tripod, param, dt)
     (; τabs, up) = p.spike
     n_abs = max(1, round(Int, τabs / dt))
     n_ref = max(1, round(Int, up / dt)) + n_abs
-    _ref_heun!(p, param, dt)
+    _ref_heun!(p, param, dt, n_abs)
     _ref_state!(p, dt, n_abs, n_ref)
 end
 
 # reference: synapse stages and the two Heun stages (the first part of `_ref_integrate!`)
-function _ref_heun!(p::Tripod, param, dt)
+function _ref_heun!(p::Tripod, param, dt, n_abs)
     (; Δv, Δv_temp, fire, synvars_s, synvars_d1, synvars_d2, receptors_d1, receptors_d2, receptors_s, soma_syn, dend_syn) = p
     SNNModels.update_synapses!(p, soma_syn, receptors_s, synvars_s, dt)
     SNNModels.update_synapses!(p, dend_syn, receptors_d1, synvars_d1, dt)
@@ -105,8 +125,10 @@ function _ref_heun!(p::Tripod, param, dt)
     fill!(Δv, 0.0f0)
     fill!(Δv_temp, 0.0f0)
     fill!(fire, false)
+    _ref_clamp!(p, n_abs)
     _ref_update_neuron!(p, param, Δv, dt)
     Δv_temp .= Δv
+    _ref_hold!(p, n_abs)
     _ref_update_neuron!(p, param, Δv, dt)
 end
 
@@ -120,12 +142,12 @@ function _ref_state!(p::Tripod, dt, n_abs, n_ref)
         θ[i] += dt * (Vt - θ[i]) / τA
         if tabs[i] > n_abs
             v_s[i] = AP_membrane
-            v_d1[i] += dt * (v_s[i] - v_d1[i]) * d1.gax[i] / d1.C[i]
-            v_d2[i] += dt * (v_s[i] - v_d2[i]) * d2.gax[i] / d2.C[i]
+            v_d1[i] += 0.5 * dt * (Δv_temp[i, 2] + Δv[i, 2])     # soma clamped, dendrites fully integrated (2.1.0)
+            v_d2[i] += 0.5 * dt * (Δv_temp[i, 3] + Δv[i, 3])
         elseif tabs[i] > 0
             v_s[i] = Vr
-            v_d1[i] += dt * (v_s[i] - v_d1[i]) * d1.gax[i] / d1.C[i]
-            v_d2[i] += dt * (v_s[i] - v_d2[i]) * d2.gax[i] / d2.C[i]
+            v_d1[i] += 0.5 * dt * (Δv_temp[i, 2] + Δv[i, 2])
+            v_d2[i] += 0.5 * dt * (Δv_temp[i, 3] + Δv[i, 3])
         elseif tabs[i] <= 0
             fire[i] = v_s[i] + Δv[i, 1] * dt >= Vspike
             Δv[i, 1] = ifelse(fire[i], AP_membrane - v_s[i], Δv[i, 1])
@@ -179,19 +201,21 @@ function _ref_integrate!(p::BallAndStick, param, dt)
     (; τabs, up) = p.spike
     n_abs = max(1, round(Int, τabs / dt))
     n_ref = max(1, round(Int, up / dt)) + n_abs
-    _ref_heun!(p, param, dt)
+    _ref_heun!(p, param, dt, n_abs)
     _ref_state!(p, dt, n_abs, n_ref)
 end
 
-function _ref_heun!(p::BallAndStick, param, dt)
+function _ref_heun!(p::BallAndStick, param, dt, n_abs)
     (; Δv, Δv_temp, fire, synvars_s, synvars_d, receptors_d, receptors_s, soma_syn, dend_syn) = p
     SNNModels.update_synapses!(p, soma_syn, receptors_s, synvars_s, dt)
     SNNModels.update_synapses!(p, dend_syn, receptors_d, synvars_d, dt)
     fill!(Δv, 0.0f0)
     fill!(Δv_temp, 0.0f0)
     fill!(fire, false)
+    _ref_clamp!(p, n_abs)
     _ref_update_neuron!(p, param, Δv, dt)
     Δv_temp .= Δv
+    _ref_hold!(p, n_abs)
     _ref_update_neuron!(p, param, Δv, dt)
 end
 
@@ -204,10 +228,10 @@ function _ref_state!(p::BallAndStick, dt, n_abs, n_ref)
         θ[i] += dt * (Vt - θ[i]) / τA
         if tabs[i] > n_abs
             v_s[i] = AP_membrane
-            v_d[i] += dt * (v_s[i] - v_d[i]) * d.gax[i] / d.C[i]
+            v_d[i] += 0.5 * dt * (Δv_temp[i, 2] + Δv[i, 2])      # soma clamped, dendrite fully integrated (2.1.0)
         elseif tabs[i] > 0
             v_s[i] = Vr
-            v_d[i] += dt * (v_s[i] - v_d[i]) * d.gax[i] / d.C[i]
+            v_d[i] += 0.5 * dt * (Δv_temp[i, 2] + Δv[i, 2])
         elseif tabs[i] <= 0
             fire[i] = v_s[i] + Δv[i, 1] * dt >= Vspike
             Δv[i, 1] = ifelse(fire[i], AP_membrane - v_s[i], Δv[i, 1])
@@ -361,7 +385,7 @@ function _mc_pair(T, N; nsteps = 150, seed = 1, dt = 0.1f0, spike = PostSpike(τ
         r = deepcopy(q)
         SNNModels.integrate!(p, p.param, dt)
         _ref_integrate!(q, q.param, dt)
-        _ref_heun!(r, r.param, dt)
+        _ref_heun!(r, r.param, dt, n_abs)
         state!(r, dt, 1:N, n_abs, n_ref)
         loop_state_equal(r, q, (T === Tripod ? _TRIPOD_STATE : _BAS_STATE)) || return fail(s, :state_stage)
         all(sv -> loop_state_equal(getfield(p, sv), getfield(q, sv), (:g, :h)), _mc_synvars(T)) || return fail(s, :synvars)

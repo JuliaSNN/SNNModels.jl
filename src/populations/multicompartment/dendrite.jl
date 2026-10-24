@@ -11,8 +11,12 @@ Passive cable properties of a dendrite, per unit length or area, in the library 
 - `Cd::T`: specific membrane capacitance, e.g. `0.5μF/cm^2` (stored in pF/cm²).
 
 Predefined: `human_dend` (`Ri = 200 Ω cm`, `Rd = 38907 Ω cm²`, `Cd = 0.5 μF/cm²`) and
-`mouse_dend` (`Ri = 200 Ω cm`, `Rd = 1700 Ω cm²`, `Cd = 1 μF/cm²`). References for these
-values are not given in the code.
+`mouse_dend` (`Ri = 200 Ω cm`, `Rd = 1700 Ω cm²`, `Cd = 1 μF/cm²`). Sources, as cited in the code of the
+published Tripod model (`aquaresima/tripod_neuron`, `model/parameters.jl`): human, Eyal G. et al. (2016),
+Unique membrane properties and enhanced signal processing in human neocortical neurons, eLife 5:e16553,
+doi:10.7554/eLife.16553; mouse, Dasika V. K., White J. A., Colburn H. S. (2007), Simple models show the general
+advantages of dendrites in coincidence detection, J. Neurophysiol. 97(5):3449-3459, https://doi.org/10/dc8tr4
+(DOI as given in that code).
 
 # Example
 ```julia
@@ -30,14 +34,15 @@ end
 """
     human_dend :: Physiology{Float32}
 
-Human cortical dendrite: `Ri = 200 Ω cm`, `Rd = 38907 Ω cm²`, `Cd = 0.5 μF/cm²`.
-Default `physiology` of `TripodParameter`, `BallAndStickParameter` and `create_dendrite`.
+Human cortical dendrite: `Ri = 200 Ω cm`, `Rd = 38907 Ω cm²`, `Cd = 0.5 μF/cm²` (Eyal et al. 2016, eLife
+5:e16553). Default `physiology` of `TripodParameter`, `BallAndStickParameter` and `create_dendrite`.
 """
 human_dend = Physiology(200 * Ω * cm, 38907 * Ω * cm^2, 0.5μF / cm^2|>Float32)
 """
     mouse_dend :: Physiology{Float32}
 
-Mouse cortical dendrite: `Ri = 200 Ω cm`, `Rd = 1700 Ω cm²`, `Cd = 1 μF/cm²`.
+Mouse cortical dendrite: `Ri = 200 Ω cm`, `Rd = 1700 Ω cm²`, `Cd = 1 μF/cm²` (Dasika et al. 2007, J. Neurophysiol.
+97(5):3449-3459).
 """
 mouse_dend = Physiology(200 * Ω * cm, 1700Ω * cm^2, 1μF / cm^2 |> Float32)
 
@@ -131,7 +136,9 @@ from the cable properties `physiology` (`Physiology`).
 
 `l` is either a length (cm, e.g. `200um`) or a tuple `(lmin, lmax)`, in which case the length
 is drawn uniformly from `lmin:1um:lmax` (independently for each of the `N` neurons in the
-first form). Lengths above `500um` raise an error. For `l > 0` it returns
+first form). Lengths above `1000um` raise an error: this is a guard against a length given without its
+unit (`400` is 400 cm), not a physical limit; up to SNNModels 2.0 the bound was `500um`, which excluded the
+550 um dendrites of the Tripod paper (Fig. 3). For `l > 0` it returns
 `(gm = G_mem(Rd, d, l), gax = G_axial(Ri, d, l), C = C_mem(Cd, d, l), l, d)`; for `l <= 0` it
 returns a disconnected compartment `(gm = 1, gax = 0, C = 1, l = -1, d)`.
 The `N` form returns a `Dendrite{Vector{FT}}` with these values per neuron and leak reversal `El`.
@@ -165,13 +172,18 @@ end
 
 create_dendrite(; l, kwargs...) = create_dendrite(l; kwargs...)
 
+# Sanity bound on a dendrite length: catches a length written without its unit (`400` is 400 cm). The bound was 500um before 2.1.0.
+const _MAX_DENDRITE_LENGTH = 1000um
+_check_length(l) = l > _MAX_DENDRITE_LENGTH &&
+    error("Dendrite length must be at most 1000um (got $(l) cm); write lengths with their unit, e.g. 400um")
+
 function create_dendrite(l; d::Real = 4um, physiology = human_dend)
     if isa(l, Tuple)
         l = rand(l[1]:1um:l[2])
     else
         l = l
     end
-    l > 500um && error("Dendrite length must be less than 500um")
+    _check_length(l)
     @unpack Ri, Rd, Cd = physiology
     if l <= 0
         return (gm = 1.0f0, gax = 0.0f0, C = 1.0f0, l = -1, d = d)
@@ -212,7 +224,7 @@ _decimal_physiology(p::Physiology) =
 # RNG draws), then lengths and diameter are read as decimals of `um`.
 function _create_dendrite_decimal(l; d::Real = 4um, physiology = human_dend)
     l = isa(l, Tuple) ? rand(l[1]:1um:l[2]) : l
-    l > 500um && error("Dendrite length must be less than 500um")    # checked on the given value, as in Float32
+    _check_length(l)    # checked on the given value, as in Float32
     l = _decimal(l, um)
     d = _decimal(d, um)
     @unpack Ri, Rd, Cd = _decimal_physiology(physiology)
@@ -222,20 +234,57 @@ function _create_dendrite_decimal(l; d::Real = 4um, physiology = human_dend)
     return (gm = G_mem(Rd = Rd, d = d, l = l), gax = G_axial(Ri = Ri, d = d, l = l), C = C_mem(Cd = Cd, d = d, l = l), l = l, d = d)
 end
 
-# Predefined dendritic length ranges, usable as `ds` in `TripodParameter`/`BallAndStickParameter`
-# (each tuple is a (min, max) range sampled by `create_dendrite`).
+# Predefined dendritic lengths, usable as `ds` in `TripodParameter`/`BallAndStickParameter`.
+# A tuple is a (min, max) range sampled by `create_dendrite`; a length is used as given.
 """
-    proximal_distal = [(150um, 400um), (150um, 400um)]
+    distal_distal = [400um, 400um]
 
-Two dendrites with lengths drawn in 150-400 μm (Tripod `ds`).
+Tripod `ds` of the paper configuration "distal-distal": two dendrites of 400 um (`d1`, `d2`). Quaresima et al. (2023),
+J. Physiol.; `parameters.jl` of `aquaresima/tripod_neuron` (`H_distal_distal`).
 """
-proximal_distal = [(150um, 400um), (150um, 400um)]
+distal_distal = [400um, 400um]
 """
-    proximal_proximal = [(150um, 300um), (150um, 300um)]
+    proximal_proximal = [150um, 150um]
 
-Two dendrites with lengths drawn in 150-300 μm (Tripod `ds`).
+Tripod `ds` of the paper configuration "proximal-proximal": two dendrites of 150 um (`d1`, `d2`). Before SNNModels 2.1
+`proximal_proximal` was the random preset now named `random_proximal_proximal`.
 """
-proximal_proximal = [(150um, 300um), (150um, 300um)]
+proximal_proximal = [150um, 150um]
+"""
+    proximal_distal = [150um, 400um]
+
+Tripod `ds` with `d1` proximal (150 um) and `d2` distal (400 um). Before SNNModels 2.1 `proximal_distal` was the random
+preset now named `random_proximal_distal`. The published Tripod code names its default configuration
+`distal_proximal` (`d1` 400 um, `d2` 150 um, `H_distal_proximal`), which is `distal_proximal` here.
+"""
+proximal_distal = [150um, 400um]
+"""
+    distal_proximal = [400um, 150um]
+
+Tripod `ds` with `d1` distal (400 um) and `d2` proximal (150 um): the default configuration of the published Tripod code
+(`H_distal_proximal`, `M_distal_proximal`), whose protocols stimulate `d1`.
+"""
+distal_proximal = [400um, 150um]
+"""
+    soma_only = [0um, 0um]
+
+Tripod `ds` with both dendrites disconnected (`create_dendrite` returns `gax = 0` for `l <= 0`): a point-neuron control.
+The original `soma_only` option of the published code also routes the dendritic inputs to the soma and sets the dendritic
+potentials equal to the somatic one; here the dendrites are inert and the inputs have to be connected to the soma (`:s`).
+"""
+soma_only = [0um, 0um]
+"""
+    random_proximal_distal = [(150um, 400um), (150um, 400um)]
+
+Two dendrites with lengths drawn in 150-400 μm (Tripod `ds`). Named `proximal_distal` up to SNNModels 2.0.
+"""
+random_proximal_distal = [(150um, 400um), (150um, 400um)]
+"""
+    random_proximal_proximal = [(150um, 300um), (150um, 300um)]
+
+Two dendrites with lengths drawn in 150-300 μm (Tripod `ds`). Named `proximal_proximal` up to SNNModels 2.0.
+"""
+random_proximal_proximal = [(150um, 300um), (150um, 300um)]
 """
     proximal = [(150um, 300um)]
 
@@ -252,8 +301,13 @@ all_lengths = [(150um, 400um)]
 export create_dendrite,
     Dendrite,
     Physiology,
-    proximal_distal,
+    distal_distal,
     proximal_proximal,
+    proximal_distal,
+    distal_proximal,
+    soma_only,
+    random_proximal_distal,
+    random_proximal_proximal,
     proximal,
     all_lengths
 
