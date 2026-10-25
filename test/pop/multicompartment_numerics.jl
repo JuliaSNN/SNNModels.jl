@@ -70,9 +70,9 @@ end
 end
 
 @testset "Tripod/BallAndStick spike threshold, dendritic El, external currents" begin
-    # Default Vspike reproduces the previous hard-coded -10 mV threshold.
-    @test Tripod(N = 1).Vspike == -10.0f0
-    @test BallAndStick(N = 1).Vspike == -10.0f0
+    # Default Vspike is 0 mV since 2.1.0 (it was -10 mV, the previous hard-coded threshold; the spike event is now the same for all models).
+    @test Tripod(N = 1).Vspike == 0.0f0
+    @test BallAndStick(N = 1).Vspike == 0.0f0
     # A threshold above AP_membrane can never be reached on the upstroke prediction:
     # a lower threshold detects spikes earlier.
     function nspikes(Vspike)

@@ -81,6 +81,21 @@ can keep the dendritic leak fixed (the original Tripod fixes it at -70.6 mV). Th
 coupling `a (V_s - El)` but not the dendritic leak, with or without `El_dend`. `TripodPaper` now passes `El_dend = -70.6mV`, so its
 dendritic leak stays at -70.6 mV even if the somatic `El` is changed through `kwargs`.
 
+**Results change (default spike event, all neuron types).** The defaults of `PostSpike` changed: `τabs` 1 -> 2 ms, `τA` 10 -> 30 ms,
+`AP_membrane` 10 -> 20 mV (`At = 0`, `up = 1 ms` unchanged), and the default `Vspike` of `Tripod` and `BallAndStick` (predicted-potential spike
+detection threshold) changed from -10 to 0 mV, so the spike event is the same everywhere: detection at 0 mV, 20 mV clamp for 1 ms, 2 ms
+absolute refractory period. Affects every `IF`, `AdEx`, `Tripod` and `BallAndStick` that relies on the default `PostSpike()` (the refractory
+period of IF/AdEx doubles; `τA` matters only for `AdEx`/`Tripod`/`BallAndStick` with `At != 0`; `AP_membrane` and `Vspike` only for the
+multicompartment models). The predictive rule is unchanged (`V + dt k2 >= Vspike`); with 0 mV it fires at most one step later than with -10 mV, and
+no overflow of the exponential term was found before detection (strongly driven Tripod/BallAndStick, Float32 and Float64, all potentials
+finite). `TripodPaper` is unchanged (own `PostSpike`, `Vspike = -50.4`, `PaperScheme`). Code that passes `τabs` explicitly (the published benchmark
+harness) is unaffected. Measured, 2.1.0 before -> after (200 neurons, 5 s after 0.5 s, seeds 7 / 8):
+  - `Tripod` (`rate_net.jl`, Poisson on d1, d2, soma) mu_e 0.2: 23.79 / 23.20 -> 23.04 / 22.48 Hz; mu_e 0.3: 55.32 / 55.44 -> 52.21 / 52.32 Hz.
+  - `BallAndStick` mu_e 0.3: 14.06 / 14.37 -> 13.78 / 14.08 Hz.
+  - `IF` (default `IFParameter`, 500 Poisson 15 Hz + 200 Poisson 8 Hz inputs, p = 0.2, mu 3 / 3 on ge / gi): rate 314.5 / 315.1 -> 237.6 / 238.1 Hz;
+    mean ISI 3.18 -> 4.21 ms, CV 0.196 -> 0.152.
+  - `AdEx` (default `AdExParameter`, same inputs on he / hi, mu 6 / 3): rate 102.9 / 103.1 -> 92.3 / 92.5 Hz; mean ISI 9.71 -> 10.83 ms, CV 0.638 -> 0.571.
+
 ## 2.0.3: smaller :fire records, monitor_time for :fire, git provenance
 
 Smaller `:fire` records, one allocation for a declared duration, provenance from outside the repository.

@@ -79,7 +79,7 @@ the AdEx model (Brette and Gerstner 2005) and in the code of the published Tripo
 2023, J. Physiol.) prints the exponential term without ``g_L``, which is not the equation the code integrates.
 
 Spike: when the predicted somatic potential ``V_s + dt\,\dot V_s`` reaches `Vspike`
-(population field, default ``-10`` mV; `adex.Vt` is only the resting value of ``\theta``), the
+(population field, default ``0`` mV, was ``-10`` mV before 2.1.0; `adex.Vt` is only the resting value of ``\theta``), the
 neuron fires: ``V_s \leftarrow`` `AP_membrane`,
 ``w_s \leftarrow w_s + b``, ``\theta \leftarrow \theta + A_t``, and the refractory counter is set
 to `n_up + n_abs` steps, with `n_up = max(1, round(up/dt))` and `n_abs = max(1, round(τabs/dt))`.
@@ -117,7 +117,7 @@ conductances are advanced with the `exp64` approximation of the exponential deca
 - `soma_syn::SYNS = TripodSomaSynapse`, `dend_syn::SYND = TripodDendSynapse`: synapse models.
 - `spike::PST = PostSpike()`: `AP_membrane`, `up`, `τabs`, `At`, `τA`.
 - `d1::VDT`, `d2::VDT`: `Dendrite`s built with `create_dendrite(N, param.ds[k]; El = _dend_El(param, adex), FT = eltype(VFT), physiology = param.physiology, d = param.d)`, where `_dend_El(param, adex)` is `param.El_dend` if not `nothing`, else `adex.El`.
-- `Vspike::Float32 = -10mV`: spike detection threshold on the predicted somatic potential (`Float32` in both precisions);
+- `Vspike::Float32 = 0mV`: spike detection threshold on the predicted somatic potential (`Float32` in both precisions);
   with `PaperScheme` the threshold of the test on the potential at the start of the step.
 - `scheme::AbstractTripodScheme = HeunScheme()`: integration scheme, `HeunScheme()` (this page) or `PaperScheme()` (the published
   code, see `TripodPaper`).
@@ -184,7 +184,7 @@ Tripod
     soma_syn::SYNS = convert_precision(TripodSomaSynapse, eltype(VFT))
     dend_syn::SYND = convert_precision(TripodDendSynapse, eltype(VFT))
     spike::PST = PostSpike(FT = eltype(VFT))
-    Vspike::Float32 = -10mV
+    Vspike::Float32 = 0mV
     scheme::SCH = HeunScheme()
     d1::VDT = create_dendrite(N, param.ds[1]; El = _dend_El(param, adex), FT = eltype(VFT), physiology = param.physiology, d = param.d)
     d2::VDT = create_dendrite(N, param.ds[2]; El = _dend_El(param, adex), FT = eltype(VFT), physiology = param.physiology, d = param.d)

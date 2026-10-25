@@ -21,7 +21,7 @@ argument of `SpikingSynapse`: targets `:s` and `:d`.
 - `dend_syn::SYND = TripodDendSynapse`, `soma_syn::SYNS = TripodSomaSynapse`: synapse models.
 - `spike::PST = PostSpike()`: spike shape and refractoriness.
 - `d::VDT`: `Dendrite` built with `create_dendrite(N, param.ds[1]; El = _dend_El(param, adex), FT = eltype(VFT), physiology = param.physiology, d = param.d)`, where `_dend_El(param, adex)` is `param.El_dend` if not `nothing`, else `adex.El` (read at construction).
-- `Vspike::Float32 = -10mV`: spike detection threshold on the predicted somatic potential.
+- `Vspike::Float32 = 0mV`: spike detection threshold on the predicted somatic potential.
 
 ## State variables
 - `v_s`, `v_d::VFT`: somatic and dendritic potentials (mV), initialised uniformly in `[Vr, Vt]`.
@@ -72,7 +72,7 @@ BallAndStick
     dend_syn::SYND = convert_precision(TripodDendSynapse, eltype(VFT))
     soma_syn::SYNS = convert_precision(TripodSomaSynapse, eltype(VFT))
     spike::PST = PostSpike(FT = eltype(VFT))
-    Vspike::Float32 = -10mV
+    Vspike::Float32 = 0mV
 
     # Membrane potential and adaptation
     d::VDT = create_dendrite(N, param.ds[1]; El = _dend_El(param, adex), FT = eltype(VFT), physiology = param.physiology, d = param.d)

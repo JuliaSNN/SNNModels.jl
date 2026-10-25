@@ -498,3 +498,28 @@ end
         @test all(==(FT(-70.6f0)), T.d1.El) && all(==(FT(-70.6f0)), T.d2.El) && T.adex.El == FT(-60f0)
     end
 end
+
+@testset "Default spike event: Vspike 0 mV, PostSpike 20 mV / 1 ms / 2 ms" begin
+    sp = PostSpike()
+    @test (sp.At, sp.τA, sp.AP_membrane, sp.τabs, sp.up) == (0f0, 30f0, 20f0, 2f0, 1f0)
+    @test Tripod(N = 2).Vspike == 0f0 && BallAndStick(N = 2).Vspike == 0f0
+    @test Tripod(N = 2).spike == PostSpike() && BallAndStick(N = 2).spike == PostSpike()
+    # TripodPaper keeps its own values
+    T = TripodPaper(N = 2)
+    @test T.Vspike == -50.4f0 && (T.spike.AP_membrane, T.spike.τabs, T.spike.τA) == (20f0, 2.1f0, 30f0)
+    # strongly driven: the predicted potential is tested against 0 mV, no overflow of the exponential term before detection
+    for P in (Tripod, BallAndStick), VFT in (Vector{Float32}, Vector{Float64})
+        FT = eltype(VFT)
+        T = P === Tripod ? Tripod(N = 5; VFT, adex = AdExParameter(FT = FT)) : BallAndStick(N = 5; VFT, adex = AdExParameter(FT = FT))
+        I = hasproperty(T, :I) ? T.I : T.Is
+        I .= FT(5000)
+        nspk = 0
+        for _ in 1:4000
+            SNNModels.integrate!(T, T.param, 0.125f0)
+            nspk += count(T.fire)
+            @test all(isfinite, T.v_s)
+        end
+        @test nspk > 0
+        @test all(isfinite, T.v_s) && all(isfinite, T.w_s) && all(isfinite, hasproperty(T, :v_d1) ? T.v_d1 : T.v_d)
+    end
+end
