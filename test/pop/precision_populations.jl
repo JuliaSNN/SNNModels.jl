@@ -282,10 +282,10 @@ const _PP_POISSON = ("PoissonHomo", "PoissonDense", "PoissonHet", "VariablePoiss
                                     r.gsyn === g0 * norm_synapse(τr, τd) && r.α === SNNModels.α_synapse(τr, τd) &&
                                     r.τr⁻ === 1 / τr && r.τd⁻ === 1 / τd
         soma = convert_precision(TripodSomaSynapse, Float64)
-        @test r_exact(soma.syn[1], 0.0, 0.26, 2.0, 0.73) && r_exact(soma.syn[2], -70.0, 0.1, 15.0, 0.38)
+        @test r_exact(soma.syn[1], 0.0, 0.25, 2.0, 0.73) && r_exact(soma.syn[2], -75.0, 0.3, 15.0, 0.38)
         dend = convert_precision(TripodDendSynapse, Float64)
         @test r_exact(dend.syn[1], 0.0, 0.26, 2.0, 0.73) && r_exact(dend.syn[2], 0.0, 8.0, 35.0, 1.31) && dend.syn[2].nmda === 1.0
-        @test r_exact(dend.syn[3], -70.0, 4.8, 29.0, 0.27) && r_exact(dend.syn[4], -90.0, 30.0, 400.0, 0.006)
+        @test r_exact(dend.syn[3], -75.0, 4.8, 29.0, 0.27) && r_exact(dend.syn[4], -90.0, 30.0, 400.0, 0.006)
         for n in (soma.NMDA, dend.NMDA, convert_precision(EyalNMDA, Float64), NMDAVoltageDependency(T = Float64))
             @test n.b === 3.36 && n.k === -0.077 && n.mg === 1.0
         end
@@ -363,7 +363,7 @@ const _PP_POISSON = ("PoissonHomo", "PoissonDense", "PoissonHet", "VariablePoiss
         end
 
         # Float32 defaults unchanged
-        @test TripodSomaSynapse.syn[1].τr === 0.26f0 && TripodSomaSynapse.syn[1].gsyn === Float32(0.73 * norm_synapse(0.26, 2.0))
+        @test TripodSomaSynapse.syn[1].τr === 0.25f0 && TripodSomaSynapse.syn[1].gsyn === Float32(0.73 * norm_synapse(0.25, 2.0))
         @test Tripod(N = 2).soma_syn === TripodSomaSynapse && BallAndStick(N = 2).dend_syn === TripodDendSynapse
         @test HHParameter().Cm === 1uF * cm^(-2) * 20000um^2 && AdExParameter().τm === 281f0 / 40f0 && IFParameter().R === 0.06f0
         @test SNNModels.MorrisLecarParameter().ϕ === 25Hz && PoissonHomoParameter().rate === 1Hz

@@ -1,0 +1,23 @@
+# original Tripod 8698e1a, human distal-proximal, dt 0.1 ms: spike times (ms) for the first 500 ms of the frozen Poisson input of tripod_poisson_events.txt.
+62.3
+77.5
+90.4
+102.200005
+113.9
+125.0
+135.40001
+145.3
+159.1
+172.8
+190.40001
+208.7
+245.2
+315.7
+331.7
+346.0
+362.80002
+382.0
+398.4
+461.80002
+479.0
+499.5

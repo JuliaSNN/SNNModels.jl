@@ -294,7 +294,7 @@ const nmda_b = 3.36f0   # voltage dependence of nmda channels
 const nmda_k = -0.077f0     # Eyal 2018
 
 @doc raw"""
-    NMDAVoltageDependency(; b = 3.36, k = -0.077, mg = 1.0)
+    NMDAVoltageDependency(; b = 3.36, k = -0.077, mg = 1.0, approx = 256)
 
 Parameters of the voltage-dependent magnesium block of NMDA receptors. The block factor
 multiplying the current of every receptor with `nmda != 0` is
@@ -307,8 +307,15 @@ B(V) = \frac{1}{1 + \frac{[\mathrm{Mg}]}{b}\, e^{k V}}
 - `b::T = 3.36`: (mM).
 - `k::T = -0.077`: voltage sensitivity (1/mV).
 - `mg::T = 1.0`: extracellular magnesium concentration (mM).
+- `approx::Int = 256`: how the exponential ``e^{kV}`` is evaluated: `256` (default, as in every release up to 2.0),
+  `(1 + x/256)^256` (`exp256`); `64`, `(1 + x/64)^64`; `32`, `(1 + x/32)^32` with the input below `-10` mapped to
+  0 (the `exp32` of the published Tripod code, `equations.jl:17-20` of `aquaresima/tripod_neuron`); `0`, the exact
+  `exp`. At the resting potential the block is ``B(-70\,\mathrm{mV}) =`` 0.0160 (`256`), 0.0225 (`32`), 0.0151 (exact),
+  so the choice changes NMDA plateau durations by 10-50 %. Any other value is an `ArgumentError`.
 
-`T` defaults to `Float32`. Predefined instances: `SomaNMDA` and `EyalNMDA` (both with the defaults).
+`T` defaults to `Float32`. Predefined instances: `SomaNMDA` and `EyalNMDA` (both with the defaults), `EyalNMDA32`
+(`approx = 32`, the block of the published Tripod code) and `MouseNMDA` (`b = 3.57`, `k = -0.062`, the mouse values printed in
+the Tripod paper).
 
 # References
 Jahr C. E., Stevens C. F. (1990), J. Neurosci. (functional form of the block).
@@ -328,17 +335,26 @@ NMDAVoltageDependency
     b::T = 3.36
     k::T = -0.077
     mg::T = 1.0
+    approx::Int = 256
 end
+
+snn_kw_finalize(::Type{<:NMDAVoltageDependency}, f::NamedTuple) =
+    (_check_exp_approx("NMDAVoltageDependency approx", f.approx); f)
 
 @doc raw"""
     nmda_gating(v, NMDA::NMDAVoltageDependency)
 
-Magnesium block factor ``B(v) = 1 / (1 + (mg/b)\, e^{k v})`` at membrane potential `v` (mV).
+Magnesium block factor ``B(v) = 1 / (1 + (mg/b)\, e^{k v})`` at membrane potential `v` (mV); the exponential is
+evaluated as selected by `NMDA.approx` (see `NMDAVoltageDependency`).
 """
 function nmda_gating(v, NMDA::NMDAVoltageDependency)
-    @unpack b, k, mg = NMDA
-    return 1 / (1.0f0 + (mg / b) * exp256(k * v))
+    @unpack b, k, mg, approx = NMDA
+    return _nmda_gating(approx, v, b, k, mg)
 end
+@inline _nmda_gating(::Val{N}, v, b, k, mg) where {N} = 1 / (1.0f0 + (mg / b) * _expapprox(Val(N), k * v))
+@inline _nmda_gating(approx::Int, v, b, k, mg) =    # run-time `approx`: the four methods are compiled, no dynamic dispatch
+    approx == 256 ? _nmda_gating(Val(256), v, b, k, mg) : approx == 32 ? _nmda_gating(Val(32), v, b, k, mg) :
+    approx == 64 ? _nmda_gating(Val(64), v, b, k, mg) : _nmda_gating(Val(0), v, b, k, mg)
 
 export norm_synapse,
     EyalNMDA,

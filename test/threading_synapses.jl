@@ -29,7 +29,7 @@ end
 # population alone: state hash after 120 steps with random input in the receptor buffers
 function _mc_run(kind, N)
     Random.seed!(11)
-    p = kind === :tripod ? Tripod(N = N) : kind === :bas ? BallAndStick(N = N) :
+    p = kind === :tripod ? Tripod(N = N) : kind === :bas ? BallAndStick(N = N) : kind === :paper ? TripodPaper(N = N) :
         IF(N = N, param = IFParameter(C = 281pF, gl = 40nS), synapse = ReceptorSynapse())
     rng = MersenneTwister(5)
     nsp = 0
@@ -75,7 +75,7 @@ end
 @testset "threaded Tripod / BallAndStick / IF with receptors" begin
     old = SM.neurons_per_thread()
     try
-        for kind in (:tripod, :bas, :if_rec), N in (0, 1, 7, 127, 129, 500, 1000, 1537, 2049, 4097)
+        for kind in (:tripod, :bas, :if_rec, :paper), N in (0, 1, 7, 127, 129, 500, 1000, 1537, 2049, 4097)
             SM.set_neurons_per_thread!(0)
             ref = _mc_run(kind, N)
             for s in (128, 256, 512, 1024, 2048)
