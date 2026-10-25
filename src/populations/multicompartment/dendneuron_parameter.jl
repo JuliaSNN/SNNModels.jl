@@ -5,7 +5,7 @@ struct TripodNeuron <: AbstractDendriticTree end
 struct BallAndStickNeuron <: AbstractDendriticTree end
 
 """
-    DendNeuronParameter(; ds = [(200um, 400um), (200um, 400um)], physiology = human_dend, d = 4um,
+    DendNeuronParameter(; ds = [(200um, 400um), (200um, 400um)], physiology = human_dend, d = 4um, El_dend = nothing,
                           geometry = [(:s=>:d1), (:s=>:d2)], type = <from length(ds)>)
 
 Parameter struct of the multicompartment dendritic populations (`Tripod`, `BallAndStick`). It
@@ -21,12 +21,17 @@ carries the morphology only; the somatic parameters are in the population field 
 - `physiology::PT = human_dend`: cable properties (`Physiology`: `Ri`, `Rd`, `Cd`), used by `Tripod` and `BallAndStick` to build their dendrites.
 - `d::Float32 = 4um`: dendrite diameter (cm), common to all dendrites of the neuron. It enters the cable formulas of
   `create_dendrite`: `g_ax ∝ d²`, `g_m ∝ d` and `C ∝ d` at fixed length. The default is the 4 um of the published model.
+- `El_dend::Union{Nothing,Float32} = nothing`: leak reversal potential of the dendrites (mV). `nothing` (default): the
+  dendrites use the somatic `adex.El`. A number: `create_dendrite(...; El = El_dend)`, so the dendritic leak stays fixed
+  whatever the somatic `El` (the original Tripod fixes it at -70.6 mV). It is read once, when the `Tripod`/`BallAndStick`
+  is constructed (`Dendrite.El`); with `nothing`, changing `adex.El` afterwards does not move the dendritic leak either
+  (it keeps the value `adex.El` had at construction), see `Tripod`.
 - `geometry::GT = [(:s=>:d1), (:s=>:d2)]`: connectivity of the compartments. Stored for
   bookkeeping; `Tripod` and `BallAndStick` hard-code soma-dendrite coupling.
 - `type::NT`: `BallAndStickNeuron()` if `length(ds) == 1`, `TripodNeuron()` if
   `length(ds) == 2`; other lengths raise an error.
 
-Type parameters: `DT = Vector{DendLength}` (`DendLength = Union{Float32,Tuple}`),
+Type parameters: `ET = Union{Nothing,Float32}`, `DT = Vector{DendLength}` (`DendLength = Union{Float32,Tuple}`),
 `GT = Vector{Pair{Symbol,Symbol}}`, `PT = Physiology{Float32}`, `NT<:AbstractDendriticTree`.
 
 # Example
@@ -39,6 +44,7 @@ T = SNN.Population(param; N = 10)   # a Tripod
 """
 DendNeuronParameter
 @snn_kw struct DendNeuronParameter{
+    ET=Union{Nothing,Float32},
     DT=Vector{DendLength},
     GT=Vector{Pair{Symbol,Symbol}},
     PT = Physiology{Float32},
@@ -49,6 +55,7 @@ DendNeuronParameter
     ds::DT = [(200um, 400um), (200um, 400um)] ## Dendritic segment lengths
     physiology::PT = human_dend
     d::Float32 = 4um  ## Dendrite diameter (cm)
+    El_dend::ET = nothing  ## Dendritic leak reversal (mV); nothing: somatic adex.El
     geometry::GT = [(:s=>:d1), (:s=>:d2)]  ## Geometry between soma and dendrites
     type::NT = begin
         if length(ds) == 1
@@ -63,11 +70,15 @@ DendNeuronParameter
     end
 end
 
+# Dendritic leak reversal used at construction: `param.El_dend`, or the somatic `adex.El` when it is `nothing`.
+_dend_El(param::DendNeuronParameter, adex) = isnothing(param.El_dend) ? adex.El : param.El_dend
+
 """
     TripodParameter(; ds = [(200um, 400um), (200um, 400um)], physiology = human_dend, d = 4um,
-                      geometry = [(:s=>:d1), (:s=>:d2)]) -> DendNeuronParameter
+                      El_dend = nothing, geometry = [(:s=>:d1), (:s=>:d2)]) -> DendNeuronParameter
 
 Morphology of a `Tripod` neuron: soma plus two dendrites with lengths `ds[1]`, `ds[2]` and diameter `d`.
+`El_dend` is the dendritic leak reversal (mV, `nothing`: the somatic `adex.El`).
 `ds` must have two entries; the fixed paper configurations `distal_distal`, `proximal_proximal`, `proximal_distal`,
 `distal_proximal` and the random presets `random_proximal_distal`, `random_proximal_proximal` can be given as `ds`.
 
@@ -82,16 +93,18 @@ function TripodParameter(;
     ds = [(200um, 400um), (200um, 400um)],
     physiology = human_dend,
     d = 4um,
+    El_dend = nothing,
     geometry = [(:s=>:d1), (:s=>:d2)],
 )
-    return DendNeuronParameter(ds = ds, physiology = physiology, d = d, geometry = geometry)
+    return DendNeuronParameter(ds = ds, physiology = physiology, d = d, El_dend = El_dend, geometry = geometry)
 end
 
 """
     BallAndStickParameter(; ds = [(150um, 400um)], physiology = human_dend, d = 4um,
-                            geometry = [(:s=>:d)]) -> DendNeuronParameter
+                            El_dend = nothing, geometry = [(:s=>:d)]) -> DendNeuronParameter
 
 Morphology of a `BallAndStick` neuron: soma plus one dendrite of length `ds[1]` and diameter `d`.
+`El_dend` is the dendritic leak reversal (mV, `nothing`: the somatic `adex.El`).
 `ds` must have one entry.
 
 # Example
@@ -105,9 +118,10 @@ function BallAndStickParameter(;
     ds = [(150um, 400um)],
     physiology = human_dend,
     d = 4um,
+    El_dend = nothing,
     geometry = [(:s=>:d)],
 )
-    return DendNeuronParameter(ds = ds, physiology = physiology, d = d, geometry = geometry)
+    return DendNeuronParameter(ds = ds, physiology = physiology, d = d, El_dend = El_dend, geometry = geometry)
 end
 
 """

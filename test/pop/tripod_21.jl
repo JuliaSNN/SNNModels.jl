@@ -3,6 +3,7 @@
 # Reference traces of the original code (test/data) were produced by running that code unmodified (validation/tripod_audit of the
 # JuliaSNN publication repository, scripts/run_orig.jl) on the audit protocols.
 using Test
+using Random
 using SNNModels
 @load_units
 
@@ -419,4 +420,81 @@ end
     @test TripodSomaSynapse.syn[1].τr == 0.25f0 && TripodSomaSynapsePaper.syn[1].τr == 0.25f0
     @test TripodSomaSynapsePaper.syn[2] === TripodSomaSynapse.syn[2] || TripodSomaSynapsePaper.syn[2] == TripodSomaSynapse.syn[2]
     @test [r.E_rev for r in TripodDendSynapsePaper.syn] == [r.E_rev for r in TripodDendSynapse.syn]
+end
+
+@testset "El_dend: dendritic leak reversal independent of the somatic El" begin
+    mk(::Type{Tripod}; kw...) = Tripod(; N = 4, param = TripodParameter(ds = distal_proximal), kw...)
+    mk(::Type{BallAndStick}; kw...) = BallAndStick(; N = 4, param = BallAndStickParameter(ds = [300um]), kw...)
+    # `param` passed by the caller replaces the default one (merge order)
+    mk(P::Type; param, kw...) = P === Tripod ? Tripod(; N = 4, param, kw...) : BallAndStick(; N = 4, param, kw...)
+    dends(P) = P isa Tripod ? (P.d1, P.d2) : (P.d,)
+    for P in (Tripod, BallAndStick), VFT in (Vector{Float32}, Vector{Float64})
+        FT = eltype(VFT)
+        pd(; kw...) = P === Tripod ? TripodParameter(ds = distal_proximal; kw...) : BallAndStickParameter(ds = [300um]; kw...)
+        # default: tied to adex.El, identical to the explicit construction with El = adex.El
+        a60 = AdExParameter(FT = FT, El = -60mV)
+        T0 = mk(P; VFT, adex = a60)
+        @test pd().El_dend === nothing
+        @test all(d -> all(==(FT(-60f0)), d.El), dends(T0))
+        Tdef = mk(P; VFT)
+        @test all(d -> all(==(FT(AdExParameter(FT = FT).El)), d.El), dends(Tdef))
+        # bit-identical dendrites to create_dendrite with El = adex.El
+        ref = create_dendrite(4, (P === Tripod ? Tdef.param.ds[1] : 300um); El = Tdef.adex.El, FT = FT, physiology = Tdef.param.physiology, d = Tdef.param.d)
+        @test all((P === Tripod ? Tdef.d1 : Tdef.d).El .== ref.El)
+        # fixed dendritic El
+        T1 = mk(P; VFT, adex = a60, param = pd(El_dend = -70.6mV))
+        @test T1.param.El_dend == -70.6f0
+        @test all(d -> all(==(FT(-70.6f0)), d.El), dends(T1))
+        @test T1.adex.El == FT(-60f0)
+        # same cable otherwise
+        for (d1, d0) in zip(dends(T1), dends(T0))
+            @test d1.gm == d0.gm && d1.gax == d0.gax && d1.C == d0.C
+        end
+        # changing adex.El afterwards does not change the dendritic El (read at construction)
+        T1.adex.El = -65f0
+        @test all(d -> all(==(FT(-70.6f0)), d.El), dends(T1))
+    end
+
+    # default behaviour: trajectory bit-identical to El_dend equal to the somatic El (which is what the code did before El_dend; the
+    # same trajectory was also checked against the commit before the change: identical state hash)
+    for P in (Tripod, BallAndStick)
+        function traj(El_dend)
+            Random.seed!(11)   # random initial potentials
+            pm = P === Tripod ? TripodParameter(ds = distal_proximal; El_dend) : BallAndStickParameter(ds = [300um]; El_dend)
+            T = mk(P; adex = AdExParameter(El = -65mV), param = pm)
+            I = hasproperty(T, :I) ? T.I : T.Is
+            I .= 300f0 .* range(0.2f0, 1f0, length = 4)
+            for _ in 1:2000; SNNModels.integrate!(T, T.param, 0.1f0); end
+            return (copy(T.v_s), copy(hasproperty(T, :v_d1) ? T.v_d1 : T.v_d), copy(T.w_s))
+        end
+        @test traj(nothing) == traj(-65f0)
+    end
+
+    # steady state without input: every compartment starts at its El, dendrites do not move (axial current is 0 only when V_s = V_d,
+    # so check the leak analytically on an isolated dendrite: gax = 0)
+    for P in (Tripod, BallAndStick)
+        T = mk(P; adex = AdExParameter(El = -60mV, Vr = -60mV), param = P === Tripod ? TripodParameter(ds = distal_proximal, El_dend = -70.6mV) : BallAndStickParameter(ds = [300um], El_dend = -70.6mV))
+        for d in dends(T); d.gax .= 0; end           # decouple the compartments
+        T.v_s .= -60f0
+        fill!(T.θ, T.adex.Vt)
+        for f in (:v_d1, :v_d2, :v_d); hasfield(typeof(T), f) && fill!(getfield(T, f), -60f0); end
+        d1 = dends(T)[1]; vd0 = -60.0
+        τ = d1.C[1] / d1.gm[1]                         # ms (pF / nS)
+        vdf(t) = -70.6 + (vd0 + 70.6) * exp(-t / τ)    # cable equation, dendrite alone
+        nsteps = round(Int, 5τ / 0.1)
+        for _ in 1:nsteps; SNNModels.integrate!(T, T.param, 0.1f0); end
+        vd = P === Tripod ? T.v_d1 : T.v_d
+        @test all(isapprox.(vd, vdf(nsteps * 0.1), atol = 1e-3))
+        @test abs(vd[1] + 70.6) < 0.1 * 10.6                               # relaxed towards -70.6, not held at the somatic El
+        @test T.adex.El == -60f0 && all(isapprox.(T.v_s, -60f0, atol = 2))   # soma around its own El (the exponential term drifts it slowly)
+    end
+
+    # TripodPaper keeps the dendritic leak fixed
+    for VFT in (Vector{Float32}, Vector{Float64})
+        FT = eltype(VFT)
+        T = TripodPaper(N = 2; VFT)
+        @test T.param.El_dend == -70.6f0 && all(==(FT(-70.6f0)), T.d1.El) && all(==(FT(-70.6f0)), T.d2.El)
+        T = TripodPaper(N = 2; VFT, adex = AdExParameter(FT = FT, C = 281pF, gl = 40nS, El = -60mV, Vr = -60mV, Vt = -50.4mV, ΔT = 2mV, a = 4nS, b = 80.5pA, τw = 144ms))
+        @test all(==(FT(-70.6f0)), T.d1.El) && all(==(FT(-70.6f0)), T.d2.El) && T.adex.El == FT(-60f0)
+    end
 end

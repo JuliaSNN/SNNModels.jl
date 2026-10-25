@@ -71,7 +71,9 @@ C_{d,k} \frac{dV_{d,k}}{dt} &= g_{m,k} (E_{L,k} - V_{d,k}) - I_{syn,d,k}
 `dend_syn` with the compartment potentials of the Heun stage being evaluated, and are clamped to
 ``\pm 1500`` pA (`Tripod`) or ``\pm 1000`` pA (`BallAndStick`). ``C_{d,k}``, ``g_{m,k}``,
 ``g_{ax,k}`` and the dendritic leak reversal ``E_{L,k}`` come from the `Dendrite` structs (see
-`create_dendrite`); by default ``E_{L,k}`` is the somatic ``E_L`` (`adex.El`). The exponential term is multiplied by ``g_L``, as in
+`create_dendrite`); by default ``E_{L,k}`` is the somatic ``E_L`` (`adex.El`),
+unless `param.El_dend` is set (a number, mV; it then stays fixed whatever `adex.El`). ``E_{L,k}`` is read at construction: changing `adex.El` of an existing
+population moves the somatic leak and the adaptation coupling, not the dendritic leak (`d1.El`, `d2.El`; set those directly to change it). The exponential term is multiplied by ``g_L``, as in
 the AdEx model (Brette and Gerstner 2005) and in the code of the published Tripod model (`equations.jl` of
 `aquaresima/tripod_neuron`: `gl * (-v + Er + ΔT * exp(...))`). Eq. 1 of the bioRxiv preprint of that paper (Quaresima et al.
 2023, J. Physiol.) prints the exponential term without ``g_L``, which is not the equation the code integrates.
@@ -114,7 +116,7 @@ conductances are advanced with the `exp64` approximation of the exponential deca
   (resting value of the threshold ``\theta``), `Vr`, `a`, `b`, `τw`.
 - `soma_syn::SYNS = TripodSomaSynapse`, `dend_syn::SYND = TripodDendSynapse`: synapse models.
 - `spike::PST = PostSpike()`: `AP_membrane`, `up`, `τabs`, `At`, `τA`.
-- `d1::VDT`, `d2::VDT`: `Dendrite`s built with `create_dendrite(N, param.ds[k]; El = adex.El, FT = eltype(VFT), physiology = param.physiology, d = param.d)`.
+- `d1::VDT`, `d2::VDT`: `Dendrite`s built with `create_dendrite(N, param.ds[k]; El = _dend_El(param, adex), FT = eltype(VFT), physiology = param.physiology, d = param.d)`, where `_dend_El(param, adex)` is `param.El_dend` if not `nothing`, else `adex.El`.
 - `Vspike::Float32 = -10mV`: spike detection threshold on the predicted somatic potential (`Float32` in both precisions);
   with `PaperScheme` the threshold of the test on the potential at the start of the step.
 - `scheme::AbstractTripodScheme = HeunScheme()`: integration scheme, `HeunScheme()` (this page) or `PaperScheme()` (the published
@@ -184,8 +186,8 @@ Tripod
     spike::PST = PostSpike(FT = eltype(VFT))
     Vspike::Float32 = -10mV
     scheme::SCH = HeunScheme()
-    d1::VDT = create_dendrite(N, param.ds[1]; El = adex.El, FT = eltype(VFT), physiology = param.physiology, d = param.d)
-    d2::VDT = create_dendrite(N, param.ds[2]; El = adex.El, FT = eltype(VFT), physiology = param.physiology, d = param.d)
+    d1::VDT = create_dendrite(N, param.ds[1]; El = _dend_El(param, adex), FT = eltype(VFT), physiology = param.physiology, d = param.d)
+    d2::VDT = create_dendrite(N, param.ds[2]; El = _dend_El(param, adex), FT = eltype(VFT), physiology = param.physiology, d = param.d)
 
     # Membrane potential and adaptation
     v_s::VFT = rand_value(N, adex.Vt, adex.Vr)

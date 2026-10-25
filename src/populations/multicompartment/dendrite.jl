@@ -99,7 +99,7 @@ population (`Tripod` has two, `d1` and `d2`; `BallAndStick` has one, `d`). Norma
 - `N::Int32 = 100`: number of neurons.
 - `El::VFT`: leak reversal (resting) potential of the dendrite (mV), used by the
   `Tripod`/`BallAndStick` dendritic equations. `create_dendrite` sets it from its `El` keyword
-  (default `-70.6mV`); `Tripod` and `BallAndStick` pass the somatic `adex.El` by default.
+  (default `-70.6mV`); `Tripod` and `BallAndStick` pass `param.El_dend`, or the somatic `adex.El` when it is `nothing` (default).
 - `l::VFT`: compartment length (cm); `-1` marks a disconnected compartment (`l <= 0`).
 - `d::VFT`: compartment diameter (cm).
 - `C::VFT`: membrane capacitance (pF), `C_mem`.

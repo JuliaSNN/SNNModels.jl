@@ -156,6 +156,7 @@ lengths and the numerics are those of the original at that step; other steps giv
 | Item | Value | Original |
 |:-----|:------|:---------|
 | soma | `C` 281 pF, `gl` 40 nS, `El` = `Vr` = -70.6 mV, `ΔT` 2 mV, `Vt` -50.4 mV, `a` 4 nS, `b` 80.5 pA, `τw` 144 ms | `AdExParams` (`soma.jl`) |
+| dendritic leak | `El_dend = -70.6 mV` in the `TripodParameter`, fixed whatever the somatic `adex.El` given through `kwargs` | `dendrites.jl:25` |
 | spike test | `V_s >= Vspike = -50.4 mV` on the potential at the start of the step, before integrating | `simulation.jl:165` (`v_soma >= AdEx.θ`) |
 | spike shape | `V_s` = 21 mV on the spike step (`PaperScheme(AP_spike)`), 20 mV during backpropagation (`spike.AP_membrane`), `up = 1 ms` | `PostSpike` (`AP_membrane` 21, `BAP` 20), `AdEx.up` |
 | refractory | `τabs = 2.1 ms`: with `dt = 0.1 ms` the spike step, 9 backpropagation and 21 refractory steps (`AdEx.idle` 2 ms, counter 30, 21 steps at `u_r`) | `simulation.jl:165-190` |
@@ -199,6 +200,7 @@ function TripodPaper(;
         ds = copy(_PAPER_CONFIGS[config]),
         physiology = physiology === :human ? human_dend : mouse_dend,
         d = d,
+        El_dend = -70.6mV,
     )
     adex = AdExParameter(FT = FT, C = 281pF, gl = 40nS, El = -70.6mV, Vr = -70.6mV, Vt = -50.4mV, ΔT = 2mV, a = 4nS, b = 80.5pA, τw = 144ms)
     spike = PostSpike(FT = FT, At = 0mV, τA = 30ms, AP_membrane = 20mV, τabs = 2.1ms, up = 1ms)

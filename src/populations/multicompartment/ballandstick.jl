@@ -20,7 +20,7 @@ argument of `SpikingSynapse`: targets `:s` and `:d`.
 - `adex::SOMAT = AdExParameter()`: somatic parameters (see `Tripod`).
 - `dend_syn::SYND = TripodDendSynapse`, `soma_syn::SYNS = TripodSomaSynapse`: synapse models.
 - `spike::PST = PostSpike()`: spike shape and refractoriness.
-- `d::VDT`: `Dendrite` built with `create_dendrite(N, param.ds[1]; El = adex.El, FT = eltype(VFT), physiology = param.physiology, d = param.d)`.
+- `d::VDT`: `Dendrite` built with `create_dendrite(N, param.ds[1]; El = _dend_El(param, adex), FT = eltype(VFT), physiology = param.physiology, d = param.d)`, where `_dend_El(param, adex)` is `param.El_dend` if not `nothing`, else `adex.El` (read at construction).
 - `Vspike::Float32 = -10mV`: spike detection threshold on the predicted somatic potential.
 
 ## State variables
@@ -75,7 +75,7 @@ BallAndStick
     Vspike::Float32 = -10mV
 
     # Membrane potential and adaptation
-    d::VDT = create_dendrite(N, param.ds[1]; El = adex.El, FT = eltype(VFT), physiology = param.physiology, d = param.d)
+    d::VDT = create_dendrite(N, param.ds[1]; El = _dend_El(param, adex), FT = eltype(VFT), physiology = param.physiology, d = param.d)
     v_s::VFT = rand_value(N, adex.Vt, adex.Vr)
     w_s::VFT = zeros(N)
     v_d::VFT = rand_value(N, adex.Vt, adex.Vr)

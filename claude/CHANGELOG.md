@@ -73,6 +73,14 @@ Other changes (no change of results unless stated):
 - Validation: `papers/JuliaSNN_publication/validation/tripod_audit` of the JuliaSNN repository (audit, `tripodpaper_check.jl`).
 - Test suite: 78323 pass, 1 broken (the `@test_skip` of 2.0.3; 78092 + 1 before: +181 in `tripod_21.jl`, +50 TripodPaper cases in the threading test).
 
+**New option `El_dend`.** `DendNeuronParameter`, `TripodParameter` and `BallAndStickParameter` take `El_dend = nothing`: the leak
+reversal potential of the dendrites. `nothing` (default) keeps the behaviour of 1.9.0 and later (dendrites use the somatic `adex.El`,
+bit-identical results); a number (mV) gives `create_dendrite(...; El = El_dend)`, so optimisation projects that sample the somatic `El`
+can keep the dendritic leak fixed (the original Tripod fixes it at -70.6 mV). The value is read when the population is constructed
+(`d1.El`, `d2.El`, `d.El`); changing `adex.El` of an existing population (e.g. `@update!`) moves the somatic leak and the adaptation
+coupling `a (V_s - El)` but not the dendritic leak, with or without `El_dend`. `TripodPaper` now passes `El_dend = -70.6mV`, so its
+dendritic leak stays at -70.6 mV even if the somatic `El` is changed through `kwargs`.
+
 ## 2.0.3: smaller :fire records, monitor_time for :fire, git provenance
 
 Smaller `:fire` records, one allocation for a declared duration, provenance from outside the repository.
