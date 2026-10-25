@@ -73,6 +73,7 @@ end
     _inc("tripod",       "pop/tripod.jl")
     _inc("ballandstick", "pop/ballandstick.jl")
     _ts("multicompartment_numerics", "pop/multicompartment_numerics.jl")
+    _ts("tripod_21",     "pop/tripod_21.jl")
 end
 
 # ── Stimuli ───────────────────────────────────────────────────────────────────

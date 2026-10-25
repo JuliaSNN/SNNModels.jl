@@ -5,8 +5,10 @@
 
 Population of two-compartment neurons: an AdEx-like soma coupled to one passive dendrite
 (`d`) through an axial conductance. Same equations, spike rule and Heun integration as `Tripod`
-with a single dendrite; the synaptic currents are clamped to ``\pm 1000`` pA and the external
-currents are `Is` (soma) and `Id` (dendrite). Connections select the compartment with the fourth
+with a single dendrite (during the backpropagation and refractory periods the soma is clamped and the dendrite is integrated
+in full, with leak and synaptic currents; before SNNModels 2.1 it only relaxed towards the soma); the synaptic currents are
+clamped to ``\pm 1000`` pA and the external currents are `Is` (soma) and `Id` (dendrite). The dendrite diameter is
+`param.d`. Connections select the compartment with the fourth
 argument of `SpikingSynapse`: targets `:s` and `:d`.
 
 # Fields
@@ -18,8 +20,8 @@ argument of `SpikingSynapse`: targets `:s` and `:d`.
 - `adex::SOMAT = AdExParameter()`: somatic parameters (see `Tripod`).
 - `dend_syn::SYND = TripodDendSynapse`, `soma_syn::SYNS = TripodSomaSynapse`: synapse models.
 - `spike::PST = PostSpike()`: spike shape and refractoriness.
-- `d::VDT`: `Dendrite` built with `create_dendrite(N, param.ds[1]; El = adex.El, FT = eltype(VFT), physiology = param.physiology)`.
-- `Vspike::Float32 = -10mV`: spike detection threshold on the predicted somatic potential.
+- `d::VDT`: `Dendrite` built with `create_dendrite(N, param.ds[1]; El = _dend_El(param, adex), FT = eltype(VFT), physiology = param.physiology, d = param.d)`, where `_dend_El(param, adex)` is `param.El_dend` if not `nothing`, else `adex.El` (read at construction).
+- `Vspike::Float32 = 0mV`: spike detection threshold on the predicted somatic potential.
 
 ## State variables
 - `v_s`, `v_d::VFT`: somatic and dendritic potentials (mV), initialised uniformly in `[Vr, Vt]`.
@@ -70,10 +72,10 @@ BallAndStick
     dend_syn::SYND = convert_precision(TripodDendSynapse, eltype(VFT))
     soma_syn::SYNS = convert_precision(TripodSomaSynapse, eltype(VFT))
     spike::PST = PostSpike(FT = eltype(VFT))
-    Vspike::Float32 = -10mV
+    Vspike::Float32 = 0mV
 
     # Membrane potential and adaptation
-    d::VDT = create_dendrite(N, param.ds[1]; El = adex.El, FT = eltype(VFT), physiology = param.physiology)
+    d::VDT = create_dendrite(N, param.ds[1]; El = _dend_El(param, adex), FT = eltype(VFT), physiology = param.physiology, d = param.d)
     v_s::VFT = rand_value(N, adex.Vt, adex.Vr)
     w_s::VFT = zeros(N)
     v_d::VFT = rand_value(N, adex.Vt, adex.Vr)
@@ -133,8 +135,10 @@ function integrate!(p::BallAndStick, param::DendNeuronParameter, dt_::AbstractFl
         fill!(p.Δv, zero(eltype(p.Δv)))
         fill!(p.Δv_temp, zero(eltype(p.Δv_temp)))
         fill!(p.fire, false)
+        _bas_clamp_soma!(p, 1:N, n_abs)
         update_neuron!(p, param, p.Δv, dt)
         p.Δv_temp .= p.Δv
+        _bas_hold_soma!(p, 1:N, n_abs)
         update_neuron!(p, param, p.Δv, dt)
         _bas_state!(p, dt, 1:N, n_abs, n_ref)
     end
@@ -154,14 +158,36 @@ function _bas_chunk!(p::BallAndStick, param::DendNeuronParameter, dt::AbstractFl
     @inbounds for i in rng
         fire[i] = false
     end
+    _bas_clamp_soma!(p, rng, n_abs)
     update_neuron!(p, param, Δv, dt, rng)
     @inbounds for k in 1:3
         @simd ivdep for i in rng
             Δv_temp[i, k] = Δv[i, k]
         end
     end
+    _bas_hold_soma!(p, rng, n_abs)
     update_neuron!(p, param, Δv, dt, rng)
     _bas_state!(p, dt, rng, n_abs, n_ref)
+end
+
+# Neurons in the backpropagation or refractory period: the soma is held at its clamp value for the whole step, so that both Heun
+# stages of the dendrite see it (the dendritic equation is integrated in full); see `Tripod`.
+function _bas_clamp_soma!(p::BallAndStick, rng::UnitRange{Int}, n_abs::Int)
+    @unpack v_s, tabs, spike, adex = p
+    AP, Vr = spike.AP_membrane, adex.Vr
+    nabs_f = convert(eltype(tabs), n_abs)
+    @inbounds @simd ivdep for i ∈ rng
+        t1 = tabs[i] - 1
+        v_s[i] = ifelse(t1 > nabs_f, AP, ifelse(t1 > 0, Vr, v_s[i]))
+    end
+end
+
+# Between the two Heun stages: a clamped soma does not move in the Euler prediction.
+function _bas_hold_soma!(p::BallAndStick, rng::UnitRange{Int}, n_abs::Int)
+    @unpack Δv, tabs = p
+    @inbounds @simd ivdep for i ∈ rng
+        Δv[i, 1] = ifelse(tabs[i] - 1 > 0, zero(eltype(Δv)), Δv[i, 1])
+    end
 end
 
 function _bas_state!(p::BallAndStick, dt::AbstractFloat, rng::UnitRange{Int}, n_abs::Int, n_ref::Int)
@@ -169,7 +195,6 @@ function _bas_state!(p::BallAndStick, dt::AbstractFloat, rng::UnitRange{Int}, n_
     @unpack spike, adex, Vspike = p
     @unpack AP_membrane, At, τA = spike
     @unpack Vr, Vt, b = adex
-    gax, Cd = d.gax, d.C
     nabs_f = convert(eltype(tabs), n_abs)    # the counters are floats: compare and store without mixing types
     FT = eltype(v_s)
     nref_f = convert(eltype(tabs), n_ref)
@@ -185,9 +210,8 @@ function _bas_state!(p::BallAndStick, dt::AbstractFloat, rng::UnitRange{Int}, n_
         ws0 = w_s[i]
         dv1 = Δv[i, 1]
 
-        # bp or rf: the soma is clamped, the dendrite relaxes towards it
+        # bp or rf: the soma is clamped (the Heun stages already integrated the dendrite against the clamped soma)
         vsc = ifelse(bp, AP_membrane, Vr)
-        vdc = vd0 + dt * (vsc - vd0) * gax[i] / Cd[i]
 
         # act: spike or Heun update
         spk = act & (vs0 + dv1 * dt >= Vspike)
@@ -200,7 +224,7 @@ function _bas_state!(p::BallAndStick, dt::AbstractFloat, rng::UnitRange{Int}, n_
         fire[i] = spk
         Δv[i, 1] = ifelse(spk, AP_membrane - vs0, dv1)
         v_s[i] = ifelse(clamped, vsc, ifelse(spk, AP_membrane, ifelse(keep, vs_h, vs0)))
-        v_d[i] = ifelse(clamped, vdc, ifelse(keep, vd_h, vd0))
+        v_d[i] = ifelse(spk, vd0, vd_h)    # Heun update, also while the soma is clamped; it holds on the spike step
         w_s[i] = ifelse(spk, ws0 + b, ifelse(keep, ws_h, ws0))
         θ[i] = ifelse(spk, th1 + At, th1)
         tabs[i] = ifelse(spk, nref_f, t1)

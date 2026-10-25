@@ -155,6 +155,7 @@ abstract type AbstractDendriteIF <: AbstractGeneralizedIF end
 include("multicompartment/dendrite.jl")
 include("multicompartment/dendneuron_parameter.jl")
 include("multicompartment/tripod.jl")
+include("multicompartment/tripod_paper.jl")
 include("multicompartment/ballandstick.jl")
 
 ## Spike lists owned by the integrate-and-fire family (see `spike_index`)
