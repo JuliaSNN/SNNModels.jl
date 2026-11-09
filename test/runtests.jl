@@ -61,6 +61,7 @@ end
     _ts("wilsoncowan",  "pop/wilsoncowan.jl")
     _ts("hetrec",       "pop/hetrec.jl")
     _inc("if_neuron",    "pop/if_neuron.jl")
+    _ts("integer_n",     "pop/integer_n.jl")
     _inc("if_update_loop", "pop/if_update_loop.jl")
     _inc("adex_update_loop", "pop/adex_update_loop.jl")
     _inc("extendedif_update_loop", "pop/extendedif_update_loop.jl")

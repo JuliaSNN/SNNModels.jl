@@ -1,5 +1,9 @@
 # SNNModels changelog
 
+## Unreleased
+
+- `IF(N = Int32(10))` (any `Integer` population size) no longer fails in `synaptic_variables`/`synaptic_receptors`: the size is converted to `Int` once, in the generic methods of `AbstractSynapseParameter`.
+
 ## 2.1.0
 
 Tripod / BallAndStick: soma-clamp fix (RESULTS CHANGE), dendrite diameter, fixed paper configurations, mouse synapses, and

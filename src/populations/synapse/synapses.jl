@@ -85,7 +85,7 @@ function get_synapse_symbol(synapse::T, sym::Symbol) where {T<:AbstractSynapsePa
 end
 
 """
-    synaptic_variables(synapse::AbstractSynapseParameter, N::Int[, FT]) -> AbstractSynapseVariable
+    synaptic_variables(synapse::AbstractSynapseParameter, N::Integer[, FT]) -> AbstractSynapseVariable
 
 Allocate the state variables (all zero, element type `FT`, default `float_type(synapse)`) of the synapse model
 `synapse` for `N` neurons or compartments. Every synapse model implements the three-argument method.
@@ -95,6 +95,12 @@ function synaptic_variables(synapse::AbstractSynapseParameter, N::Int, ::Type{FT
     _two_argument_only(synaptic_variables, synapse, FT) && return synaptic_variables(synapse, N)
     error("synaptic_variables not implemented for synapse type $(typeof(synapse))")
 end
+
+# Any `Integer` population size is accepted (e.g. `IF(N = Int32(10))`): it is converted to `Int` here, once, and the `Int` methods
+# above and the model-specific ones do the work.
+synaptic_variables(synapse::AbstractSynapseParameter, N::Integer) = synaptic_variables(synapse, Int(N))
+synaptic_variables(synapse::AbstractSynapseParameter, N::Integer, ::Type{FT}) where {FT<:AbstractFloat} =
+    synaptic_variables(synapse, Int(N), FT)
 
 # A synapse model that defines only the two-argument `synaptic_variables`/`synaptic_receptors` keeps working when `FT` is
 # its own precision; for another precision the error asks for the three-argument method.
@@ -106,7 +112,7 @@ function _two_argument_only(f, synapse, ::Type{FT}) where {FT}
 end
 
 """
-    synaptic_receptors(synapse::AbstractSynapseParameter, N::Int[, FT]) -> NamedTuple
+    synaptic_receptors(synapse::AbstractSynapseParameter, N::Integer[, FT]) -> NamedTuple
 
 Allocate the spike-input buffers of a population: a `NamedTuple` of `Vector{FT}` of length
 `N`, one per receptor group. The default is `(glu = zeros(FT, N), gaba = zeros(FT, N))`;
@@ -118,6 +124,10 @@ function synaptic_receptors(synapse::AbstractSynapseParameter, N::Int, ::Type{FT
     _two_argument_only(synaptic_receptors, synapse, FT) && return synaptic_receptors(synapse, N)
     return (glu = zeros(FT, N), gaba = zeros(FT, N))
 end
+
+synaptic_receptors(synapse::AbstractSynapseParameter, N::Integer) = synaptic_receptors(synapse, Int(N))
+synaptic_receptors(synapse::AbstractSynapseParameter, N::Integer, ::Type{FT}) where {FT<:AbstractFloat} =
+    synaptic_receptors(synapse, Int(N), FT)
 
 # Copy of a synapse model in precision `T`; the object itself when already in `T` or without floating-point fields.
 convert_precision(x::AbstractSynapseParameter, ::Type{T}) where {T<:AbstractFloat} = _convert_float_struct(x, T)
