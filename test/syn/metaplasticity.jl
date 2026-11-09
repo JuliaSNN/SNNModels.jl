@@ -58,6 +58,18 @@ using Test
         @test length(p.Y) == 10
         @test p.τ  ≈ 10ms
         @test p.τa ≈ 100ms
+        @test p.Wmax ≈ 250pF
+    end
+
+    @testset "AggregateScalingParameter — positional Wmax" begin
+        p = AggregateScalingParameter(10, 5Hz; Wmin = 1pF, Wmax = 100pF)
+        @test p.Wmax == 100f0 * pF
+        @test p.Wmax isa Float32
+        @test p.Wmin == 1f0 * pF
+        @test length(p.Y) == 10
+        # same result as the keyword form
+        q = AggregateScalingParameter(; τa = 100ms, τe = 100ms, Y = fill(Float32(5Hz), 10), Wmin = 1pF, Wmax = 100pF)
+        @test (p.τ, p.τa, p.τe, p.Y, p.Wmin, p.Wmax) == (q.τ, q.τa, q.τe, q.Y, q.Wmin, q.Wmax)
     end
 
     @testset "RandomTurnover — constructor" begin

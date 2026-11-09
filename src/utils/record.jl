@@ -734,6 +734,43 @@ function _rate_Hz(monitor_rate)
     return Float32(monitor_rate / Hz)
 end
 
+# `monitor!` on a key that is already monitored: the settings given in this call and different from the stored ones
+# replace them (`nothing` leaves a setting as it is), with an @info note listing old and new values.
+function _update_monitor_settings!(obj, key::Symbol, sr, monitor_time, monitor_rate)
+    meta = obj.records[:meta]
+    changes = String[]
+    if key !== :fire
+        new = Float32(sr)
+        old = get(obj.records[:sr], key, nothing)
+        if old != new
+            obj.records[:sr][key] = new
+            meta[:period][key] = max(1, round(Int, 1.0f0 / new / 0.125f0))  # reconciled with the real dt in _allocate_records!
+            push!(changes, "sr $(old === nothing ? "unset" : round(old / Hz, digits = 3)) Hz -> $(round(new / Hz, digits = 3)) Hz")
+        end
+    end
+    if monitor_time !== nothing
+        new = Float32(monitor_time)
+        old = get(meta[:monitor_time], key, nothing)
+        if old != new
+            meta[:monitor_time][key] = new
+            push!(changes, "monitor_time $(old === nothing ? "unset" : "$old ms") -> $new ms")
+        end
+    end
+    if monitor_rate !== nothing && key === :fire   # only the :fire buffers are sized from it
+        new = _rate_Hz(monitor_rate)
+        old = get(meta[:monitor_rate], key, nothing)
+        if old != new
+            meta[:monitor_rate][key] = new
+            push!(changes, "monitor_rate $(old === nothing ? "unset" : "$old Hz") -> $new Hz")
+        end
+    end
+    isempty(changes) && return false
+    note = isnan(get(obj.records[:start_time], key, NaN32)) ? "" :
+        " (samples were already recorded: clear the records to avoid a record with mixed settings)"
+    @info "Monitor settings of :$key in $(obj.name) updated: $(join(changes, ", "))$note"
+    return true
+end
+
 """
     monitor!(obj, keys; sr = 1000Hz, variables = :none, monitor_time = nothing, monitor_rate = nothing, verbose = false)
     monitor!(objs::Union{Array,NamedTuple}, keys; sr = 200Hz, kwargs...)
@@ -779,8 +816,11 @@ here.
   of snapshots.
 - A first sample is taken at `t = 0` when the model time is 0.
 
-Already-monitored keys and missing fields are skipped silently (with a warning if
-`verbose = true`).
+Missing fields are skipped silently (with a warning if `verbose = true`).
+
+A key that is already monitored keeps its recording; the settings `sr`, `monitor_time` and `monitor_rate`
+passed explicitly in the new call replace the stored ones when they differ, and an `@info` message lists
+the changes (`monitor_time` and `monitor_rate` are left as they are when omitted; `sr` has a default, so a call without `sr` resets it to the default, and the message shows it).
 
 With `(:fire, indices)` only the spikes of the listed neurons are recorded (with their
 original neuron indices, so `spiketimes` still returns one entry per neuron of the
@@ -820,6 +860,7 @@ function monitor!(
             if haskey(obj.records, :fire)
                 verbose && @warn "Field :fire already being monitored in $(obj.name)"
                 :fire ∉ obj.records[:data] && push!(obj.records[:data], :fire)
+                _update_monitor_settings!(obj, :fire, nothing, monitor_time, monitor_rate)
                 continue
             end
             # COO fire event list: flat parallel arrays, pre-allocated in _allocate_records!.
@@ -877,6 +918,7 @@ function monitor!(
 
         if haskey(obj.records, key)
             verbose && @warn "Key $key already being monitored in $(obj.name)"
+            _update_monitor_settings!(obj, key, sr, monitor_time, monitor_rate)
             continue
         end
         !isempty(ind) && (obj.records[:indices][key] = ind)
@@ -908,13 +950,13 @@ end
 
 function monitor!(objs::Array, keys::Vector; sr = 200Hz, kwargs...)
     for obj in objs
-        monitor!(obj, keys, sr = sr; kwargs...)
+        monitor!(obj, keys; sr, kwargs...)
     end
 end
 
 function monitor!(objs::NamedTuple, keys::Vector; sr = 200Hz, kwargs...)
     for obj in values(objs)
-        monitor!(obj, keys, sr = sr; kwargs...)
+        monitor!(obj, keys; sr, kwargs...)
     end
 end
 
@@ -1117,6 +1159,7 @@ function record(
         return spiketimes(p)
     else
         sym = isnothing(variables) ? sym : Symbol(variables, "_", sym)
+        _check_recorded(p, sym)
         # not interpolate
         if !interpolate
             v = getvariable(p, sym)
@@ -1143,6 +1186,30 @@ function record(
     else
         return v
     end
+end
+
+# Keys of `p.records` that hold a monitored variable (not the bookkeeping entries).
+_recorded_keys(p) = sort!([k for (k, _) in p.records if k ∉ _RECORD_META_KEYS && k ∉ (:start_time, :end_time)])
+
+# Clear error, naming the available keys, when `sym` cannot be read from `p.records`: not monitored, or monitored but
+# without samples (records cleared by `load_model`/`clear_records!`, or no `sim!` after `monitor!`).
+function _check_recorded(p, sym::Symbol)
+    name = hasproperty(p, :name) ? string(p.name) : string(typeof(p))
+    if !haskey(p.records, sym)
+        throw(ArgumentError(
+            "`$sym` is not recorded for $name. Available record keys: $(_recorded_keys(p)). Call `monitor!` before `sim!` to record it.",
+        ))
+    end
+    start_time = get(p.records, :start_time, nothing)
+    has_samples = start_time isa AbstractDict ? haskey(start_time, sym) : true
+    if !has_samples || (p.records[sym] isa AbstractArray && isempty(p.records[sym]))
+        with_data = [k for k in _recorded_keys(p) if start_time isa AbstractDict && haskey(start_time, k)]
+        throw(ArgumentError(
+            "`$sym` is monitored for $name but holds no samples (the records were cleared, e.g. by `load_model`, or `sim!` has not " *
+            "run since `monitor!`). Keys with samples: $with_data. Load the file with `load_data` to keep the records.",
+        ))
+    end
+    return nothing
 end
 
 function record(pops, sym::Symbol; interval=nothing, interpolate=true, kwargs...)

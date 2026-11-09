@@ -19,6 +19,12 @@
   This is the unbounded, reversal-free adaptation current of the AdEx model (`V_s` relaxes to `El - w_s/gl`), independent of `dt` and
   identical in `AdEx`; nothing is clipped. Explained in the `Tripod` docstring, pinned by `test/pop/tripod_adaptation.jl`.
 
+- `IF(N = Int32(10))` (any `Integer` population size) no longer fails in `synaptic_variables`/`synaptic_receptors`: the size is converted to `Int` once, in the generic methods of `AbstractSynapseParameter`.
+- `firing_rate` of a silent population with a `neurons` subset (e.g. `neurons = 1:50`) no longer throws an incommensurate-range error: it returns zeros of shape `(length(neurons), length(interval))`.
+- The positional `AggregateScalingParameter(N, rate; ..., Wmax = 250pF)` accepts `Wmax` (it was documented but threw a keyword error); code and docstring now agree.
+- `record(p, sym)` on records that hold no samples (typically after `load_model`, which clears them) throws an `ArgumentError` that says so, lists the keys with samples and points to `load_data`, instead of a bare `KeyError`; a key that is not monitored at all lists the available record keys. `load_data` keeps the records, so `record` works on it.
+- `monitor!` on a key that is already monitored now replaces the stored `sr`, `monitor_time` and (for `:fire`) `monitor_rate` when the call gives a different value, with an `@info` note listing old and new values; it used to keep the old settings silently. `monitor_time` and `monitor_rate` default to `nothing`, so only explicit values update; `sr` keeps its defaults (`1000Hz`, `200Hz` for arrays and NamedTuples), so a call without `sr` on a key monitored at another rate resets it to the default, and the note says so.
+
 ## 2.1.0
 
 Tripod / BallAndStick: soma-clamp fix (RESULTS CHANGE), dendrite diameter, fixed paper configurations, mouse synapses, and
