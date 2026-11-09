@@ -114,7 +114,8 @@ is advanced by ``x_{n+1} = x_n + \frac{dt}{2}(k_1 + k_2)``. The scheme is second
 between spikes. During the backpropagation and refractory periods the soma is set to its clamp value before the first stage
 and does not move in the Euler prediction of the second, and the dendrites follow the same Heun update.
 The synaptic currents are evaluated at the stage potentials (the Euler-predicted potentials at the second stage), and the
-conductances are advanced with the `exp64` approximation of the exponential decay (see `ReceptorSynapse`).
+conductances are advanced with the exact one-step update of the double exponential (see `ReceptorSynapse`; `PaperScheme` keeps
+the discrete update of the published code).
 
 # Fields
 ## Population info

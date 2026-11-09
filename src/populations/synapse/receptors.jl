@@ -14,7 +14,8 @@ g_{syn} = g_0 \cdot \mathrm{norm\_synapse}(\tau_r, \tau_d), \qquad
 \alpha = \frac{\tau_d - \tau_r}{\tau_d \tau_r}, \qquad
 \tau_r^{-} = 1/\tau_r, \quad \tau_d^{-} = 1/\tau_d
 ```
-so that a unit weight produces a conductance with peak ``g_0`` (see `ReceptorSynapse`).
+so that a unit weight produces a conductance with peak exactly ``g_0`` (see `ReceptorSynapse`; releases up to 2.1 gave the peak
+``c(dt)\,g_0`` with ``c = \alpha\,dt/(1 - e^{-\alpha\,dt})``, see the CHANGELOG).
 
 # Fields
 - `name::String = "Receptor"`: label.

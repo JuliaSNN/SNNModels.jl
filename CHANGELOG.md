@@ -38,6 +38,41 @@
   (`MethodError: Cannot convert Float64 to Union{Float32, Tuple}`). Any `Real` length is accepted and stored as `Float32`; `(min, max)`
   tuples are unchanged. The diameter `d` already accepted any `Real`.
 
+### Changed
+
+- **Results change (receptor kinetics).** `ReceptorSynapse` and `MultiReceptorSynapse` (hence the soma and dendrites of `Tripod` and
+  `BallAndStick`, and every point-neuron population with receptors) integrate the double-exponential conductance exactly over one
+  step: `h += α w`, `g = e_d g + K h`, `h = e_r h`, with `e_d = exp(-dt/τd)`, `e_r = exp(-dt/τr)`, `K = (e_d - e_r)/α`,
+  `α = 1/τr - 1/τd`. The peak conductance of a unit weight is now `g0` for any `dt` (on the time grid: at most slightly below, 1e-3 or
+  less for the library receptors at `dt <= 0.2` ms), as in Brian2's exact integrator. Before, the update
+  `g = E(-dt/τd) (g + dt h)` (exponential Euler, `E` = `exp64` by default) sampled the kernel as `c(dt)` times the exact one, so
+  the peak was `c(dt) g0`:
+
+  `c(dt, τr, τd) = α dt / (1 - exp(-α dt))`  (> 1; derivation in `test/syn/exact_receptor.jl`)
+
+  | receptor (τr, τd in ms) | c at dt = 0.1 ms | c at dt = 0.125 ms |
+  |:--|--:|--:|
+  | AMPA (0.25, 2), `DuarteGluSoma` | 1.1852 | 1.2346 |
+  | GABAa (0.3, 15), `MilesGabaSoma` | 1.1722 | 1.2180 |
+  | NMDA (1, 100), `SomaReceptors` | 1.0503 | 1.0632 |
+  | GABAb (30, 100) | 1.0012 | 1.0015 |
+  | AMPA (0.26, 2), Tripod dendrite | 1.1766 | 1.2237 |
+  | NMDA (8, 35), Tripod dendrite | 1.0048 | 1.0060 |
+  | GABAa (4.8, 29), Tripod dendrite | 1.0087 | 1.0109 |
+  | GABAb (30, 400) | 1.0015 | 1.0019 |
+
+  **Migration.** A model tuned with 2.1.0 or earlier at time step `dt` and parameter `g0_old` had the peak `c(dt) g0_old`; the exact
+  update with `g0_new = c(dt) g0_old` (per receptor, at the `dt` of the old runs; multiply, not divide) reproduces the old
+  conductance traces (rtol 1e-5 in Float64, test `test/syn/exact_receptor.jl`). Keeping `g0` unchanged makes every synapse weaker
+  by `1/c` (about 20 % for AMPA and GABAa at 0.125 ms, 5 % for NMDA, nothing for GABAb). The default `decay = 64` of 2.1.0 gave a
+  peak 0.1-0.3 % below `c(dt) g0` (the power-law exponential shortens the time constants slightly), so for such runs the factor is
+  approximate at that level. Models with `dt = 0.1 ms` and the Tripod defaults change by 17-18 % in the AMPA and somatic GABAa peak.
+- `ReceptorSynapse` has the new field `exact::Bool = true`. `exact = false` selects the legacy update (with `decay`) and is used by
+  `TripodSomaSynapsePaper`, `TripodDendSynapsePaper` and `TripodDendSynapsePaperMouse`, so `TripodPaper` / `PaperScheme` still reproduce
+  the discrete update of the published code (peak `c(dt) g0`; the reference traces of the tests are unchanged). `decay` applies only to
+  `exact = false`. `DoubleExpSynapse`, `DoubleExpCurrentSynapse` (forward Euler, unnormalised weights) and the other synapse models are
+  not changed.
+
 ## 2.1.0
 
 Tripod / BallAndStick: soma-clamp fix (RESULTS CHANGE), dendrite diameter, fixed paper configurations, mouse synapses, and
