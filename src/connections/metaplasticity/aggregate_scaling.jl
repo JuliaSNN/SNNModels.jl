@@ -1,6 +1,6 @@
 """
     AggregateScalingParameter(; τ = 10ms, τa, τe, Y, Wmin = 0.5pF, Wmax = 250pF)
-    AggregateScalingParameter(N, rate = 10Hz; τ = 10ms, τa = 100ms, τe = 100ms, Wmin = 0.5pF)
+    AggregateScalingParameter(N, rate = 10Hz; τ = 10ms, τa = 100ms, τe = 100ms, Wmin = 0.5pF, Wmax = 250pF)
 
 Parameters of `AggregateScaling` (homeostatic scaling of the summed input weight towards a
 target firing rate).
@@ -17,7 +17,8 @@ target firing rate).
   code is a numerical factor (1); the weight unit is that of the synapse target.
 - `Wmax::Float32 = 250pF`: soft upper bound of `WT`.
 
-The positional form builds the vector `Y` for `N` neurons and does not take `Wmax`.
+The positional form builds the vector `Y` for `N` neurons and takes the same keywords as the keyword form (`Wmax` included).
+(Up to SNNModels 2.1.0 it did not accept `Wmax`.)
 (Up to SNNModels 1.8.4 its `Wmin` default was `0.05`, against `0.5pF` in the keyword form.)
 """
 AggregateScalingParameter
@@ -38,8 +39,11 @@ function AggregateScalingParameter(
     τa = 100ms,
     τe = 100ms,
     Wmin = 0.5pF,
+    Wmax = 250pF,
 )
-    AggregateScalingParameter(; τ = τ, τa = τa, τe = τe, Y = fill(Float32(rate), N), Wmin = Float32(Wmin))
+    AggregateScalingParameter(;
+        τ = τ, τa = τa, τe = τe, Y = fill(Float32(rate), N), Wmin = Float32(Wmin), Wmax = Float32(Wmax),
+    )
 end
 
 @doc raw"""

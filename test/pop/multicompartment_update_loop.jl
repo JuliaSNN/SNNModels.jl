@@ -34,17 +34,18 @@ function _ref_receptor_current!(p, synapse, synvars, v, syncurr)
 end
 
 
-# reference: MultiReceptorSynapse input stage of SNNModels <= 1.9
+# reference: MultiReceptorSynapse input stage (exact one-step update since 2.2.0; before, `g = E(-dt/τd) (g + dt h)`)
 function _ref_update_synapses!(p, synapse::MultiReceptorSynapse, receptors, synvars, dt)
     for name in keys(synapse.receptors)
         @inbounds for n in synapse.receptors[name]
             (; N, g, h) = synvars
             (; τr⁻, τd⁻, α) = synapse.syn[n]
             target = getfield(receptors, name)
-            for i ∈ 1:N
-                h[i, n] += target[i] * α
-                g[i, n] = SNNModels.exp64(-dt * τd⁻) * (g[i, n] + dt * h[i, n])
-                h[i, n] = SNNModels.exp64(-dt * τr⁻) * (h[i, n])
+            ed, er, K = SNNModels._exact_coeffs(Float32, dt, τr⁻, τd⁻, α)
+            for i ∈ 1:N      # muladd in the order the vectorised loop compiles to (fused where the target has FMA)
+                hn = muladd(target[i], α, h[i, n])
+                g[i, n] = muladd(ed, g[i, n], K * hn)
+                h[i, n] = er * hn
             end
         end
     end

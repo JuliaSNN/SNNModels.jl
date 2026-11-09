@@ -162,7 +162,7 @@ TripodDendSynapseMouse = ReceptorSynapse(
     TripodSomaSynapsePaper :: ReceptorSynapse
 
 Somatic synapse of the published Tripod code (`aquaresima/tripod_neuron` at 8698e1a): AMPA (E 0, τr 0.25, τd 2, g0 0.73) and
-GABAa (E -75, τr 0.3, τd 15, g0 0.38), `decay = 32` (the `exp32` of that code). `glu_receptors = [1]`, `gaba_receptors = [2]`.
+GABAa (E -75, τr 0.3, τd 15, g0 0.38), `decay = 32` (the `exp32` of that code) and `exact = false` (the discrete update of that code, whose peak conductance is `c(dt) g0`; see `ReceptorSynapse`). `glu_receptors = [1]`, `gaba_receptors = [2]`.
 """
 TripodSomaSynapsePaper = ReceptorSynapse(
     glu_receptors = [1],
@@ -170,13 +170,14 @@ TripodSomaSynapsePaper = ReceptorSynapse(
     syn = Receptors(PaperGluSoma, PaperGabaSoma),
     NMDA = EyalNMDA32,
     decay = 32,
+    exact = false,
 )
 
 """
     TripodDendSynapsePaper :: ReceptorSynapse
 
 Human dendritic synapse of the published Tripod code (8698e1a): the receptors of `TripodDendSynapse` (identical to it for GABA
-since 2.1.0; `PaperGabaDend` is an alias of `MilesGabaDend`), the Mg block of that code (`EyalNMDA32`, exponential `(1 + x/32)^32`) and `decay = 32`.
+since 2.1.0; `PaperGabaDend` is an alias of `MilesGabaDend`), the Mg block of that code (`EyalNMDA32`, exponential `(1 + x/32)^32`), `decay = 32` and `exact = false` (the discrete update of that code).
 """
 TripodDendSynapsePaper = ReceptorSynapse(
     glu_receptors = [1, 2],
@@ -184,13 +185,14 @@ TripodDendSynapsePaper = ReceptorSynapse(
     syn = Receptors(EyalGluDend, PaperGabaDend),
     NMDA = EyalNMDA32,
     decay = 32,
+    exact = false,
 )
 
 """
     TripodDendSynapsePaperMouse :: ReceptorSynapse
 
 Mouse dendritic synapse of the published Tripod code (8698e1a, `mouse_synapses`): `DuarteGluDend` glutamatergic receptors,
-GABAa E_rev -75 mV, block `EyalNMDA32`, `decay = 32`.
+GABAa E_rev -75 mV, block `EyalNMDA32`, `decay = 32`, `exact = false`.
 """
 TripodDendSynapsePaperMouse = ReceptorSynapse(
     glu_receptors = [1, 2],
@@ -198,6 +200,7 @@ TripodDendSynapsePaperMouse = ReceptorSynapse(
     syn = Receptors(DuarteGluDend, PaperGabaDend),
     NMDA = EyalNMDA32,
     decay = 32,
+    exact = false,
 )
 
 ## Soma parameters

@@ -360,7 +360,9 @@ function firing_rate(
     if length(spiketimes) < 1
         rates = zeros(Float32, 0, length(interval))
     elseif all(isempty.(spiketimes))
-        rates = zeros(Float32, length(spiketimes[neurons]), length(interval))
+        # keep only the selected neurons so the interpolation axis matches the rows of `rates`
+        spiketimes = spiketimes[neurons]
+        rates = zeros(Float32, length(spiketimes), length(interval))
     else
         spiketimes = spiketimes[neurons]
         conv_kernel = kernel(;interval, kwargs...)

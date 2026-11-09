@@ -16,7 +16,7 @@ carries the morphology only; the somatic parameters are in the population field 
 `TripodNeuron()` and a `BallAndStick` when it is `BallAndStickNeuron()`.
 
 # Fields
-- `ds::DT = [(200um, 400um), (200um, 400um)]`: one entry per dendrite, either a length (cm)
+- `ds::DT = [(200um, 400um), (200um, 400um)]`: one entry per dendrite, either a length (cm, any `Real`, stored as `Float32`)
   or a `(min, max)` range from which `create_dendrite` draws the length of each neuron.
 - `physiology::PT = human_dend`: cable properties (`Physiology`: `Ri`, `Rd`, `Cd`), used by `Tripod` and `BallAndStick` to build their dendrites.
 - `d::Float32 = 4um`: dendrite diameter (cm), common to all dendrites of the neuron. It enters the cable formulas of
@@ -69,6 +69,10 @@ DendNeuronParameter
         end
     end
 end
+
+# `ds` accepts any `Real` length (Float64, Int, ...) besides `(min, max)` tuples; scalar lengths are stored as `Float32`.
+snn_kw_finalize(::Type{<:DendNeuronParameter}, f::NamedTuple) =
+    (; f..., ds = DendLength[l isa Tuple ? l : Float32(l) for l in f.ds])
 
 # Dendritic leak reversal used at construction: `param.El_dend`, or the somatic `adex.El` when it is `nothing`.
 _dend_El(param::DendNeuronParameter, adex) = isnothing(param.El_dend) ? adex.El : param.El_dend

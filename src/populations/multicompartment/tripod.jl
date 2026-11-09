@@ -78,6 +78,16 @@ the AdEx model (Brette and Gerstner 2005) and in the code of the published Tripo
 `aquaresima/tripod_neuron`: `gl * (-v + Er + ΔT * exp(...))`). Eq. 1 of the bioRxiv preprint of that paper (Quaresima et al.
 2023, J. Physiol.) prints the exponential term without ``g_L``, which is not the equation the code integrates.
 
+Hyperpolarisation after a burst. The adaptation ``w_s`` is a current without reversal potential (as in the AdEx model of
+Brette and Gerstner 2005; the `AdEx` populations behave the same): each spike adds `b` and it decays with `τw`, so that after a
+strong burst the somatic potential relaxes to ``E_L - w_s/g_L`` and undershoots ``E_L`` by ``w_s/g_L`` before ``w_s`` has
+decayed. With the default parameters (`b = 80.5` pA, `τw = 144` ms, `gl = 40` nS) a 200 ms drive that makes the soma fire 46 spikes
+gives ``w_s \approx 3000`` pA and a minimum of about -130 mV some 25 ms after the end of the drive; -225 mV corresponds to
+``w_s \approx 6200`` pA, i.e. a firing rate of several hundred Hz sustained for hundreds of ms (the refractory clamp limits the
+rate to `1/(up + τabs)`). This is the model, not a numerical artefact (the minimum does not depend on `dt`: -129.8 mV at 0.025 ms, -131.4 mV at 0.5
+ms), and the undershoot is bounded by ``E_L - w_{max}/g_L``. Nothing in `Tripod` clips ``V_s`` from below; for a bounded
+afterhyperpolarisation lower `b` or the input rate.
+
 Spike: when the predicted somatic potential ``V_s + dt\,\dot V_s`` reaches `Vspike`
 (population field, default ``0`` mV, was ``-10`` mV before 2.1.0; `adex.Vt` is only the resting value of ``\theta``), the
 neuron fires: ``V_s \leftarrow`` `AP_membrane`,
@@ -104,7 +114,8 @@ is advanced by ``x_{n+1} = x_n + \frac{dt}{2}(k_1 + k_2)``. The scheme is second
 between spikes. During the backpropagation and refractory periods the soma is set to its clamp value before the first stage
 and does not move in the Euler prediction of the second, and the dendrites follow the same Heun update.
 The synaptic currents are evaluated at the stage potentials (the Euler-predicted potentials at the second stage), and the
-conductances are advanced with the `exp64` approximation of the exponential decay (see `ReceptorSynapse`).
+conductances are advanced with the exact one-step update of the double exponential (see `ReceptorSynapse`; `PaperScheme` keeps
+the discrete update of the published code).
 
 # Fields
 ## Population info

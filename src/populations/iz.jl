@@ -62,6 +62,13 @@ half steps of `dt/2` of the quadratic part (as in Izhikevich 2003), ``u`` with o
 using the new ``v``, then the synaptic term `dt * (ge * (Ee - v) + gi * (Ei - v))` is added;
 finally spikes are detected (`v > 30`) and reset. No refractory period.
 
+The synaptic term is explicit, so the step is stable only for `dt * (ge + gi) < 2`; `ge` and
+`gi` are in 1/ms (``\tau_m = 1/(g_e + g_i)``), and a negative conductance is unstable at any `dt`.
+Up to SNNModels 2.1.0 the conductances started from random values (mean 40 and 200, the
+`nS` scale of the capacitive `HH`, with `gi` often negative): `dt * gi` was of the order of 10-100,
+so every population left at the default state diverged within a few steps (`v` reaching
+-1e17 mV) even under `I = 0`. They now start at zero.
+
 # Fields
 - `id::String = randstring(12)`, `name::String = "IZ"`, `param::IZParameter = IZParameter()`.
 - `N::Int32 = 100`.
@@ -70,10 +77,8 @@ finally spikes are detected (`v > 30`) and reset. No refractory period.
 - `u::VFT = param.b * v`: recovery variable.
 - `fire::Vector{Bool}`; `I::VFT`: external input (mV/ms), zeros.
 - `spikes::SpikeIndex`: neurons that fired in the step (see `spike_index`).
-- `ge::VFT = (1.5randn(N) .+ 4) .* 10nS`: excitatory conductance, random initial
-  values (mean 40 nS).
-- `gi::VFT = (12randn(N) .+ 20) .* 10nS`: inhibitory conductance, random initial
-  values (mean 200 nS, can be negative).
+- `ge::VFT = zeros(N)`, `gi::VFT = zeros(N)`: excitatory and inhibitory conductances (1/ms,
+  there is no capacitance), initially zero.
 - `records::Dict`.
 
 # References
@@ -103,8 +108,8 @@ IZ
     spikes::SpikeIndex = owned_spike_index(N)
     I::VFT = zeros(N)
     records::Dict = Dict()
-    ge::VFT = (1.5randn(N) .+ 4) .* 10nS
-    gi::VFT = (12randn(N) .+ 20) .* 10nS
+    ge::VFT = zeros(N)
+    gi::VFT = zeros(N)
 end
 
 function synaptic_target(
