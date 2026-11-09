@@ -6,6 +6,7 @@
 - `firing_rate` of a silent population with a `neurons` subset (e.g. `neurons = 1:50`) no longer throws an incommensurate-range error: it returns zeros of shape `(length(neurons), length(interval))`.
 - The positional `AggregateScalingParameter(N, rate; ..., Wmax = 250pF)` accepts `Wmax` (it was documented but threw a keyword error); code and docstring now agree.
 - `record(p, sym)` on records that hold no samples (typically after `load_model`, which clears them) throws an `ArgumentError` that says so, lists the keys with samples and points to `load_data`, instead of a bare `KeyError`; a key that is not monitored at all lists the available record keys. `load_data` keeps the records, so `record` works on it.
+- `monitor!` on a key that is already monitored now replaces the stored `sr`, `monitor_time` and (for `:fire`) `monitor_rate` by the ones passed explicitly in the call when they differ, with an `@info` note listing old and new values; it used to keep the old settings silently. The default of `sr` is now `nothing`, standing for the unchanged defaults (`1000Hz` for one object, `200Hz` for a collection), so that a call without `sr` does not reset a stored one.
 
 ## 2.1.0
 
