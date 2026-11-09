@@ -3,7 +3,7 @@ abstract type AbstractReceptorVariable <: AbstractSynapseVariable end
 
 @doc raw"""
     ReceptorSynapse(; syn = SomaReceptors, NMDA = NMDAVoltageDependency(),
-                      glu_receptors = [1, 2], gaba_receptors = [3, 4], decay = 64)
+                      glu_receptors = [1, 2], gaba_receptors = [3, 4], decay = 64, exact = true)
     ReceptorSynapse(syn::ReceptorArray, NMDA::NMDAVoltageDependency{Float32}; kwargs...)
 
 Conductance-based synapse built from an arbitrary list of receptors (`Receptor`), each with its
@@ -21,7 +21,9 @@ auxiliary rise variable ``h_r``. A spike of weight ``w`` arriving on the recepto
 ```
 With this choice a unit weight gives ``g_r(t) = e^{-t/\tau_d} - e^{-t/\tau_r}``, whose peak is
 ``1/\mathrm{norm\_synapse}(\tau_r, \tau_d)``; since ``g_{syn} = g_0\,\mathrm{norm\_synapse}(\tau_r,\tau_d)``
-the peak conductance of a unit weight is ``g_0`` (nS). The synaptic current is
+the peak conductance of a unit weight is exactly ``g_0`` (nS), for any `dt` (the integration below is exact between spikes; the
+sampled peak on the time grid is at most slightly below ``g_0``). Before 2.2.0 the peak was ``c(dt)\,g_0`` with
+``c = \alpha\,dt / (1 - e^{-\alpha\,dt}) > 1`` (about 1.23 for AMPA at `dt = 0.125` ms); see the CHANGELOG for the migration rule. The synaptic current is
 ```math
 I_{syn} = \sum_r g_{syn,r}\, g_r\,(V - E_{rev,r})\, B_r(V), \qquad
 B_r(V) = \begin{cases} 1 & \text{if } nmda_r = 0 \\
@@ -30,10 +32,15 @@ B_r(V) = \begin{cases} 1 & \text{if } nmda_r = 0 \\
 where ``b``, ``k`` and ``[\mathrm{Mg}]`` are the fields of the `NMDAVoltageDependency` stored in `NMDA`.
 
 # Integration
-Exponential-Euler update of the conductances over one step, receptor by receptor:
-`h += α w`; `g = E(-dt/τd) (g + dt h)`; `h = E(-dt/τr) h`, where `E` is the power-law approximation
-``(1 + x/64)^{64}`` of the exponential (`exp64`; accurate to about 1 % of the decay for `|dt/τ| < 0.4`, not exact), or the one
-selected by `decay`. The receptor buffers are then zeroed. The current is evaluated by the dendritic and point models with
+Exact integration of the linear system over one step, receptor by receptor (the input arrives at the beginning of the step):
+`h += α w`; `g = e_d g + K h`; `h = e_r h`, with `e_d = exp(-dt/τd)`, `e_r = exp(-dt/τr)` and
+`K = (e_d - e_r)/α` (`K = dt e_d` when `α = 0`). The coefficients are evaluated in `Float64` from `dt` at every call, outside the
+loop over neurons, and rounded to the precision of the population. A unit weight gives, at every grid point, the exact kernel
+`e^{-t/τd} - e^{-t/τr}` up to rounding. With `exact = false` (legacy, used by `PaperScheme`/`TripodPaper` and by releases up to
+2.1) the update is the exponential-Euler one, `h += α w`; `g = E(-dt/τd) (g + dt h)`; `h = E(-dt/τr) h`, where `E` is the
+power-law approximation ``(1 + x/64)^{64}`` of the exponential (`exp64`), or the one selected by `decay`; its sampled kernel is
+`c(dt)` times the exact one, `c = α dt / (1 - e^{-α dt})`, so the peak conductance is `c g_0` instead of `g_0`.
+The receptor buffers are then zeroed. The current is evaluated by the dendritic and point models with
 the potential of the integration stage being computed: for `Tripod` and `BallAndStick` the stage potentials of the Heun method (the
 Euler-predicted potential at the second stage), for the point-neuron models the potential at the beginning of the step.
 
@@ -46,7 +53,9 @@ Euler-predicted potential at the second stage), for the point-neuron models the 
 - `gaba_receptors::VIT = [3, 4]`: indices in `syn` driven by the `gaba` input.
 - `decay::Int = 64`: exponential used in the conductance update: `64` (default, as in every release up to 2.0), `32`
   (`exp32o`, the `exp32` of the published Tripod code, which maps inputs below -10 to 0), `256`, or `0` (exact `exp`).
-  Not available in `MultiReceptorSynapse`.
+  Used only when `exact = false`. Not available in `MultiReceptorSynapse`.
+- `exact::Bool = true`: exact integration of the kinetics (peak conductance `g0` for any `dt`). `false` selects the legacy
+  exponential-Euler update (peak `c(dt) g0`), kept for `TripodPaper`; do not use it elsewhere.
 
 Type parameters: `VIT = Vector{Int}`, `ST = Vector{Receptor{Float32}}`,
 `NMDAT = NMDAVoltageDependency{Float32}`. State variables: `ReceptorSynapseVars`. Input
@@ -76,6 +85,7 @@ ReceptorSynapse
     glu_receptors::VIT = [1, 2]
     gaba_receptors::VIT = [3, 4]
     decay::Int = 64
+    exact::Bool = true
 end
 
 snn_kw_finalize(::Type{<:ReceptorSynapse}, f::NamedTuple) = (_check_exp_approx("ReceptorSynapse decay", f.decay); f)
@@ -105,7 +115,7 @@ end
 function convert_precision(x::ReceptorSynapse, ::Type{T}) where {T<:AbstractFloat}
     _float_type(typeof(x)) === T && return x
     syn, NMDA = _convert_receptors(x.syn, T), convert_precision(x.NMDA, T)
-    return ReceptorSynapse{typeof(x.glu_receptors),typeof(syn),typeof(NMDA)}(syn, NMDA, x.glu_receptors, x.gaba_receptors, x.decay)
+    return ReceptorSynapse{typeof(x.glu_receptors),typeof(syn),typeof(NMDA)}(syn, NMDA, x.glu_receptors, x.gaba_receptors, x.decay, x.exact)
 end
 
 
@@ -132,7 +142,9 @@ auxiliary rise variable ``h_r``. A spike of weight ``w`` arriving on the recepto
 ```
 With this choice a unit weight gives ``g_r(t) = e^{-t/\tau_d} - e^{-t/\tau_r}``, whose peak is
 ``1/\mathrm{norm\_synapse}(\tau_r, \tau_d)``; since ``g_{syn} = g_0\,\mathrm{norm\_synapse}(\tau_r,\tau_d)``
-the peak conductance of a unit weight is ``g_0`` (nS). The synaptic current is
+the peak conductance of a unit weight is exactly ``g_0`` (nS), for any `dt` (the integration below is exact between spikes; the
+sampled peak on the time grid is at most slightly below ``g_0``). Before 2.2.0 the peak was ``c(dt)\,g_0`` with
+``c = \alpha\,dt / (1 - e^{-\alpha\,dt}) > 1`` (about 1.23 for AMPA at `dt = 0.125` ms); see the CHANGELOG for the migration rule. The synaptic current is
 ```math
 I_{syn} = \sum_r g_{syn,r}\, g_r\,(V - E_{rev,r})\, B_r(V), \qquad
 B_r(V) = \begin{cases} 1 & \text{if } nmda_r = 0 \\
@@ -141,10 +153,9 @@ B_r(V) = \begin{cases} 1 & \text{if } nmda_r = 0 \\
 where ``b``, ``k`` and ``[\mathrm{Mg}]`` are the fields of the `NMDAVoltageDependency` stored in `NMDA`.
 
 # Integration
-Exponential-Euler update of the conductances over one step, receptor by receptor:
-`h += α w`; `g = exp64(-dt/τd) (g + dt h)`; `h = exp64(-dt/τr) h`, with the power-law approximation
-``(1 + x/64)^{64}`` of the exponential (not exact). The receptor buffers are then zeroed. The current is evaluated with the
-potential of the integration stage being computed (see `ReceptorSynapse`).
+Exact integration over one step, receptor by receptor: `h += α w`; `g = e_d g + K h`; `h = e_r h` with
+`e_d = exp(-dt/τd)`, `e_r = exp(-dt/τr)`, `K = (e_d - e_r)/α` (see `ReceptorSynapse`). The receptor buffers are then zeroed.
+The current is evaluated with the potential of the integration stage being computed (see `ReceptorSynapse`).
 
 # Fields
 - `syn::ST = SomaReceptors`: vector of `Receptor`.
@@ -246,10 +257,12 @@ end
     dt::AbstractFloat,
     rng::UnitRange{Int},
 ) where {P<:AbstractPopulation,RECT<:NamedTuple}
-    @unpack glu_receptors, gaba_receptors, decay = synapse
+    @unpack glu_receptors, gaba_receptors, decay, exact = synapse
     @unpack glu, gaba = receptors
-    # the exponential is chosen by `decay`: one compiled method per approximation, selected by a branch (no dynamic dispatch)
-    if decay == 64
+    if exact
+        _exact_receptors!(synapse, synvars, glu, gaba, dt, rng)
+    # legacy exponential-Euler update; the exponential is chosen by `decay`: one compiled method per approximation, selected by a branch (no dynamic dispatch)
+    elseif decay == 64
         _decay_receptors!(Val(64), synapse, synvars, glu, gaba, dt, rng)
     elseif decay == 32
         _decay_receptors!(Val(32), synapse, synvars, glu, gaba, dt, rng)
@@ -265,6 +278,44 @@ end
     end
 end
 
+# Coefficients of the exact one-step update of a receptor, `g' = ed g + K h`, `h' = er h`, evaluated in Float64 and rounded to `FT`.
+# `K = (ed - er)/α` is written with `expm1` (ed - er = -ed expm1(-α dt)) to avoid the cancellation for small `dt`; the
+# limit `K = dt ed` is used when `α == 0`. The stored `α` is used in both the spike increment and `K`, so that the kernel is exact
+# whatever the rounding of `α`.
+@inline function _exact_coeffs(::Type{FT}, dt, τr⁻, τd⁻, α) where {FT<:AbstractFloat}
+    dt64, a = Float64(dt), Float64(α)
+    ed = exp(-dt64 * Float64(τd⁻))
+    er = exp(-dt64 * Float64(τr⁻))
+    K = a == 0.0 ? dt64 * ed : -ed * expm1(-a * dt64) / a
+    return FT(ed), FT(er), FT(K)
+end
+
+# One receptor `n` on the neurons `rng`: spike input `inp`, then the exact update of `g` and `h`.
+@inline function _exact_receptor!(g, h, inp, n::Int, ed, er, K, α, rng)
+    @turbo for i ∈ rng
+        hn = h[i, n] + inp[i] * α
+        g[i, n] = ed * g[i, n] + K * hn
+        h[i, n] = er * hn
+    end
+end
+
+@inline function _exact_receptors!(synapse, synvars, glu, gaba, dt, rng)
+    @unpack glu_receptors, gaba_receptors = synapse
+    @unpack g, h = synvars
+    FT = eltype(g)
+    @inbounds for n in glu_receptors
+        r = synapse.syn[n]
+        ed, er, K = _exact_coeffs(FT, dt, r.τr⁻, r.τd⁻, r.α)
+        _exact_receptor!(g, h, glu, n, ed, er, K, FT(r.α), rng)
+    end
+    @inbounds for n in gaba_receptors
+        r = synapse.syn[n]
+        ed, er, K = _exact_coeffs(FT, dt, r.τr⁻, r.τd⁻, r.α)
+        _exact_receptor!(g, h, gaba, n, ed, er, K, FT(r.α), rng)
+    end
+end
+
+# Legacy exponential-Euler update (`exact = false`)
 @inline function _decay_receptors!(::Val{N}, synapse, synvars, glu, gaba, dt, rng) where {N}
     @unpack glu_receptors, gaba_receptors = synapse
     @unpack g, h = synvars
@@ -333,13 +384,8 @@ end
     @unpack τr⁻, τd⁻, α = receptor
     (size(g, 1) >= N && size(h, 1) >= N && n <= size(g, 2) && n <= size(h, 2) && length(target) >= N) ||
         throw(DimensionMismatch("receptor state of $(size(g)) / $(size(h)) or input buffer of length $(length(target)) too small for N = $N receptors $n"))
-    ed = exp64(-dt * τd⁻)    # loop invariants
-    er = exp64(-dt * τr⁻)
-    @inbounds @simd for i ∈ rng
-        h[i, n] += target[i] * α
-        g[i, n] = ed * (g[i, n] + dt * h[i, n])
-        h[i, n] = er * (h[i, n])
-    end
+    ed, er, K = _exact_coeffs(FT, dt, τr⁻, τd⁻, α)    # loop invariants
+    _exact_receptor!(g, h, target, n, ed, er, K, α, rng)
 end
 
 _chunk_synapse(::AbstractReceptorParameter) = true
