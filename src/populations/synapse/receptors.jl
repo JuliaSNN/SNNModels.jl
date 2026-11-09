@@ -64,16 +64,22 @@ end
 # Registry of the predefined receptors and NMDA blocks (`receptor_types.jl`) with their decimal keywords, filled at load time:
 # `convert_precision` rebuilds a predefined object (`===`) from its keywords (`_from_definition`) instead of converting values.
 const _PREDEFINED = Pair{Any,NamedTuple}[]
+const _PREDEFINED_LOCK = ReentrantLock()   # the registry is shared by all threads
 function _predefined(::Type{O}; kw...) where {O}
     obj = O(; kw...)
-    push!(_PREDEFINED, obj => (; kw...))
+    def = (; kw...)
+    lock(_PREDEFINED_LOCK) do
+        any(p -> p.first === obj && p.second == def, _PREDEFINED) || push!(_PREDEFINED, obj => def)
+    end
     return obj
 end
 function _from_definition(x, ::Type{T}) where {T<:AbstractFloat}
-    for (obj, kw) in _PREDEFINED
-        obj === x && return Base.typename(typeof(x)).wrapper(; T = T, kw...)
+    kw = lock(_PREDEFINED_LOCK) do
+        i = findfirst(p -> p.first === x, _PREDEFINED)
+        i === nothing ? nothing : _PREDEFINED[i].second
     end
-    return nothing
+    kw === nothing && return nothing
+    return Base.typename(typeof(x)).wrapper(; T = T, kw...)
 end
 
 """

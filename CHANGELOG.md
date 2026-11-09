@@ -1,5 +1,12 @@
 # SNNModels changelog
 
+## Unreleased
+
+- Fix: the registry of predefined receptors (`_PREDEFINED`, filled by `_predefined`) was a shared `Vector` pushed to without a lock, so
+  building receptors from several threads failed with `ConcurrencyViolationError: Vector can not be resized concurrently`. Writes and
+  lookups are now guarded by a lock, and registering the same definition twice no longer grows the registry. Building `Tripod` and
+  `Receptor` objects was and remains thread safe; only `_predefined` touched shared state.
+
 ## 2.1.0
 
 Tripod / BallAndStick: soma-clamp fix (RESULTS CHANGE), dendrite diameter, fixed paper configurations, mouse synapses, and
