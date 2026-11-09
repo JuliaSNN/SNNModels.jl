@@ -1,5 +1,14 @@
 # SNNModels changelog
 
+## Unreleased
+
+### Fixed
+- `IZ`: the default conductances `ge`, `gi` were random with mean 40 and 200 (the nS scale of `HH`; `gi` often negative). The Izhikevich
+  equation has no capacitance, so `ge` and `gi` are in 1/ms and the explicit synaptic step needs `dt * (ge + gi) < 2`; every `IZ`
+  left at the default state diverged within a few steps (`v` down to -1e17 mV; a single regular-spiking neuron with `I = 10` reached
+  -386 mV). They now start at zero (RESULTS CHANGE for `IZ` populations that relied on the random initial conductances). The stability
+  condition is documented in `IZ`. Test: `test/pop/iz_stability.jl`.
+
 ## 2.1.0
 
 Tripod / BallAndStick: soma-clamp fix (RESULTS CHANGE), dendrite diameter, fixed paper configurations, mouse synapses, and

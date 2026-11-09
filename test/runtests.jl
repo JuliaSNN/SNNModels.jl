@@ -69,6 +69,7 @@ end
     _inc("multicompartment_update_loop", "pop/multicompartment_update_loop.jl")
     _inc("adex_neuron",  "pop/adex_neuron.jl")
     _inc("iz_neuron",    "pop/iz_neuron.jl")
+    _ts("iz_stability",  "pop/iz_stability.jl")
     _inc("hh_neuron",    "pop/hh_neuron.jl")
     _inc("tripod",       "pop/tripod.jl")
     _inc("ballandstick", "pop/ballandstick.jl")
