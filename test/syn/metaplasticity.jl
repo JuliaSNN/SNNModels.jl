@@ -1,5 +1,6 @@
 using SNNModels
 using Test
+using Random
 @load_units
 
 @testset "Metaplasticity" begin
@@ -50,6 +51,40 @@ using Test
         norm = SynapseNormalization([s]; param = MultiplicativeNorm(τ = 100ms))
         # full connectivity, μ=1 → each post neuron receives N pre connections each of weight 1
         @test all(norm.W0 .≈ E.N)
+    end
+
+    @testset "SynapseNormalization — step equals the reference loops" begin
+        # Reference: the explicit per-neuron loops of the normalization step (sequential sums).
+        function reference_step(syn, W0, additive)
+            rowptr, index = syn.rowptr, syn.index
+            W = copy(syn.W)
+            N = length(rowptr) - 1
+            W1 = zeros(Float32, N)
+            for i in 1:N, j in rowptr[i]:(rowptr[i+1]-1)
+                W1[i] += W[index[j]]
+            end
+            for i in 1:N
+                n = rowptr[i+1] - rowptr[i]
+                μ = additive ? (n > 0 ? (W0[i] - W1[i]) / n : 0.0f0) : (W1[i] > 0 ? W0[i] / W1[i] : 1.0f0)
+                for j in rowptr[i]:(rowptr[i+1]-1)
+                    W[index[j]] = additive ? W[index[j]] + μ : W[index[j]] * μ
+                end
+            end
+            return W
+        end
+        for param in (MultiplicativeNorm(τ = 20ms), AdditiveNorm(τ = 20ms))
+            Random.seed!(11)
+            E = IF(N = 200, name = "E")
+            EE = SpikingSynapse(E, E, :ge; conn = (p = 0.1, μ = 2.0), LTPParam = STDPGerstner())
+            stim = PoissonStimulus(E, :ge; param = PoissonFixed(rate = 2kHz))
+            norm = SynapseNormalization([EE]; param)
+            model = compose(; E, EE, stim, norm, silent = true)
+            train!(model; duration = 100ms)
+            SNNModels.ensure_transpose!(EE)
+            Wref = reference_step(EE, norm.W0, param isa AdditiveNorm)
+            SNNModels.plasticity!(norm, param)
+            @test EE.W == Wref
+        end
     end
 
     @testset "AggregateScalingParameter — constructor" begin

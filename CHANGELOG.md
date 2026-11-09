@@ -25,6 +25,11 @@
 - `record(p, sym)` on records that hold no samples (typically after `load_model`, which clears them) throws an `ArgumentError` that says so, lists the keys with samples and points to `load_data`, instead of a bare `KeyError`; a key that is not monitored at all lists the available record keys. `load_data` keeps the records, so `record` works on it.
 - `monitor!` on a key that is already monitored now replaces the stored `sr`, `monitor_time` and (for `:fire`) `monitor_rate` when the call gives a different value, with an `@info` note listing old and new values; it used to keep the old settings silently. `monitor_time` and `monitor_rate` default to `nothing`, so only explicit values update; `sr` keeps its defaults (`1000Hz`, `200Hz` for arrays and NamedTuples), so a call without `sr` on a key monitored at another rate resets it to the default, and the note says so.
 
+- `SynapseNormalization` (`MultiplicativeNorm`, `AdditiveNorm`): the normalization step was about 7x slower than the rest of the
+  simulation (N = 2000, p = 0.1, 0.5 s with STDP: 3.3 s against 0.47 s without it; one step took 0.12 s and made 4.4 M allocations).
+  The `synapses` field has an abstract element type, so the loops over the weights ran without type information; they now run in
+  kernels called per synapse. The weights are bit-identical to the previous implementation (tested against the reference loops).
+
 ## 2.1.0
 
 Tripod / BallAndStick: soma-clamp fix (RESULTS CHANGE), dendrite diameter, fixed paper configurations, mouse synapses, and

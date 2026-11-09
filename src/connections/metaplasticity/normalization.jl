@@ -211,22 +211,15 @@ function plasticity!(c::SynapseNormalization, param::NormParam)
     foreach(ensure_transpose!, synapses)
     fill!(W1, zero(eltype(W1)))
     nsyn = zeros(Int, length(W1))
+    # `c.synapses` has an abstract element type: every loop runs in a kernel called through a
+    # function barrier, so that it is compiled for the concrete synapse type.
     for syn in synapses
-        @unpack rowptr = syn
-        for i = 1:(length(rowptr)-1)
-            nsyn[i] += rowptr[i+1] - rowptr[i]
-        end
+        _count_inputs!(nsyn, syn.rowptr)
     end
     for syn in synapses
-        @unpack rowptr, W, index = syn
-        for i = 1:(length(rowptr)-1) # Iterate over all postsynaptic neuron
-            @inbounds @fastmath @simd for j = rowptr[i]:(rowptr[i+1]-1) # all presynaptic neurons of i
-                W1[i] += W[index[j]]
-            end
-        end
+        _sum_inputs!(W1, syn.rowptr, syn.W, syn.index)
     end
     # normalize
-    # @fastmath @inbounds @simd 
     @inbounds for i in eachindex(μ)
         if additive
             μ[i] = nsyn[i] > 0 ? (W0[i] - W1[i]) / nsyn[i] : zero(eltype(μ))
@@ -236,13 +229,43 @@ function plasticity!(c::SynapseNormalization, param::NormParam)
     end
     # apply
     for syn in synapses
-        @unpack rowptr, W, index = syn
-        for i = 1:(length(rowptr)-1) # Iterate over all postsynaptic neuron
-            @inbounds @fastmath @simd for j = rowptr[i]:(rowptr[i+1]-1) # all presynaptic neurons connected to neuron i
-                W[index[j]] = additive ? W[index[j]] + μ[i] : W[index[j]] * μ[i]
+        _apply_norm!(syn.W, syn.rowptr, syn.index, μ, additive)
+    end
+end
+
+function _count_inputs!(nsyn, rowptr)
+    @inbounds for i = 1:(length(rowptr)-1)
+        nsyn[i] += rowptr[i+1] - rowptr[i]
+    end
+    return nsyn
+end
+
+# Sequential (in-order) accumulation, as the weight sums are compared exactly in the tests.
+function _sum_inputs!(W1, rowptr, W, index)
+    @inbounds for i = 1:(length(rowptr)-1) # all postsynaptic neurons
+        s = W1[i]
+        for j = rowptr[i]:(rowptr[i+1]-1) # all presynaptic neurons of i
+            s += W[index[j]]
+        end
+        W1[i] = s
+    end
+    return W1
+end
+
+function _apply_norm!(W, rowptr, index, μ, additive::Bool)
+    @inbounds for i = 1:(length(rowptr)-1)
+        m = μ[i]
+        if additive
+            for j = rowptr[i]:(rowptr[i+1]-1)
+                W[index[j]] += m
+            end
+        else
+            for j = rowptr[i]:(rowptr[i+1]-1)
+                W[index[j]] *= m
             end
         end
     end
+    return W
 end
 
 export MultiplicativeNorm, AdditiveNorm, SynapseNormalization, NormParam
