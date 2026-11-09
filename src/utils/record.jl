@@ -1117,6 +1117,7 @@ function record(
         return spiketimes(p)
     else
         sym = isnothing(variables) ? sym : Symbol(variables, "_", sym)
+        _check_recorded(p, sym)
         # not interpolate
         if !interpolate
             v = getvariable(p, sym)
@@ -1143,6 +1144,30 @@ function record(
     else
         return v
     end
+end
+
+# Keys of `p.records` that hold a monitored variable (not the bookkeeping entries).
+_recorded_keys(p) = sort!([k for (k, _) in p.records if k ∉ _RECORD_META_KEYS && k ∉ (:start_time, :end_time)])
+
+# Clear error, naming the available keys, when `sym` cannot be read from `p.records`: not monitored, or monitored but
+# without samples (records cleared by `load_model`/`clear_records!`, or no `sim!` after `monitor!`).
+function _check_recorded(p, sym::Symbol)
+    name = hasproperty(p, :name) ? string(p.name) : string(typeof(p))
+    if !haskey(p.records, sym)
+        throw(ArgumentError(
+            "`$sym` is not recorded for $name. Available record keys: $(_recorded_keys(p)). Call `monitor!` before `sim!` to record it.",
+        ))
+    end
+    start_time = get(p.records, :start_time, nothing)
+    has_samples = start_time isa AbstractDict ? haskey(start_time, sym) : true
+    if !has_samples || (p.records[sym] isa AbstractArray && isempty(p.records[sym]))
+        with_data = [k for k in _recorded_keys(p) if start_time isa AbstractDict && haskey(start_time, k)]
+        throw(ArgumentError(
+            "`$sym` is monitored for $name but holds no samples (the records were cleared, e.g. by `load_model`, or `sim!` has not " *
+            "run since `monitor!`). Keys with samples: $with_data. Load the file with `load_data` to keep the records.",
+        ))
+    end
+    return nothing
 end
 
 function record(pops, sym::Symbol; interval=nothing, interpolate=true, kwargs...)

@@ -5,6 +5,7 @@
 - `IF(N = Int32(10))` (any `Integer` population size) no longer fails in `synaptic_variables`/`synaptic_receptors`: the size is converted to `Int` once, in the generic methods of `AbstractSynapseParameter`.
 - `firing_rate` of a silent population with a `neurons` subset (e.g. `neurons = 1:50`) no longer throws an incommensurate-range error: it returns zeros of shape `(length(neurons), length(interval))`.
 - The positional `AggregateScalingParameter(N, rate; ..., Wmax = 250pF)` accepts `Wmax` (it was documented but threw a keyword error); code and docstring now agree.
+- `record(p, sym)` on records that hold no samples (typically after `load_model`, which clears them) throws an `ArgumentError` that says so, lists the keys with samples and points to `load_data`, instead of a bare `KeyError`; a key that is not monitored at all lists the available record keys. `load_data` keeps the records, so `record` works on it.
 
 ## 2.1.0
 
