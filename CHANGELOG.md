@@ -14,6 +14,11 @@
   curve at 11-12 Hz is not reproduced: with `dt = 0.01` the f-I curve of the Traub-Miles / Brette et al. (2007) model implemented here is
   monotonic (14 Hz at 50 pA to 262 Hz at 3 nA), the flat curve comes from `dt` too large. Test: `test/pop/hh_fi.jl`.
 
+### Documented (no behaviour change)
+- `Tripod`: the somatic potential undershoots after a burst (-130 mV after 46 spikes under 3 nA, -225 mV needs `w_s` of about 6 nA).
+  This is the unbounded, reversal-free adaptation current of the AdEx model (`V_s` relaxes to `El - w_s/gl`), independent of `dt` and
+  identical in `AdEx`; nothing is clipped. Explained in the `Tripod` docstring, pinned by `test/pop/tripod_adaptation.jl`.
+
 ## 2.1.0
 
 Tripod / BallAndStick: soma-clamp fix (RESULTS CHANGE), dendrite diameter, fixed paper configurations, mouse synapses, and

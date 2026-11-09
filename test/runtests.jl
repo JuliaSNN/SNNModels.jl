@@ -73,6 +73,7 @@ end
     _inc("hh_neuron",    "pop/hh_neuron.jl")
     _ts("hh_fi",         "pop/hh_fi.jl")
     _inc("tripod",       "pop/tripod.jl")
+    _ts("tripod_adaptation", "pop/tripod_adaptation.jl")
     _inc("ballandstick", "pop/ballandstick.jl")
     _ts("multicompartment_numerics", "pop/multicompartment_numerics.jl")
     _ts("tripod_21",     "pop/tripod_21.jl")
