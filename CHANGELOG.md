@@ -1,6 +1,9 @@
 # SNNModels changelog
 
-## Unreleased
+## 2.2.0
+
+Receptor kinetics now integrated exactly (peak conductance = g0 at any dt; RESULTS CHANGE, migration rule below), plus the fixes
+of the audit of the library (Izhikevich, HH, API, MetaPlasticity speed, thread safety of custom receptors).
 
 ### Fixed
 - `IZ`: the default conductances `ge`, `gi` were random with mean 40 and 200 (the nS scale of `HH`; `gi` often negative). The Izhikevich
@@ -19,17 +22,16 @@
   This is the unbounded, reversal-free adaptation current of the AdEx model (`V_s` relaxes to `El - w_s/gl`), independent of `dt` and
   identical in `AdEx`; nothing is clipped. Explained in the `Tripod` docstring, pinned by `test/pop/tripod_adaptation.jl`.
 
+### Fixed (API, records, performance, Tripod construction)
 - `IF(N = Int32(10))` (any `Integer` population size) no longer fails in `synaptic_variables`/`synaptic_receptors`: the size is converted to `Int` once, in the generic methods of `AbstractSynapseParameter`.
 - `firing_rate` of a silent population with a `neurons` subset (e.g. `neurons = 1:50`) no longer throws an incommensurate-range error: it returns zeros of shape `(length(neurons), length(interval))`.
 - The positional `AggregateScalingParameter(N, rate; ..., Wmax = 250pF)` accepts `Wmax` (it was documented but threw a keyword error); code and docstring now agree.
 - `record(p, sym)` on records that hold no samples (typically after `load_model`, which clears them) throws an `ArgumentError` that says so, lists the keys with samples and points to `load_data`, instead of a bare `KeyError`; a key that is not monitored at all lists the available record keys. `load_data` keeps the records, so `record` works on it.
 - `monitor!` on a key that is already monitored now replaces the stored `sr`, `monitor_time` and (for `:fire`) `monitor_rate` when the call gives a different value, with an `@info` note listing old and new values; it used to keep the old settings silently. `monitor_time` and `monitor_rate` default to `nothing`, so only explicit values update; `sr` keeps its defaults (`1000Hz`, `200Hz` for arrays and NamedTuples), so a call without `sr` on a key monitored at another rate resets it to the default, and the note says so.
-
 - `SynapseNormalization` (`MultiplicativeNorm`, `AdditiveNorm`): the normalization step was about 7x slower than the rest of the
   simulation (N = 2000, p = 0.1, 0.5 s with STDP: 3.3 s against 0.47 s without it; one step took 0.12 s and made 4.4 M allocations).
   The `synapses` field has an abstract element type, so the loops over the weights ran without type information; they now run in
   kernels called per synapse. The weights are bit-identical to the previous implementation (tested against the reference loops).
-
 - Fix: the registry of predefined receptors (`_PREDEFINED`, filled by `_predefined`) was a shared `Vector` pushed to without a lock, so
   building receptors from several threads failed with `ConcurrencyViolationError: Vector can not be resized concurrently`. Writes and
   lookups are now guarded by a lock, and registering the same definition twice no longer grows the registry. Building `Tripod` and
