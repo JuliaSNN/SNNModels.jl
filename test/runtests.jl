@@ -71,6 +71,7 @@ end
     _inc("iz_neuron",    "pop/iz_neuron.jl")
     _ts("iz_stability",  "pop/iz_stability.jl")
     _inc("hh_neuron",    "pop/hh_neuron.jl")
+    _ts("hh_fi",         "pop/hh_fi.jl")
     _inc("tripod",       "pop/tripod.jl")
     _inc("ballandstick", "pop/ballandstick.jl")
     _ts("multicompartment_numerics", "pop/multicompartment_numerics.jl")

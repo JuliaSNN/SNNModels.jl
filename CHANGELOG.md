@@ -8,6 +8,11 @@
   left at the default state diverged within a few steps (`v` down to -1e17 mV; a single regular-spiking neuron with `I = 10` reached
   -386 mV). They now start at zero (RESULTS CHANGE for `IZ` populations that relied on the random initial conductances). The stability
   condition is documented in `IZ`. Test: `test/pop/iz_stability.jl`.
+- `HH`: the rate functions alpha_m, beta_m, alpha_n are 0/0 at v - Vt = 13, 40, 15 mV; a neuron with `v` exactly -50, -23 or -48 mV
+  (default `Vt`) became `NaN`. The limit is now used there; every other step is bit-identical. Documented in `HH`: the forward-Euler step is
+  stiff (`gn/Cm = 100`/ms) and needs `dt <= 0.02 ms`; `dt >= 0.04 ms` gives `NaN` (the `sim!` default of 0.125 ms does). A flat f-I
+  curve at 11-12 Hz is not reproduced: with `dt = 0.01` the f-I curve of the Traub-Miles / Brette et al. (2007) model implemented here is
+  monotonic (14 Hz at 50 pA to 262 Hz at 3 nA), the flat curve comes from `dt` too large. Test: `test/pop/hh_fi.jl`.
 
 ## 2.1.0
 

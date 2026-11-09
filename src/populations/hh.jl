@@ -75,6 +75,10 @@ end
 end
 @inline _pow4(x::Float64) = (x2 = x * x; x2 * x2)
 
+# The rate functions α_m, β_m, α_n are c x / (exp(x / k) - 1), 0/0 at x = 0 (v = -50, -23, -48 mV with `Vt = -63`); the limit is c k.
+# Applied after the original expression, so that every other argument keeps its exact arithmetic (bit-identity tests of the update loop).
+@inline _limit0(val::T, x::T, lim::T) where {T<:AbstractFloat} = ifelse(x == zero(T), lim, val)
+
 @doc raw"""
     HH(; N = 100, param = HHParameter(), name = "HH", kwargs...)
 
@@ -107,7 +111,14 @@ with ``u = v - V_t`` (mV) and rates in 1/ms:
 Forward Euler, sequential: `m`, `n`, `h` are updated first, then ``v`` with the new gating
 variables, then `ge`, `gi` decay. A spike is flagged (`fire[i] = true`) in the step in which
 ``v`` crosses -20 mV upwards (`v_old <= -20mV < v`), so each action potential gives exactly one
-flag. There is no reset and no refractory period. A small `dt` (e.g. 0.01-0.05 ms) is needed for stability.
+flag. There is no reset and no refractory period. The rate functions ``\alpha_m, \beta_m, \alpha_n`` have a removable
+0/0 singularity (``u = 13, 40, 15``); its limit is used when the argument is exactly 0 (up to SNNModels 2.1.0 a neuron whose
+``v`` was exactly -50, -23 or -48 mV with the default `Vt` became `NaN`).
+
+The step is stiff (``g_n/C_m = 100`` ms``^{-1}``): forward Euler needs `dt <= 0.02` ms. At `dt = 0.025` the spike peak is
+overshot by a few mV, at `dt >= 0.04` the state becomes `NaN` within the first spikes (`sim!` and `train!` default to
+`dt = 0.125ms`: pass `dt = 0.01ms`). With `dt = 0.01` the f-I curve (no synapses, `v = El`, 1 s) is monotonic: 14 Hz at 50 pA, 24 at
+100, 53 at 300, 77 at 500, 171 at 1500, 262 at 3000 pA, converged against `dt = 0.005`.
 
 # Fields
 - `name::String = "HH"`, `id::String = randstring(12)`, `param::HHParameter = HHParameter()`.
@@ -150,15 +161,24 @@ function integrate!(p::HH, param::HHParameter, dt_::AbstractFloat)
         v_old = v[i]
         m[i] +=
             dt * (
-                T(0.32) * (T(13.0) - v[i] + Vt) /
-                (@inline(exp((T(13.0) - v[i] + Vt) / T(4.0))) - T(1.0)) * (T(1.0) - m[i]) -
-                T(0.28) * (v[i] - Vt - T(40.0)) /
-                (@inline(exp((v[i] - Vt - T(40.0)) / T(5.0))) - T(1.0)) * m[i]
+                _limit0(
+                    T(0.32) * (T(13.0) - v[i] + Vt) /
+                    (@inline(exp((T(13.0) - v[i] + Vt) / T(4.0))) - T(1.0)),
+                    T(13.0) - v[i] + Vt, T(0.32) * T(4.0),
+                ) * (T(1.0) - m[i]) -
+                _limit0(
+                    T(0.28) * (v[i] - Vt - T(40.0)) /
+                    (@inline(exp((v[i] - Vt - T(40.0)) / T(5.0))) - T(1.0)),
+                    v[i] - Vt - T(40.0), T(0.28) * T(5.0),
+                ) * m[i]
             )
         n[i] +=
             dt * (
-                T(0.032) * (T(15.0) - v[i] + Vt) /
-                (@inline(exp((T(15.0) - v[i] + Vt) / T(5.0))) - T(1.0)) * (T(1.0) - n[i]) -
+                _limit0(
+                    T(0.032) * (T(15.0) - v[i] + Vt) /
+                    (@inline(exp((T(15.0) - v[i] + Vt) / T(5.0))) - T(1.0)),
+                    T(15.0) - v[i] + Vt, T(0.032) * T(5.0),
+                ) * (T(1.0) - n[i]) -
                 T(0.5) * @inline(exp((T(10.0) - v[i] + Vt) / T(40.0))) * n[i]
             )
         h[i] +=
