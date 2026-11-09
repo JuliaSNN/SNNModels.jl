@@ -80,6 +80,7 @@ end
     _inc("ballandstick", "pop/ballandstick.jl")
     _ts("multicompartment_numerics", "pop/multicompartment_numerics.jl")
     _ts("tripod_21",     "pop/tripod_21.jl")
+    _ts("tripod_parameter_real", "pop/tripod_parameter_real.jl")
 end
 
 # ── Stimuli ───────────────────────────────────────────────────────────────────
@@ -100,6 +101,7 @@ end
     _ts("plasticity_params", "syn/plasticity_params.jl")
     _ts("with_plasticity",   "syn/with_plasticity.jl")
     _ts("float32",           "syn/float32.jl")
+    _ts("receptor_threads",  "syn/receptor_threads.jl")
     _ts("stdp_event",        "syn/stdp_event.jl")
     _ts("spike_index",       "syn/spike_index.jl")
     _ts("delay_uniform",     "syn/delay_uniform.jl")
