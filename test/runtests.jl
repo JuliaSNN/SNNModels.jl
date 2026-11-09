@@ -74,6 +74,7 @@ end
     _inc("ballandstick", "pop/ballandstick.jl")
     _ts("multicompartment_numerics", "pop/multicompartment_numerics.jl")
     _ts("tripod_21",     "pop/tripod_21.jl")
+    _ts("tripod_parameter_real", "pop/tripod_parameter_real.jl")
 end
 
 # ── Stimuli ───────────────────────────────────────────────────────────────────

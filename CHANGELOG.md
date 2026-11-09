@@ -6,6 +6,9 @@
   building receptors from several threads failed with `ConcurrencyViolationError: Vector can not be resized concurrently`. Writes and
   lookups are now guarded by a lock, and registering the same definition twice no longer grows the registry. Building `Tripod` and
   `Receptor` objects was and remains thread safe; only `_predefined` touched shared state.
+- Fix: `TripodParameter`, `BallAndStickParameter` and `DendNeuronParameter` rejected `Float64` (and `Int`) dendrite lengths in `ds`
+  (`MethodError: Cannot convert Float64 to Union{Float32, Tuple}`). Any `Real` length is accepted and stored as `Float32`; `(min, max)`
+  tuples are unchanged. The diameter `d` already accepted any `Real`.
 
 ## 2.1.0
 
