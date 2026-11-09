@@ -78,8 +78,9 @@ end
 end
 
 # parameters of the audit protocols for the original code (human, d = 4 um, dt 0.1 ms) with the numerics of the library defaults
-const _ORIG_SOMA = ReceptorSynapse(glu_receptors = [1], gaba_receptors = [2], NMDA = EyalNMDA, syn = TripodSomaSynapsePaper.syn)
-const _ORIG_DEND = ReceptorSynapse(glu_receptors = [1, 2], gaba_receptors = [3, 4], NMDA = EyalNMDA, syn = TripodDendSynapsePaper.syn)
+# `exact = false`: the audit references (ref.jl) were produced with the discrete update of releases <= 2.1
+const _ORIG_SOMA = ReceptorSynapse(glu_receptors = [1], gaba_receptors = [2], NMDA = EyalNMDA, syn = TripodSomaSynapsePaper.syn, exact = false)
+const _ORIG_DEND = ReceptorSynapse(glu_receptors = [1, 2], gaba_receptors = [3, 4], NMDA = EyalNMDA, syn = TripodDendSynapsePaper.syn, exact = false)
 function _plateau_default(l, eff; n = 10000)
     T = Tripod(N = 1, param = TripodParameter(ds = [l * um, l * um]), adex = AdExParameter(Vt = -50.4mV),
                spike = PostSpike(AP_membrane = 20mV, up = 1ms, τabs = 2ms, At = 0mV), soma_syn = _ORIG_SOMA, dend_syn = _ORIG_DEND,
@@ -163,9 +164,9 @@ end
     end
     @test current(32) < current(256) < current(0) < 0       # inward currents: a larger block factor gives a larger magnitude
     @test current(32) / current(256) ≈ nmda_gating(-70f0, EyalNMDA32) / nmda_gating(-70f0, EyalNMDA) rtol = 1e-5
-    # decay: one step after a unit input, g = E(-dt/τd) (dt h) with h = α
+    # decay (legacy update, exact = false): one step after a unit input, g = E(-dt/τd) (dt h) with h = α
     for (decay, E) in ((64, SNNModels.exp64), (32, SNNModels.exp32o), (256, SNNModels.exp256), (0, exp))
-        syn = ReceptorSynapse(; syn = TripodDendSynapse.syn, glu_receptors = [1, 2], gaba_receptors = [3, 4], decay = decay)
+        syn = ReceptorSynapse(; syn = TripodDendSynapse.syn, glu_receptors = [1, 2], gaba_receptors = [3, 4], decay = decay, exact = false)
         T = Tripod(N = 3, dend_syn = syn)
         T.receptors_d1.glu .= 1f0
         SNNModels.update_synapses!(T, syn, T.receptors_d1, T.synvars_d1, 0.1f0, 1:3)
@@ -179,6 +180,7 @@ end
     @test SNNModels.exp32o(-11f0) == 0f0 && SNNModels.exp32o(0f0) == 1f0 && SNNModels.exp32o(-1f0) ≈ (1 - 1 / 32f0)^32
     # Float64 conversion keeps the options
     @test convert_precision(TripodDendSynapsePaper, Float64).decay == 32
+    @test convert_precision(TripodDendSynapsePaper, Float64).exact == false && convert_precision(TripodDendSynapse, Float64).exact == true
     @test convert_precision(TripodDendSynapsePaper, Float64).NMDA.approx == 32
     @test convert_precision(NMDAVoltageDependency(approx = 64, b = 3.0f0), Float64).approx == 64
 end
@@ -308,7 +310,7 @@ end
     dsyn = T.dend_syn.syn
     @test [r.E_rev for r in dsyn] == [0f0, 0f0, -75f0, -90f0]
     @test [r.τr for r in dsyn] == [0.26f0, 8f0, 4.8f0, 30f0] && [r.τd for r in dsyn] == [2f0, 35f0, 29f0, 400f0]
-    @test T.dend_syn.NMDA.approx == 32 && T.dend_syn.decay == 32 && T.soma_syn.decay == 32
+    @test T.dend_syn.NMDA.approx == 32 && T.dend_syn.decay == 32 && T.soma_syn.decay == 32 && !T.dend_syn.exact && !T.soma_syn.exact
     @test nmda_gating(-70f0, T.dend_syn.NMDA) ≈ 0.0225 atol = 5e-5
     @test nmda_gating(-40f0, T.dend_syn.NMDA) ≈ 0.1508 atol = 5e-5
     # mouse

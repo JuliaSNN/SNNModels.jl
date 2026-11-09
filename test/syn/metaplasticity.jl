@@ -1,5 +1,6 @@
 using SNNModels
 using Test
+using Random
 @load_units
 
 @testset "Metaplasticity" begin
@@ -52,12 +53,58 @@ using Test
         @test all(norm.W0 .≈ E.N)
     end
 
+    @testset "SynapseNormalization — step equals the reference loops" begin
+        # Reference: the explicit per-neuron loops of the normalization step (sequential sums).
+        function reference_step(syn, W0, additive)
+            rowptr, index = syn.rowptr, syn.index
+            W = copy(syn.W)
+            N = length(rowptr) - 1
+            W1 = zeros(Float32, N)
+            for i in 1:N, j in rowptr[i]:(rowptr[i+1]-1)
+                W1[i] += W[index[j]]
+            end
+            for i in 1:N
+                n = rowptr[i+1] - rowptr[i]
+                μ = additive ? (n > 0 ? (W0[i] - W1[i]) / n : 0.0f0) : (W1[i] > 0 ? W0[i] / W1[i] : 1.0f0)
+                for j in rowptr[i]:(rowptr[i+1]-1)
+                    W[index[j]] = additive ? W[index[j]] + μ : W[index[j]] * μ
+                end
+            end
+            return W
+        end
+        for param in (MultiplicativeNorm(τ = 20ms), AdditiveNorm(τ = 20ms))
+            Random.seed!(11)
+            E = IF(N = 200, name = "E")
+            EE = SpikingSynapse(E, E, :ge; conn = (p = 0.1, μ = 2.0), LTPParam = STDPGerstner())
+            stim = PoissonStimulus(E, :ge; param = PoissonFixed(rate = 2kHz))
+            norm = SynapseNormalization([EE]; param)
+            model = compose(; E, EE, stim, norm, silent = true)
+            train!(model; duration = 100ms)
+            SNNModels.ensure_transpose!(EE)
+            Wref = reference_step(EE, norm.W0, param isa AdditiveNorm)
+            SNNModels.plasticity!(norm, param)
+            @test EE.W == Wref
+        end
+    end
+
     @testset "AggregateScalingParameter — constructor" begin
         p = AggregateScalingParameter(10, 5Hz; τ = 10ms, τa = 100ms, τe = 100ms)
         @test p isa AggregateScalingParameter
         @test length(p.Y) == 10
         @test p.τ  ≈ 10ms
         @test p.τa ≈ 100ms
+        @test p.Wmax ≈ 250pF
+    end
+
+    @testset "AggregateScalingParameter — positional Wmax" begin
+        p = AggregateScalingParameter(10, 5Hz; Wmin = 1pF, Wmax = 100pF)
+        @test p.Wmax == 100f0 * pF
+        @test p.Wmax isa Float32
+        @test p.Wmin == 1f0 * pF
+        @test length(p.Y) == 10
+        # same result as the keyword form
+        q = AggregateScalingParameter(; τa = 100ms, τe = 100ms, Y = fill(Float32(5Hz), 10), Wmin = 1pF, Wmax = 100pF)
+        @test (p.τ, p.τa, p.τe, p.Y, p.Wmin, p.Wmax) == (q.τ, q.τa, q.τe, q.Y, q.Wmin, q.Wmax)
     end
 
     @testset "RandomTurnover — constructor" begin

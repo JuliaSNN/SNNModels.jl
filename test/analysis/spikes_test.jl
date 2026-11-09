@@ -251,5 +251,19 @@ const _SPIKE_MODEL, _SPIKE_POP = _spike_model()
         @test all(isfinite, fr)
     end
 
+
+    @testset "firing_rate — silent population with a neuron subset" begin
+        st = Spiketimes([Float32[] for _ in 1:100])
+        iv = 0f0:1f0:100f0
+        fr, r = firing_rate(st; interval = iv, neurons = 1:50)
+        @test size(fr) == (50, length(iv))
+        @test all(iszero, [fr(n, t) for n in (1, 50), t in (0f0, 50f0, 100f0)])
+        fr, _ = firing_rate(st; interval = iv, neurons = 1:50, interpolate = false)
+        @test size(fr) == (50, length(iv))
+        @test all(iszero, fr)
+        fr, _ = firing_rate(st; interval = iv, neurons = 1:50, pop_average = true)
+        @test size(fr) == (length(iv),)
+        @test all(iszero, fr)
+    end
 end
 true
