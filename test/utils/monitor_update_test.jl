@@ -21,11 +21,13 @@ using SNNModels.Logging
             E, [:fire]; monitor_time = 500ms, monitor_rate = 50Hz,
         )
         @test meta(E)[:monitor_rate][:fire] == 50f0
-        # same values again, or settings left out: no message and nothing changes
+        # same values again: no message and nothing changes
         @test_logs min_level = Logging.Info monitor!(E, [:v, :fire]; sr = 2kHz, monitor_time = 500ms, monitor_rate = 50Hz)
-        @test_logs min_level = Logging.Info monitor!(E, [:v, :fire])
-        @test E.records[:sr][:v] == Float32(2kHz)
+        # monitor_time / monitor_rate omitted: left as they are; sr omitted: back to the 1 kHz default, announced
+        @test_logs (:info, r"Monitor settings of :v.*sr 2000.0 Hz -> 1000.0 Hz") min_level = Logging.Info monitor!(E, [:v, :fire])
+        @test E.records[:sr][:v] == Float32(1kHz)
         @test meta(E)[:monitor_time][:v] == 500f0
+        @test meta(E)[:monitor_rate][:fire] == 50f0
         @test E.records[:data] == [:v, :fire]
         # a rate in plain Hz is still rejected
         @test_throws ArgumentError monitor!(E, [:fire]; monitor_rate = 50)
@@ -42,14 +44,14 @@ using SNNModels.Logging
         @test size(v, 2) == 51                   # t = 0 and one sample every 2 ms
     end
 
-    @testset "collections keep their 200 Hz default" begin
+    @testset "collections default to 200 Hz" begin
         E = IF(N = 5)
         I = IF(N = 5)
         monitor!([E, I], [:v])
         @test E.records[:sr][:v] == Float32(200Hz)
         monitor!([E, I], [:v]; sr = 1kHz)
         @test I.records[:sr][:v] == Float32(1kHz)
-        monitor!((; E, I), [:v])                 # omitted: unchanged
-        @test E.records[:sr][:v] == Float32(1kHz)
+        monitor!((; E, I), [:v])                 # default again: reset, with a message
+        @test E.records[:sr][:v] == Float32(200Hz)
     end
 end

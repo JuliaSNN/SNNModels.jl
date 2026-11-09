@@ -734,16 +734,12 @@ function _rate_Hz(monitor_rate)
     return Float32(monitor_rate / Hz)
 end
 
-# Default sampling rate of `monitor!` for a single object / for the elements of a collection.
-const _MONITOR_SR = 1000Hz
-const _MONITOR_SR_COLLECTION = 200Hz
-
 # `monitor!` on a key that is already monitored: the settings given in this call and different from the stored ones
 # replace them (`nothing` leaves a setting as it is), with an @info note listing old and new values.
 function _update_monitor_settings!(obj, key::Symbol, sr, monitor_time, monitor_rate)
     meta = obj.records[:meta]
     changes = String[]
-    if key !== :fire && sr !== nothing
+    if key !== :fire
         new = Float32(sr)
         old = get(obj.records[:sr], key, nothing)
         if old != new
@@ -776,8 +772,8 @@ function _update_monitor_settings!(obj, key::Symbol, sr, monitor_time, monitor_r
 end
 
 """
-    monitor!(obj, keys; sr = nothing, variables = :none, monitor_time = nothing, monitor_rate = nothing, verbose = false)
-    monitor!(objs::Union{Array,NamedTuple}, keys; sr = nothing, kwargs...)
+    monitor!(obj, keys; sr = 1000Hz, variables = :none, monitor_time = nothing, monitor_rate = nothing, verbose = false)
+    monitor!(objs::Union{Array,NamedTuple}, keys; sr = 200Hz, kwargs...)
     monitor!(obj, keys, variables::Symbol; kwargs...)
 
 Register variables of a population, connection or stimulus for recording during the next
@@ -791,7 +787,7 @@ here.
   sampling rate is then `200Hz` instead of `1000Hz`.
 - `keys`: field names of `obj` (e.g. `:v`, `:w`, `:W`, `:ρ`, `:fire`). A tuple
   `(sym, indices)` records only the listed elements of a vector field.
-- `sr = 1000Hz` (`200Hz` for a collection; `nothing` stands for this default): sampling rate. The sampling period is `max(1, round(1 / (sr * dt)))` steps,
+- `sr = 1000Hz`: sampling rate. The sampling period is `max(1, round(1 / (sr * dt)))` steps,
   so `sr` larger than `1/dt` records every step. Ignored for `:fire`.
 - `variables = :none`: name of a nested field holding the variables, e.g. `:STPVars` or
   `:LTPVars` of a `SpikingSynapse`, or `:synvars`. The key `sym` is then read from
@@ -824,7 +820,7 @@ Missing fields are skipped silently (with a warning if `verbose = true`).
 
 A key that is already monitored keeps its recording; the settings `sr`, `monitor_time` and `monitor_rate`
 passed explicitly in the new call replace the stored ones when they differ, and an `@info` message lists
-the changes (a setting that is omitted is left as it is).
+the changes (`monitor_time` and `monitor_rate` are left as they are when omitted; `sr` has a default, so a call without `sr` resets it to the default, and the message shows it).
 
 With `(:fire, indices)` only the spikes of the listed neurons are recorded (with their
 original neuron indices, so `spiketimes` still returns one entry per neuron of the
@@ -848,15 +844,13 @@ st = SNN.spiketimes(E)
 function monitor!(
     obj::Item,
     keys::Vector;
-    sr = nothing,
+    sr = 1000Hz,
     variables::Symbol = :none,
     monitor_time = nothing,
     monitor_rate = nothing,
-    verbose = false,
-    default_sr = _MONITOR_SR,
+    verbose = false
 ) where {Item<:Union{AbstractPopulation,AbstractStimulus,AbstractConnection}}
     _init_records!(obj.records)
-    sr_new = something(sr, default_sr)  # value for a key monitored for the first time
     meta = obj.records[:meta]
     dt_hint = 0.125f0  # only used to precompute :period; reconciled in _allocate_records!
     ## If the key is a tuple, then the first element is the symbol and the second element is the list of neurons to record.
@@ -928,7 +922,7 @@ function monitor!(
             continue
         end
         !isempty(ind) && (obj.records[:indices][key] = ind)
-        obj.records[:sr][key] = sr_new
+        obj.records[:sr][key] = sr
         push!(obj.records[:data], key)
         obj.records[:start_time][key] = NaN32
         if variables != :none
@@ -938,7 +932,7 @@ function monitor!(
         # Classify dense vs legacy (manifesto §8) and init meta.
         mode, snap_size = _classify_record(sample, !isempty(ind), length(ind))
         meta[:mode][key] = mode
-        meta[:period][key] = max(1, round(Int, 1.0f0 / Float32(sr_new) / dt_hint))
+        meta[:period][key] = max(1, round(Int, 1.0f0 / Float32(sr) / dt_hint))
         meta[:step_count][key] = 0
         meta[:grew][key] = false
         meta[:allocated][key] = 0
@@ -954,15 +948,15 @@ function monitor!(
 end
 
 
-function monitor!(objs::Array, keys::Vector; sr = nothing, kwargs...)
+function monitor!(objs::Array, keys::Vector; sr = 200Hz, kwargs...)
     for obj in objs
-        monitor!(obj, keys; sr, default_sr = _MONITOR_SR_COLLECTION, kwargs...)
+        monitor!(obj, keys; sr, kwargs...)
     end
 end
 
-function monitor!(objs::NamedTuple, keys::Vector; sr = nothing, kwargs...)
+function monitor!(objs::NamedTuple, keys::Vector; sr = 200Hz, kwargs...)
     for obj in values(objs)
-        monitor!(obj, keys; sr, default_sr = _MONITOR_SR_COLLECTION, kwargs...)
+        monitor!(obj, keys; sr, kwargs...)
     end
 end
 
