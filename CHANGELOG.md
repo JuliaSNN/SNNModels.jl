@@ -1,5 +1,29 @@
 # SNNModels changelog
 
+## Unreleased
+
+### Improved
+
+- `vSTDPParameter` and `vSTDPDenseParameter` have the field `delay_uv` (default `0ms`): the low-pass filters `u` and `v` of the
+  postsynaptic potential are driven by the potential `round(delay_uv / dt)` steps earlier (the delay of the ModelDB implementation of
+  Clopath et al. 2010 and of NEST `delay_u_bars`); the potentiation keeps the current potential. With the default the results are unchanged. The event-driven
+  and the dense rules give the same weights with any delay (tests `test/syn/plasticity_presets.jl`).
+- `STDPTriplet` has the field `nearest::Bool = false`: with `nearest = true` a spike sets the traces of its neuron to 1
+  (nearest-spike interaction of Pfister & Gerstner 2006) instead of adding 1 (all-to-all).
+- Presets of the Tripod plasticity code, as functions returning the existing rule types (keyword arguments override any field):
+  - `lkd_vstdp()`, `clopath_vstdp_visualcortex()`, `bono_vstdp()`: `vSTDPParameter` (`dense = true`: `vSTDPDenseParameter`) with the
+    parameter sets of Litwin-Kumar & Doiron 2014, Clopath et al. 2010 (visual cortex, as modified in the Tripod code) and Bono &
+    Clopath 2017. `convention = :tripod` (default) converts the amplitudes to the scaling of the Tripod code at `dt` (default 0.1 ms):
+    `A_LTD = dt a⁻`, `A_LTP = a⁺ (τx - dt)`; `convention = :verbatim` copies them.
+  - `pfister_visualcortex(alltoall = true, full = true)`: `STDPTriplet` with the four visual-cortex sets (all-to-all or nearest-spike,
+    full or minimal model).
+  - `gutig_nltah(; τ, λ, μ, α = 1)`: the nonlinear temporally asymmetric Hebbian rule of Gütig et al. 2003 as `STDPWeightDependent`
+    (`η = λ`, `μ_plus = μ_minus = μ`, `τpre = τpost = τ`, bounds 0 and 1).
+- Voltage-based STDP on dendrites: a `SpikingSynapse` onto a compartment of a `Tripod` or `BallAndStick` (`:d1`, `:d2`, `:d`) filters and
+  thresholds the potential of that compartment; documented in `vSTDPParameter` and `bono_vstdp`, tested in `test/syn/vstdp_tripod.jl`
+  (prescribed dendritic potentials against the update of the Tripod code, and a simulated Tripod with one `SynapseNormalization` per
+  dendritic synapse).
+
 ## 2.2.0
 
 Receptor kinetics now integrated exactly (peak conductance = g0 at any dt; RESULTS CHANGE, migration rule below), plus the fixes

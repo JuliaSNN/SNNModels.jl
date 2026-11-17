@@ -67,10 +67,10 @@ Clopath et al. (2010) and Litwin-Kumar & Doiron (2014): per-spike depression wit
 @doc """
     lkd_vstdp(; convention = :tripod, dt = 0.1ms, dense = false, kwargs...)
 
-Voltage-based STDP (Clopath et al. 2010) with the parameter set of the excitatory synapses of
-Litwin-Kumar & Doiron (2014), as used in the Tripod code: `a⁻ = 8e-4` pA/mV, `a⁺ = 1.4e-3` pA/mV²,
-`θ_LTD = -70` mV, `θ_LTP = -49` mV, `τu = 10` ms, `τv = 7` ms, `τx = 15` ms, no delay (`delay_uv = 0`),
-`Wmin = 0.78` pF, `Wmax = 11.4` pF. Returns a [`vSTDPParameter`](@ref).
+Voltage-based STDP (Clopath et al. 2010) with the amplitudes, thresholds and time constants of the
+excitatory synapses of Litwin-Kumar & Doiron (2014) and the weight bounds of the Tripod code:
+`a⁻ = 8e-4` pA/mV, `a⁺ = 1.4e-3` pA/mV², `θ_LTD = -70` mV, `θ_LTP = -49` mV, `τu = 10` ms, `τv = 7` ms,
+`τx = 15` ms, no delay (`delay_uv = 0`), `Wmin = 0.78` pF, `Wmax = 11.4` pF. Returns a [`vSTDPParameter`](@ref).
 
 The defaults of `vSTDPParameter` share `θ`, `τv`, `τx` and the verbatim amplitudes but have `τu = 20` ms and
 the bounds 0.1-30 pF.

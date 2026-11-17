@@ -34,8 +34,9 @@ With ``V_i`` the postsynaptic potential (`v_post`), ``u_i``, ``v_i`` its low-pas
 ```
 A presynaptic spike increases ``x_j`` by ``1/τ_x`` (units 1/ms) and potentiation is a rate, integrated over
 `dt`. The filtered potential ``v`` is compared with `θ_LTD`, the instantaneous one with `θ_LTP`.
-The filters are driven by the potential delayed by ``ε`` = `delay_uv` (Clopath et al. 2010 use the delay so that
-the filtered potentials at a spike do not contain the spike itself; NEST `delay_u_bars`): ``D`` =
+The filters are driven by the potential delayed by ``ε`` = `delay_uv` (the delayed processing of the filtered
+potentials of the ModelDB reference implementation of Clopath et al. 2010 and of NEST `delay_u_bars`; it is not
+in the paper): ``D`` =
 `round(delay_uv / dt)` steps (at least one when `delay_uv > 0`), the potential of step ``n - D`` drives the
 update of step ``n``, and the delay buffer is filled with the current potential at the first step (or when
 ``D`` changes). `delay_uv = 0` drives the filters with the current potential.
