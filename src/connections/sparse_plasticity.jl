@@ -352,6 +352,7 @@ include("sparse_plasticity/STDP_traces.jl")
 include("sparse_plasticity/STDP_weight_dependent.jl")
 include("sparse_plasticity/STDP_triplet.jl")
 include("sparse_plasticity/STDP_structured.jl")
+include("sparse_plasticity/plasticity_presets.jl")
 
 """
     change_plasticity!(syn; LTP = nothing, STP = nothing)
