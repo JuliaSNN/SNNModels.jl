@@ -296,7 +296,8 @@ end
 
 # Neurons in the backpropagation or refractory period (counter after this step `tabs - 1 > 0`): the soma is held at its clamp value
 # for the whole step, so that both Heun stages of the dendrites see it (the dendritic equations are integrated in full).
-function _tripod_clamp_soma!(p::Tripod, rng::UnitRange{Int}, n_abs::Int)
+# Shared with `Multipod` (same fields `v_s`, `tabs`, `spike`, `adex`; column 1 of `Δv` is the soma).
+function _tripod_clamp_soma!(p::AbstractDendriteIF, rng::UnitRange{Int}, n_abs::Int)
     @unpack v_s, tabs, spike, adex = p
     AP, Vr = spike.AP_membrane, adex.Vr
     nabs_f = convert(eltype(tabs), n_abs)
@@ -307,7 +308,7 @@ function _tripod_clamp_soma!(p::Tripod, rng::UnitRange{Int}, n_abs::Int)
 end
 
 # Between the two Heun stages: a clamped soma does not move in the Euler prediction.
-function _tripod_hold_soma!(p::Tripod, rng::UnitRange{Int}, n_abs::Int)
+function _tripod_hold_soma!(p::AbstractDendriteIF, rng::UnitRange{Int}, n_abs::Int)
     @unpack Δv, tabs = p
     @inbounds @simd ivdep for i ∈ rng
         Δv[i, 1] = ifelse(tabs[i] - 1 > 0, zero(eltype(Δv)), Δv[i, 1])
@@ -451,6 +452,8 @@ end
 
 # one precision per population (see `IF`); `param` holds the morphology only (precision-agnostic)
 function snn_kw_finalize(::Type{T}, f::NamedTuple) where {T<:Tripod}
+    length(f.param.ds) > 2 &&
+        throw(ArgumentError("Tripod has two dendrites, `param.ds` has $(length(f.param.ds)) entries; use `Multipod` for more dendrites"))
     _check_precision("Tripod", _state_float(T, :v_s), "adex" => f.adex, "soma_syn" => f.soma_syn, "dend_syn" => f.dend_syn,
                      "spike" => f.spike)
     f.scheme isa PaperScheme && !(f.soma_syn isa ReceptorSynapse && f.dend_syn isa ReceptorSynapse) &&

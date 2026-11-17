@@ -81,6 +81,7 @@ end
     _ts("multicompartment_numerics", "pop/multicompartment_numerics.jl")
     _ts("tripod_21",     "pop/tripod_21.jl")
     _ts("tripod_parameter_real", "pop/tripod_parameter_real.jl")
+    _ts("multipod_tripod_equivalence", "pop/multipod_tripod_equivalence.jl")
 end
 
 # ── Stimuli ───────────────────────────────────────────────────────────────────

@@ -295,6 +295,8 @@ end
 
 # one precision per population (see `IF`); `param` holds the morphology only (precision-agnostic)
 function snn_kw_finalize(::Type{T}, f::NamedTuple) where {T<:BallAndStick}
+    length(f.param.ds) > 2 &&
+        throw(ArgumentError("BallAndStick has one dendrite, `param.ds` has $(length(f.param.ds)) entries; use `Multipod` for more dendrites"))
     _check_precision("BallAndStick", _state_float(T, :v_s), "adex" => f.adex, "soma_syn" => f.soma_syn, "dend_syn" => f.dend_syn,
                      "spike" => f.spike)
     return f
