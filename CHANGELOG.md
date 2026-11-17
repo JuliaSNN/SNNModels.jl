@@ -28,8 +28,6 @@ nearest-spike options of the vSTDP and triplet rules. Additive: existing models 
   dendritic synapse).
 New model `Multipod` (soma + N dendrites); no results change for the existing models.
 
-### Improved
-
 - **New population `Multipod`**: an AdEx soma (same `AdExParameter`, `PostSpike` and `Vspike` as `Tripod`) with `N_d` passive
   dendrites `d1`, ..., `dN` (`1 <= N_d <= 8`) attached to the soma in a star. Each dendrite has its own length and optionally its own
   diameter; `g_ax`, `g_m` and `C` come from `create_dendrite`, the derivation used by `Tripod`. It is `Tripod` with the sum of the
