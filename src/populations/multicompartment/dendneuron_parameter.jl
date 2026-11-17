@@ -1,23 +1,35 @@
 
-DendLength = Union{Float32,Tuple}
+# One entry of `ds`: a length (cm), a `(min, max)` range, or `length => diameter` (per-dendrite diameter, used by `Multipod`).
+DendLength = Union{Float32,Tuple,Pair}
 abstract type AbstractDendriticTree end
 struct TripodNeuron <: AbstractDendriticTree end
 struct BallAndStickNeuron <: AbstractDendriticTree end
+"""
+    MultipodNeuron()
+
+Tag of a `DendNeuronParameter` (field `type`) that `Population(param)` builds as a `Multipod`: set by `MultipodParameter`, and by
+`DendNeuronParameter` for 3 to 8 dendrites.
+"""
+struct MultipodNeuron <: AbstractDendriticTree end
+
+# Largest number of dendrites of a `Multipod` (one concrete type per number, generated at load time).
+const MULTIPOD_MAX_DENDRITES = 8
 
 """
     DendNeuronParameter(; ds = [(200um, 400um), (200um, 400um)], physiology = human_dend, d = 4um, El_dend = nothing,
                           geometry = [(:s=>:d1), (:s=>:d2)], type = <from length(ds)>)
 
-Parameter struct of the multicompartment dendritic populations (`Tripod`, `BallAndStick`). It
+Parameter struct of the multicompartment dendritic populations (`Tripod`, `BallAndStick`, `Multipod`). It
 carries the morphology only; the somatic parameters are in the population field `adex`
 (an `AdExParameter`) and the synapses in `soma_syn`/`dend_syn`.
 
 `Population(param::DendNeuronParameter; kwargs...)` builds a `Tripod` when `type` is
-`TripodNeuron()` and a `BallAndStick` when it is `BallAndStickNeuron()`.
+`TripodNeuron()`, a `BallAndStick` when it is `BallAndStickNeuron()` and a `Multipod` when it is `MultipodNeuron()`.
 
 # Fields
 - `ds::DT = [(200um, 400um), (200um, 400um)]`: one entry per dendrite, either a length (cm, any `Real`, stored as `Float32`)
-  or a `(min, max)` range from which `create_dendrite` draws the length of each neuron.
+  or a `(min, max)` range from which `create_dendrite` draws the length of each neuron. `Multipod` also accepts
+  `length => diameter` (the length a number or a range), the diameter of that dendrite replacing `d`.
 - `physiology::PT = human_dend`: cable properties (`Physiology`: `Ri`, `Rd`, `Cd`), used by `Tripod` and `BallAndStick` to build their dendrites.
 - `d::Float32 = 4um`: dendrite diameter (cm), common to all dendrites of the neuron. It enters the cable formulas of
   `create_dendrite`: `g_ax ∝ d²`, `g_m ∝ d` and `C ∝ d` at fixed length. The default is the 4 um of the published model.
@@ -26,10 +38,12 @@ carries the morphology only; the somatic parameters are in the population field 
   whatever the somatic `El` (the original Tripod fixes it at -70.6 mV). It is read once, when the `Tripod`/`BallAndStick`
   is constructed (`Dendrite.El`); with `nothing`, changing `adex.El` afterwards does not move the dendritic leak either
   (it keeps the value `adex.El` had at construction), see `Tripod`.
-- `geometry::GT = [(:s=>:d1), (:s=>:d2)]`: connectivity of the compartments. Stored for
-  bookkeeping; `Tripod` and `BallAndStick` hard-code soma-dendrite coupling.
-- `type::NT`: `BallAndStickNeuron()` if `length(ds) == 1`, `TripodNeuron()` if
-  `length(ds) == 2`; other lengths raise an error.
+- `geometry::GT`: connectivity of the compartments, `[(:s=>:d1), (:s=>:d2)]` for one or two dendrites and the star
+  `[(:s=>:d1), ..., (:s=>:dN)]` for more. Stored for bookkeeping; the populations hard-code the soma-dendrite coupling
+  (all dendrites attached to the soma).
+- `type::NT`: `BallAndStickNeuron()` if `length(ds) == 1`, `TripodNeuron()` if `length(ds) == 2`, `MultipodNeuron()` if
+  `3 <= length(ds) <= $(MULTIPOD_MAX_DENDRITES)` (`MultipodParameter` sets `MultipodNeuron()` for any number of dendrites);
+  other lengths raise an error.
 
 Type parameters: `ET = Union{Nothing,Float32}`, `DT = Vector{DendLength}` (`DendLength = Union{Float32,Tuple}`),
 `GT = Vector{Pair{Symbol,Symbol}}`, `PT = Physiology{Float32}`, `NT<:AbstractDendriticTree`.
@@ -56,23 +70,31 @@ DendNeuronParameter
     physiology::PT = human_dend
     d::Float32 = 4um  ## Dendrite diameter (cm)
     El_dend::ET = nothing  ## Dendritic leak reversal (mV); nothing: somatic adex.El
-    geometry::GT = [(:s=>:d1), (:s=>:d2)]  ## Geometry between soma and dendrites
+    geometry::GT = length(ds) <= 2 ? [(:s=>:d1), (:s=>:d2)] : _star_geometry(length(ds))  ## Geometry between soma and dendrites
     type::NT = begin
         if length(ds) == 1
             BallAndStickNeuron()
         elseif length(ds) == 2
             TripodNeuron()
+        elseif 3 <= length(ds) <= MULTIPOD_MAX_DENDRITES
+            MultipodNeuron()
         else
             error(
-                "MulticompartmentNeuron not implemented yet. Dendritic segments must be either 1 (BallAndStick) or 2 (Tripod).",
+                "Dendritic segments must be 1 (BallAndStick), 2 (Tripod) or 3 to $(MULTIPOD_MAX_DENDRITES) (Multipod); got $(length(ds)).",
             )
         end
     end
 end
 
-# `ds` accepts any `Real` length (Float64, Int, ...) besides `(min, max)` tuples; scalar lengths are stored as `Float32`.
-snn_kw_finalize(::Type{<:DendNeuronParameter}, f::NamedTuple) =
-    (; f..., ds = DendLength[l isa Tuple ? l : Float32(l) for l in f.ds])
+# `ds` accepts any `Real` length (Float64, Int, ...) besides `(min, max)` tuples; scalar lengths are stored as `Float32`, and so are
+# both sides of a `length => diameter` pair (its length may be a range).
+_dend_length(l::Tuple) = l
+_dend_length(l::Pair) = _dend_length(l.first) => Float32(l.second)
+_dend_length(l) = Float32(l)
+snn_kw_finalize(::Type{<:DendNeuronParameter}, f::NamedTuple) = (; f..., ds = DendLength[_dend_length(l) for l in f.ds])
+
+# Star topology of `n` dendrites: every dendrite attached to the soma.
+_star_geometry(n::Integer) = Pair{Symbol,Symbol}[(:s => Symbol(:d, k)) for k in 1:n]
 
 # Dendritic leak reversal used at construction: `param.El_dend`, or the somatic `adex.El` when it is `nothing`.
 _dend_El(param::DendNeuronParameter, adex) = isnothing(param.El_dend) ? adex.El : param.El_dend
@@ -131,7 +153,7 @@ end
 """
     Population(param::DendNeuronParameter; kwargs...)
 
-Build a `Tripod` (two dendrites) or a `BallAndStick` (one dendrite) population according to
+Build a `Tripod` (two dendrites), a `BallAndStick` (one dendrite) or a `Multipod` population according to
 `param.type`; `kwargs` are passed to the population constructor.
 """
 function Population(param::T; kwargs...) where {T<:DendNeuronParameter}
@@ -139,8 +161,10 @@ function Population(param::T; kwargs...) where {T<:DendNeuronParameter}
         return Tripod(; param, kwargs...)
     elseif param.type isa BallAndStickNeuron
         return BallAndStick(; param, kwargs...)
+    elseif param.type isa MultipodNeuron
+        return Multipod(; param, kwargs...)
     else
-        error("Dendritic segments must be either 1 (BallAndStick) or 2 (Tripod).")
+        error("Dendritic segments must be 1 (BallAndStick), 2 (Tripod) or 1 to $(MULTIPOD_MAX_DENDRITES) (Multipod).")
     end
 end
 
@@ -148,7 +172,7 @@ end
     synaptic_target(targets::Dict, post::AbstractDendriteIF, sym::Symbol, target::Symbol)
 
 Target the receptor buffer `post.receptors_<target>.<sym>` of compartment `target` (`:s`,
-`:d1`, `:d2` for `Tripod`; `:s`, `:d` for `BallAndStick`); `sym` is mapped with
+`:d1`, `:d2` for `Tripod`; `:s`, `:d` for `BallAndStick`; `:s`, `:d1`, ..., `:dN` for `Multipod`); `sym` is mapped with
 `get_synapse_symbol` (`:ge`/`:he` -> `:glu`, `:gi`/`:hi` -> `:gaba`). Returns the buffer and
 `post.v_<target>`. Records `:sym => "<sym>_<target>"` in `targets`. An unknown `target`
 raises an `ArgumentError`.
