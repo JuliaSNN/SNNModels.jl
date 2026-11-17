@@ -111,6 +111,8 @@ end
     _ts("lazy_traces",       "syn/lazy_traces.jl")
     _ts("lazy_traces_euler", "syn/lazy_traces_euler.jl")
     _ts("vstdp",       "syn/vstdp.jl")
+    _ts("vstdp_tripod", "syn/vstdp_tripod.jl")
+    _ts("plasticity_presets", "syn/plasticity_presets.jl")
     _ts("lazy_weights", "syn/lazy_weights.jl")
     _ts("precision",   "syn/precision.jl")
     _ts("precision_populations", "pop/precision_populations.jl")
