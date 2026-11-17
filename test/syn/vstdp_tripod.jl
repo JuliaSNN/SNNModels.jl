@@ -74,8 +74,8 @@ end
     Random.seed!(3)
     N = 50
     T = Tripod(N = 1)
-    E1 = Poisson(N = N, param = PoissonParameter(10Hz))
-    E2 = Poisson(N = N, param = PoissonParameter(10Hz))
+    E1 = SNNModels.Poisson(N = N, param = SNNModels.PoissonParameter(10Hz))   # qualified: Distributions.Poisson may be loaded
+    E2 = SNNModels.Poisson(N = N, param = SNNModels.PoissonParameter(10Hz))
     s1e = SpikingSynapse(E1, T, :glu, :d1; conn = fill(1.0f0, 1, N), LTPParam = bono_vstdp())
     s1d = SpikingSynapse(E1, T, :glu, :d1; conn = fill(1.0f0, 1, N), LTPParam = bono_vstdp(dense = true))
     s2 = SpikingSynapse(E2, T, :glu, :d2; conn = fill(1.0f0, 1, N), LTPParam = bono_vstdp())
