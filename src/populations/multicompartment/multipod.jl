@@ -8,7 +8,9 @@
 #
 # Layout. One concrete struct per number of dendrites `D`, generated at module load with named fields `d1..dD`, `v_d1..v_dD`,
 # `synvars_d1..`, `receptors_d1..` (the field access of `Tripod`). The integration code is written once for `Multipod{D}`: it
-# reads the per-dendrite fields as tuples (`_dendrites`, `_v_dends`, ...), which the compiler unrolls for each `D`.
+# reads the per-dendrite fields as tuples (`_dendrites`, `_v_dends`, ...), and the two per-neuron loops of the Heun scheme
+# (`_multipod_derivatives!`, `_multipod_state!`) are generated functions whose body is Tripod's loop with one block of statements
+# per dendrite, so that the loop vectorises as Tripod's does.
 # The arithmetic of every step is the one of `Tripod` (same expressions, same order of the sums), so that `D = 2` reproduces
 # `Tripod` bit for bit.
 
@@ -382,15 +384,8 @@ end
 
 # One Heun stage for the neurons `rng`: derivatives at the predicted state x + dt Δv (Δv = 0 at the first stage).
 function _multipod_stage!(p::Multipod{D}, Δv::Matrix{FT}, dt::FT, rng::UnitRange{Int}) where {D,FT<:AbstractFloat}
-    @unpack v_s, I_d, I, w_s, θ, is, v_pred = p
-    @unpack adex, soma_syn, dend_syn, synvars_s = p
-    @unpack C, gl, El, ΔT, a, τw = adex
+    @unpack v_s, is, v_pred, soma_syn, dend_syn, synvars_s = p
     v_ds = _v_dends(p)
-    dends = _dendrites(p)
-    gax = map(d -> d.gax, dends)
-    gm = map(d -> d.gm, dends)
-    Eld = map(d -> d.El, dends)
-    Cd = map(d -> d.C, dends)
     last(rng) <= p.N || throw(BoundsError(v_s, last(rng)))
 
     # stage potentials of the soma (column 1) and of the dendrites (columns 2..D+1)
@@ -415,74 +410,101 @@ function _multipod_stage!(p::Multipod{D}, Δv::Matrix{FT}, dt::FT, rng::UnitRang
         end
     end
 
-    # derivatives: the expressions and the `muladd` order of `Tripod` (bit-identical for D = 2; see `update_neuron!(::Tripod)`)
-    @inbounds @simd ivdep for i ∈ rng
-        vs = v_pred[i, 1]
-        ws = muladd(Δv[i, D + 2], dt, w_s[i])
+    _multipod_derivatives!(p, Δv, dt, rng)
+end
 
-        # dendrites: leak - synapses + axial + external; the axial currents soma -> dendrite are kept for the soma
-        ics = ntuple(Val(D)) do k
-            vd = v_pred[i, k + 1]
-            ic = (vs - vd) * gax[k][i]
-            Δv[i, k + 1] = ((muladd(Eld[k][i] - vd, gm[k][i], -is[i, k + 1]) + ic) + I_d[i]) / Cd[k][i]
-            ic
+# Derivatives of one Heun stage. The loop over the neurons is the one of `update_neuron!(::Tripod)` with one block of statements
+# per dendrite: the body is generated for each `D` (a single fused loop, no closure, so that it vectorises as Tripod's), and the
+# axial currents enter the somatic equation as the left-to-right sum `((w_s + I_syn,s) + ic_1) + ic_2 + ...`, the order of
+# Tripod (bit-identical for D = 2).
+@generated function _multipod_derivatives!(p::Multipod{D}, Δv::Matrix{FT}, dt::FT, rng::UnitRange{Int}) where {D,FT<:AbstractFloat}
+    vd = [Symbol(:vd, k) for k in 1:D]
+    ic = [Symbol(:ic, k) for k in 1:D]
+
+    # dendrite k: leak - synapses + axial + external
+    dendrite_blocks = [quote
+        $(vd[k]) = v_pred[i, $(k + 1)]
+        $(ic[k]) = (vs - $(vd[k])) * gax[$k][i]                     # axial current soma -> dendrite k
+        Δv[i, $(k + 1)] = ((muladd(Eld[$k][i] - $(vd[k]), gm[$k][i], -is[i, $(k + 1)]) + $(ic[k])) + I_d[i]) / Cd[$k][i]
+    end for k in 1:D]
+
+    # outgoing somatic current: adaptation + synapses + the axial currents in the order k = 1..D
+    outgoing = foldl((acc, k) -> :($acc + $(ic[k])), 1:D; init = :(ws + is[i, 1]))
+
+    # tuples of the cable constants of the D dendrites (a generated body cannot hold a closure such as `map(d -> d.gax, ...)`)
+    cable(f) = Expr(:tuple, (:(dends[$k].$f) for k in 1:D)...)
+
+    return quote
+        @unpack v_s, I_d, I, w_s, θ, is, v_pred, adex = p
+        @unpack C, gl, El, ΔT, a, τw = adex
+        dends = _dendrites(p)
+        gax = $(cable(:gax))
+        gm = $(cable(:gm))
+        Eld = $(cable(:El))
+        Cd = $(cable(:C))
+
+        @inbounds @simd ivdep for i ∈ rng
+            vs = v_pred[i, 1]
+            ws = muladd(Δv[i, $(D + 2)], dt, w_s[i])
+            $(dendrite_blocks...)
+            # soma: gl * (El - vs + ΔT * exp((vs - θ) / ΔT)) + I - (adaptation + synapses + axial currents)
+            e = exp256((vs - θ[i]) / ΔT)
+            Δv[i, 1] = muladd(gl, muladd(ΔT, e, El - vs), I[i] - $outgoing) / C
+            Δv[i, $(D + 2)] = muladd(a, vs - El, -ws) / τw
         end
-
-        # soma: gl * (El - vs + ΔT * exp((vs - θ) / ΔT)) + I - (adaptation + synapses + axial currents)
-        e = exp256((vs - θ[i]) / ΔT)
-        Δv[i, 1] = muladd(gl, muladd(ΔT, e, El - vs), I[i] - _sum_left(ws + is[i, 1], ics)) / C
-        Δv[i, D + 2] = muladd(a, vs - El, -ws) / τw
     end
 end
 
-# State update after the Heun stages (spike detection, refractoriness, clamping), neurons `rng`; the rules of `_tripod_state!`.
-function _multipod_state!(p::Multipod{D}, dt::AbstractFloat, rng::UnitRange{Int}, n_abs::Int, n_ref::Int) where {D}
-    @unpack v_s, w_s, fire, θ, tabs, Δv, Δv_temp = p
-    @unpack spike, adex, Vspike = p
-    @unpack AP_membrane, At, τA = spike
-    @unpack Vr, Vt, b = adex
-    v_ds = _v_dends(p)
-    nabs_f = convert(eltype(tabs), n_abs)    # the counters are floats: compare and store without mixing types
-    nref_f = convert(eltype(tabs), n_ref)
-    FT = eltype(v_s)
+# State update after the Heun stages (spike detection, refractoriness, clamping), neurons `rng`: the loop of `_tripod_state!`
+# with one Heun update per dendrite, generated for each `D` (a single fused loop, as in Tripod).
+@generated function _multipod_state!(p::Multipod{D}, dt::AbstractFloat, rng::UnitRange{Int}, n_abs::Int, n_ref::Int) where {D}
+    # dendrite k: Heun update, also while the soma is clamped; it holds on the spike step
+    dendrite_updates = [quote
+        vd = v_ds[$k][i]
+        vd_h = convert(FT, vd + 0.5 * dt * (Δv_temp[i, $(k + 1)] + Δv[i, $(k + 1)]))
+        v_ds[$k][i] = ifelse(spk, vd, vd_h)
+    end for k in 1:D]
 
-    # Branchless, as in `_tripod_state!`: every case (backpropagation, refractory, free integration, spike) is evaluated and the
-    # applicable one kept.
-    @inbounds @simd ivdep for i ∈ rng
-        t1 = tabs[i] - 1
-        th1 = θ[i] + dt * (Vt - θ[i]) / τA
-        bp = t1 > nabs_f                 # backpropagation period
-        rf = !bp & (t1 > 0)              # absolute refractory period
-        act = t1 <= 0                    # free integration (or spike)
-        vs0 = v_s[i]
-        ws0 = w_s[i]
-        dv1 = Δv[i, 1]
+    return quote
+        @unpack v_s, w_s, fire, θ, tabs, Δv, Δv_temp = p
+        @unpack spike, adex, Vspike = p
+        @unpack AP_membrane, At, τA = spike
+        @unpack Vr, Vt, b = adex
+        v_ds = _v_dends(p)
+        nabs_f = convert(eltype(tabs), n_abs)    # the counters are floats: compare and store without mixing types
+        nref_f = convert(eltype(tabs), n_ref)
+        FT = eltype(v_s)
 
-        # bp or rf: the soma is clamped (the Heun stages already integrated the dendrites against the clamped soma)
-        vsc = ifelse(bp, AP_membrane, Vr)
+        # Branchless, as in `_tripod_state!`: every case (backpropagation, refractory, free integration, spike) is evaluated and
+        # the applicable one kept.
+        @inbounds @simd ivdep for i ∈ rng
+            t1 = tabs[i] - 1
+            th1 = θ[i] + dt * (Vt - θ[i]) / τA
+            bp = t1 > nabs_f                 # backpropagation period
+            rf = !bp & (t1 > 0)              # absolute refractory period
+            act = t1 <= 0                    # free integration (or spike)
+            vs0 = v_s[i]
+            ws0 = w_s[i]
+            dv1 = Δv[i, 1]
 
-        # act: spike or Heun update
-        spk = act & (vs0 + dv1 * dt >= Vspike)
-        keep = act & !spk
-        vs_h = convert(FT, vs0 + 0.5 * dt * (Δv_temp[i, 1] + dv1))   # the Float64 sum stored in the state precision
-        ws_h = convert(FT, ws0 + 0.5 * dt * (Δv_temp[i, D + 2] + Δv[i, D + 2]))
+            # bp or rf: the soma is clamped (the Heun stages already integrated the dendrites against the clamped soma)
+            vsc = ifelse(bp, AP_membrane, Vr)
 
-        clamped = bp | rf
-        fire[i] = spk
-        Δv[i, 1] = ifelse(spk, AP_membrane - vs0, dv1)
-        v_s[i] = ifelse(clamped, vsc, ifelse(spk, AP_membrane, ifelse(keep, vs_h, vs0)))
+            # act: spike or Heun update
+            spk = act & (vs0 + dv1 * dt >= Vspike)
+            keep = act & !spk
+            vs_h = convert(FT, vs0 + 0.5 * dt * (Δv_temp[i, 1] + dv1))   # the Float64 sum stored in the state precision
+            ws_h = convert(FT, ws0 + 0.5 * dt * (Δv_temp[i, $(D + 2)] + Δv[i, $(D + 2)]))
 
-        # dendrites: Heun update, also while the soma is clamped; they hold on the spike step
-        ntuple(Val(D)) do k
-            vd = v_ds[k][i]
-            vd_h = convert(FT, vd + 0.5 * dt * (Δv_temp[i, k + 1] + Δv[i, k + 1]))
-            v_ds[k][i] = ifelse(spk, vd, vd_h)
-            nothing
+            clamped = bp | rf
+            fire[i] = spk
+            Δv[i, 1] = ifelse(spk, AP_membrane - vs0, dv1)
+            v_s[i] = ifelse(clamped, vsc, ifelse(spk, AP_membrane, ifelse(keep, vs_h, vs0)))
+            $(dendrite_updates...)
+            w_s[i] = ifelse(spk, ws0 + b, ifelse(keep, ws_h, ws0))
+            θ[i] = ifelse(spk, th1 + At, th1)
+            tabs[i] = ifelse(spk, nref_f, t1)
         end
-
-        w_s[i] = ifelse(spk, ws0 + b, ifelse(keep, ws_h, ws0))
-        θ[i] = ifelse(spk, th1 + At, th1)
-        tabs[i] = ifelse(spk, nref_f, t1)
     end
 end
 

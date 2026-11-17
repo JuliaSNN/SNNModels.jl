@@ -28,6 +28,17 @@ function _multipod_chunk!(::PaperScheme, p::Multipod, dt::AbstractFloat, rng::Un
     _multipod_paper_step!(p, dt, rng, n_abs, n_ref)
 end
 
+# Per-dendrite helpers of the step. They take every value as an argument (no closure over the loop variables that the step
+# reassigns, which would be boxed): the potentials after the external-current kick, the frozen axial currents, and the
+# two-stage step of every dendrite.
+@inline _paper_kicked(v_ds::NTuple{D}, dends::NTuple{D}, Id, dt, i, ::Type{FT}) where {D,FT} =
+    ntuple(@inline(k -> convert(FT, v_ds[k][i] + (dt / dends[k].C[i]) * Id)), Val(D))
+
+@inline _paper_axial(vs, vd::NTuple{D}, dends::NTuple{D}, i) where {D} = ntuple(@inline(k -> (vs - vd[k]) * dends[k].gax[i]), Val(D))
+
+@inline _paper_dends(vd::NTuple{D}, c::NTuple{D}, dends::NTuple{D}, synapse, svs::NTuple{D}, i, dt) where {D} =
+    ntuple(@inline(k -> _paper_dend(vd[k], c[k], dends[k].gm[i], dends[k].El[i], dends[k].C[i], synapse, svs[k], i, dt)), Val(D))
+
 # One step of the original loop for the neurons `rng`; see `PaperScheme` for the list of its rules.
 function _multipod_paper_step!(p::Multipod{D}, dt::AbstractFloat, rng::UnitRange{Int}, n_abs::Int, n_ref::Int) where {D}
     @unpack v_s, w_s, fire, θ, tabs, I, I_d, adex, spike, Vspike, scheme = p
@@ -46,17 +57,14 @@ function _multipod_paper_step!(p::Multipod{D}, dt::AbstractFloat, rng::UnitRange
     @inbounds for i in rng
         # external currents: Euler kick before the step
         vs = convert(FT, v_s[i] + (dt * Cinv) * I[i])
-        vd = ntuple(k -> convert(FT, v_ds[k][i] + (dt / dends[k].C[i]) * I_d[i]), Val(D))
+        vd = _paper_kicked(v_ds, dends, I_d[i], dt, i, FT)
         w = w_s[i]
 
         t1 = tabs[i] - 1
         th1 = θ[i] + dt * (Vt - θ[i]) / τA
 
         # axial currents into the dendrites from the potentials at the start of the step (kept fixed over the step)
-        c = ntuple(k -> (vs - vd[k]) * dends[k].gax[i], Val(D))
-
-        # two-stage step of every dendrite with its frozen axial current
-        step_dends() = ntuple(k -> _paper_dend(vd[k], c[k], dends[k].gm[i], dends[k].El[i], dends[k].C[i], dend_syn, svs[k], i, dt), Val(D))
+        c = _paper_axial(vs, vd, dends, i)
 
         spk = false
         if t1 <= 0
@@ -66,20 +74,24 @@ function _multipod_paper_step!(p::Multipod{D}, dt::AbstractFloat, rng::UnitRange
                 w += b
                 # the dendrites do not move in the spike step
             else
-                vdn = step_dends()
+                # two-stage step of every dendrite with its frozen axial current, w by forward Euler, then the soma with
+                # the new w and the sum of the frozen axial currents
+                vdn = _paper_dends(vd, c, dends, dend_syn, svs, i, dt)
                 wn = convert(FT, w + dt * (muladd(a, vs - El, -w) / τw))
                 vs = _paper_soma(vs, wn, θ[i], _sum_left(first(c), Base.tail(c)), gl, El, ΔT, Cinv, soma_syn, synvars_s, i, dt)
                 vd, w = vdn, wn
             end
         else
             # backpropagation or refractory period: dendrites in full, then the soma is clamped
-            vd = step_dends()
+            vd = _paper_dends(vd, c, dends, dend_syn, svs, i, dt)
             vs = t1 > nabs_f ? AP_membrane : Vr
         end
 
         fire[i] = spk
         v_s[i] = vs
-        ntuple(k -> (v_ds[k][i] = vd[k]; nothing), Val(D))
+        for k in 1:D
+            v_ds[k][i] = vd[k]
+        end
         w_s[i] = w
         θ[i] = spk ? th1 + At : th1
         tabs[i] = spk ? nref_f : t1
