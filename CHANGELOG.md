@@ -6,41 +6,6 @@ Receptor kinetics now integrated exactly (peak conductance = g0 at any dt; RESUL
 of the audit of the library (Izhikevich, HH, API, MetaPlasticity speed, thread safety of custom receptors).
 
 ### Fixed
-- `IZ`: the default conductances `ge`, `gi` were random with mean 40 and 200 (the nS scale of `HH`; `gi` often negative). The Izhikevich
-  equation has no capacitance, so `ge` and `gi` are in 1/ms and the explicit synaptic step needs `dt * (ge + gi) < 2`; every `IZ`
-  left at the default state diverged within a few steps (`v` down to -1e17 mV; a single regular-spiking neuron with `I = 10` reached
-  -386 mV). They now start at zero (RESULTS CHANGE for `IZ` populations that relied on the random initial conductances). The stability
-  condition is documented in `IZ`. Test: `test/pop/iz_stability.jl`.
-- `HH`: the rate functions alpha_m, beta_m, alpha_n are 0/0 at v - Vt = 13, 40, 15 mV; a neuron with `v` exactly -50, -23 or -48 mV
-  (default `Vt`) became `NaN`. The limit is now used there; every other step is bit-identical. Documented in `HH`: the forward-Euler step is
-  stiff (`gn/Cm = 100`/ms) and needs `dt <= 0.02 ms`; `dt >= 0.04 ms` gives `NaN` (the `sim!` default of 0.125 ms does). A flat f-I
-  curve at 11-12 Hz is not reproduced: with `dt = 0.01` the f-I curve of the Traub-Miles / Brette et al. (2007) model implemented here is
-  monotonic (14 Hz at 50 pA to 262 Hz at 3 nA), the flat curve comes from `dt` too large. Test: `test/pop/hh_fi.jl`.
-
-### Documented (no behaviour change)
-- `Tripod`: the somatic potential undershoots after a burst (-130 mV after 46 spikes under 3 nA, -225 mV needs `w_s` of about 6 nA).
-  This is the unbounded, reversal-free adaptation current of the AdEx model (`V_s` relaxes to `El - w_s/gl`), independent of `dt` and
-  identical in `AdEx`; nothing is clipped. Explained in the `Tripod` docstring, pinned by `test/pop/tripod_adaptation.jl`.
-
-### Fixed (API, records, performance, Tripod construction)
-- `IF(N = Int32(10))` (any `Integer` population size) no longer fails in `synaptic_variables`/`synaptic_receptors`: the size is converted to `Int` once, in the generic methods of `AbstractSynapseParameter`.
-- `firing_rate` of a silent population with a `neurons` subset (e.g. `neurons = 1:50`) no longer throws an incommensurate-range error: it returns zeros of shape `(length(neurons), length(interval))`.
-- The positional `AggregateScalingParameter(N, rate; ..., Wmax = 250pF)` accepts `Wmax` (it was documented but threw a keyword error); code and docstring now agree.
-- `record(p, sym)` on records that hold no samples (typically after `load_model`, which clears them) throws an `ArgumentError` that says so, lists the keys with samples and points to `load_data`, instead of a bare `KeyError`; a key that is not monitored at all lists the available record keys. `load_data` keeps the records, so `record` works on it.
-- `monitor!` on a key that is already monitored now replaces the stored `sr`, `monitor_time` and (for `:fire`) `monitor_rate` when the call gives a different value, with an `@info` note listing old and new values; it used to keep the old settings silently. `monitor_time` and `monitor_rate` default to `nothing`, so only explicit values update; `sr` keeps its defaults (`1000Hz`, `200Hz` for arrays and NamedTuples), so a call without `sr` on a key monitored at another rate resets it to the default, and the note says so.
-- `SynapseNormalization` (`MultiplicativeNorm`, `AdditiveNorm`): the normalization step was about 7x slower than the rest of the
-  simulation (N = 2000, p = 0.1, 0.5 s with STDP: 3.3 s against 0.47 s without it; one step took 0.12 s and made 4.4 M allocations).
-  The `synapses` field has an abstract element type, so the loops over the weights ran without type information; they now run in
-  kernels called per synapse. The weights are bit-identical to the previous implementation (tested against the reference loops).
-- Fix: the registry of predefined receptors (`_PREDEFINED`, filled by `_predefined`) was a shared `Vector` pushed to without a lock, so
-  building receptors from several threads failed with `ConcurrencyViolationError: Vector can not be resized concurrently`. Writes and
-  lookups are now guarded by a lock, and registering the same definition twice no longer grows the registry. Building `Tripod` and
-  `Receptor` objects was and remains thread safe; only `_predefined` touched shared state.
-- Fix: `TripodParameter`, `BallAndStickParameter` and `DendNeuronParameter` rejected `Float64` (and `Int`) dendrite lengths in `ds`
-  (`MethodError: Cannot convert Float64 to Union{Float32, Tuple}`). Any `Real` length is accepted and stored as `Float32`; `(min, max)`
-  tuples are unchanged. The diameter `d` already accepted any `Real`.
-
-### Changed
 
 - **Results change (receptor kinetics).** `ReceptorSynapse` and `MultiReceptorSynapse` (hence the soma and dendrites of `Tripod` and
   `BallAndStick`, and every point-neuron population with receptors) integrate the double-exponential conductance exactly over one
@@ -74,6 +39,39 @@ of the audit of the library (Izhikevich, HH, API, MetaPlasticity speed, thread s
   the discrete update of the published code (peak `c(dt) g0`; the reference traces of the tests are unchanged). `decay` applies only to
   `exact = false`. `DoubleExpSynapse`, `DoubleExpCurrentSynapse` (forward Euler, unnormalised weights) and the other synapse models are
   not changed.
+
+- `IZ`: the default conductances `ge`, `gi` were random with mean 40 and 200 (the nS scale of `HH`; `gi` often negative). The Izhikevich
+  equation has no capacitance, so `ge` and `gi` are in 1/ms and the explicit synaptic step needs `dt * (ge + gi) < 2`; every `IZ`
+  left at the default state diverged within a few steps (`v` down to -1e17 mV; a single regular-spiking neuron with `I = 10` reached
+  -386 mV). They now start at zero (RESULTS CHANGE for `IZ` populations that relied on the random initial conductances). The stability
+  condition is documented in `IZ`. Test: `test/pop/iz_stability.jl`.
+- `HH`: the rate functions alpha_m, beta_m, alpha_n are 0/0 at v - Vt = 13, 40, 15 mV; a neuron with `v` exactly -50, -23 or -48 mV
+  (default `Vt`) became `NaN`. The limit is now used there; every other step is bit-identical. Documented in `HH`: the forward-Euler step is
+  stiff (`gn/Cm = 100`/ms) and needs `dt <= 0.02 ms`; `dt >= 0.04 ms` gives `NaN` (the `sim!` default of 0.125 ms does). A flat f-I
+  curve at 11-12 Hz is not reproduced: with `dt = 0.01` the f-I curve of the Traub-Miles / Brette et al. (2007) model implemented here is
+  monotonic (14 Hz at 50 pA to 262 Hz at 3 nA), the flat curve comes from `dt` too large. Test: `test/pop/hh_fi.jl`.
+- Fix: the registry of predefined receptors (`_PREDEFINED`, filled by `_predefined`) was a shared `Vector` pushed to without a lock, so
+  building receptors from several threads failed with `ConcurrencyViolationError: Vector can not be resized concurrently`. Writes and
+  lookups are now guarded by a lock, and registering the same definition twice no longer grows the registry. Building `Tripod` and
+  `Receptor` objects was and remains thread safe; only `_predefined` touched shared state.
+
+### Improved
+
+- `IF(N = Int32(10))` (any `Integer` population size) no longer fails in `synaptic_variables`/`synaptic_receptors`: the size is converted to `Int` once, in the generic methods of `AbstractSynapseParameter`.
+- `firing_rate` of a silent population with a `neurons` subset (e.g. `neurons = 1:50`) no longer throws an incommensurate-range error: it returns zeros of shape `(length(neurons), length(interval))`.
+- The positional `AggregateScalingParameter(N, rate; ..., Wmax = 250pF)` accepts `Wmax` (it was documented but threw a keyword error); code and docstring now agree.
+- `record(p, sym)` on records that hold no samples (typically after `load_model`, which clears them) throws an `ArgumentError` that says so, lists the keys with samples and points to `load_data`, instead of a bare `KeyError`; a key that is not monitored at all lists the available record keys. `load_data` keeps the records, so `record` works on it.
+- `monitor!` on a key that is already monitored now replaces the stored `sr`, `monitor_time` and (for `:fire`) `monitor_rate` when the call gives a different value, with an `@info` note listing old and new values; it used to keep the old settings silently. `monitor_time` and `monitor_rate` default to `nothing`, so only explicit values update; `sr` keeps its defaults (`1000Hz`, `200Hz` for arrays and NamedTuples), so a call without `sr` on a key monitored at another rate resets it to the default, and the note says so.
+- `SynapseNormalization` (`MultiplicativeNorm`, `AdditiveNorm`): the normalization step was about 7x slower than the rest of the
+  simulation (N = 2000, p = 0.1, 0.5 s with STDP: 3.3 s against 0.47 s without it; one step took 0.12 s and made 4.4 M allocations).
+  The `synapses` field has an abstract element type, so the loops over the weights ran without type information; they now run in
+  kernels called per synapse. The weights are bit-identical to the previous implementation (tested against the reference loops).
+- Fix: `TripodParameter`, `BallAndStickParameter` and `DendNeuronParameter` rejected `Float64` (and `Int`) dendrite lengths in `ds`
+  (`MethodError: Cannot convert Float64 to Union{Float32, Tuple}`). Any `Real` length is accepted and stored as `Float32`; `(min, max)`
+  tuples are unchanged. The diameter `d` already accepted any `Real`.
+- `Tripod` (documentation): the somatic potential undershoots after a burst (-130 mV after 46 spikes under 3 nA, -225 mV needs `w_s` of about 6 nA).
+  This is the unbounded, reversal-free adaptation current of the AdEx model (`V_s` relaxes to `El - w_s/gl`), independent of `dt` and
+  identical in `AdEx`; nothing is clipped. Explained in the `Tripod` docstring, pinned by `test/pop/tripod_adaptation.jl`.
 
 ## 2.1.0
 
