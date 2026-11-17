@@ -4,6 +4,12 @@ DendLength = Union{Float32,Tuple,Pair}
 abstract type AbstractDendriticTree end
 struct TripodNeuron <: AbstractDendriticTree end
 struct BallAndStickNeuron <: AbstractDendriticTree end
+"""
+    MultipodNeuron()
+
+Tag of a `DendNeuronParameter` (field `type`) that `Population(param)` builds as a `Multipod`: set by `MultipodParameter`, and by
+`DendNeuronParameter` for 3 to 8 dendrites.
+"""
 struct MultipodNeuron <: AbstractDendriticTree end
 
 # Largest number of dendrites of a `Multipod` (one concrete type per number, generated at load time).
