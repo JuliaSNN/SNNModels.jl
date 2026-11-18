@@ -16,8 +16,9 @@ nearest-spike options of the vSTDP and triplet rules. Additive: existing models 
 - Presets of the Tripod plasticity code, as functions returning the existing rule types (keyword arguments override any field):
   - `lkd_vstdp()`, `clopath_vstdp_visualcortex()`, `bono_vstdp()`: `vSTDPParameter` (`dense = true`: `vSTDPDenseParameter`) with the
     parameter sets of Litwin-Kumar & Doiron 2014, Clopath et al. 2010 (visual cortex, as modified in the Tripod code) and Bono &
-    Clopath 2017. `convention = :tripod` (default) converts the amplitudes to the scaling of the Tripod code at `dt` (default 0.1 ms):
-    `A_LTD = dt a⁻`, `A_LTP = a⁺ (τx - dt)`; `convention = :verbatim` copies them.
+    Clopath 2017. By default (`convention = :verbatim`) the amplitudes are copied (published convention: per-spike depression without
+    `dt`, trace jump `1/τx`). Running the numbers of the Tripod code needs `convention = :tripod`, which converts the amplitudes to its
+    scaling at `dt` (default 0.1 ms): `A_LTD = dt a⁻`, `A_LTP = a⁺ (τx - dt)`.
   - `pfister_visualcortex(alltoall = true, full = true)`: `STDPTriplet` with the four visual-cortex sets (all-to-all or nearest-spike,
     full or minimal model).
   - `gutig_nltah(; τ, λ, μ, α = 1)`: the nonlinear temporally asymmetric Hebbian rule of Gütig et al. 2003 as `STDPWeightDependent`

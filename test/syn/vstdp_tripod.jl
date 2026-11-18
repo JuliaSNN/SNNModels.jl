@@ -42,7 +42,7 @@ end
     for dense in (false, true)
         T = Tripod(N = npost)
         pre = IF(N = npre)
-        rule = bono_vstdp(; dense, Wmin = -100.0, Wmax = 100.0)
+        rule = bono_vstdp(; convention = :tripod, dense, Wmin = -100.0, Wmax = 100.0)
         s1 = SpikingSynapse(pre, T, :glu, :d1; conn = fill(1.0f0, npost, npre), LTPParam = rule)
         s2 = SpikingSynapse(pre, T, :glu, :d2; conn = fill(1.0f0, npost, npre), LTPParam = rule)
         ss = SpikingSynapse(pre, T, :glu, :s; conn = fill(1.0f0, npost, npre), LTPParam = rule)
@@ -76,9 +76,10 @@ end
     T = Tripod(N = 1)
     E1 = SNNModels.Poisson(N = N, param = SNNModels.PoissonParameter(10Hz))   # qualified: Distributions.Poisson may be loaded
     E2 = SNNModels.Poisson(N = N, param = SNNModels.PoissonParameter(10Hz))
-    s1e = SpikingSynapse(E1, T, :glu, :d1; conn = fill(1.0f0, 1, N), LTPParam = bono_vstdp())
-    s1d = SpikingSynapse(E1, T, :glu, :d1; conn = fill(1.0f0, 1, N), LTPParam = bono_vstdp(dense = true))
-    s2 = SpikingSynapse(E2, T, :glu, :d2; conn = fill(1.0f0, 1, N), LTPParam = bono_vstdp())
+    # amplitudes of the Tripod code (convention = :tripod), the regime of its dendritic simulations
+    s1e = SpikingSynapse(E1, T, :glu, :d1; conn = fill(1.0f0, 1, N), LTPParam = bono_vstdp(convention = :tripod))
+    s1d = SpikingSynapse(E1, T, :glu, :d1; conn = fill(1.0f0, 1, N), LTPParam = bono_vstdp(convention = :tripod, dense = true))
+    s2 = SpikingSynapse(E2, T, :glu, :d2; conn = fill(1.0f0, 1, N), LTPParam = bono_vstdp(convention = :tripod))
 
     # one multiplicative normalisation per dendritic synapse, every 20 ms (the Tripod code: every 200 steps)
     n1e = SynapseNormalization([s1e]; param = MultiplicativeNorm(τ = 20ms))
