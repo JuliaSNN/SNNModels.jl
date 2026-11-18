@@ -5,25 +5,19 @@
 ### Improved
 
 - `vSTDPParameter` and `vSTDPDenseParameter` have the field `delay_uv` (default `0ms`): the low-pass filters `u` and `v` of the
-  postsynaptic potential are driven by the potential `round(delay_uv / dt)` steps earlier (the delay of the ModelDB implementation of
-  Clopath et al. 2010 and of NEST `delay_u_bars`); the potentiation keeps the current potential. With the default the results are unchanged. The event-driven
-  and the dense rules give the same weights with any delay (tests `test/syn/plasticity_presets.jl`).
+  postsynaptic potential are driven by the potential `round(delay_uv / dt)` steps earlier (the delayed processing of the ModelDB
+  implementation of Clopath et al. 2010 and of NEST `delay_u_bars`); the potentiation keeps the current potential. With the default
+  the results are unchanged. Event-driven and dense rules give the same weights with any delay (`test/syn/vstdp_delay.jl`).
 - `STDPTriplet` has the field `nearest::Bool = false`: with `nearest = true` a spike sets the traces of its neuron to 1
-  (nearest-spike interaction of Pfister & Gerstner 2006) instead of adding 1 (all-to-all).
-- Presets of the Tripod plasticity code, as functions returning the existing rule types (keyword arguments override any field):
-  - `lkd_vstdp()`, `clopath_vstdp_visualcortex()`, `bono_vstdp()`: `vSTDPParameter` (`dense = true`: `vSTDPDenseParameter`) with the
-    parameter sets of Litwin-Kumar & Doiron 2014, Clopath et al. 2010 (visual cortex, as modified in the Tripod code) and Bono &
-    Clopath 2017. By default (`convention = :verbatim`) the amplitudes are copied (published convention: per-spike depression without
-    `dt`, trace jump `1/τx`). Running the numbers of the Tripod code needs `convention = :tripod`, which converts the amplitudes to its
-    scaling at `dt` (default 0.1 ms): `A_LTD = dt a⁻`, `A_LTP = a⁺ (τx - dt)`.
-  - `pfister_visualcortex(alltoall = true, full = true)`: `STDPTriplet` with the four visual-cortex sets (all-to-all or nearest-spike,
-    full or minimal model).
-  - `gutig_nltah(; τ, λ, μ, α = 1)`: the nonlinear temporally asymmetric Hebbian rule of Gütig et al. 2003 as `STDPWeightDependent`
-    (`η = λ`, `μ_plus = μ_minus = μ`, `τpre = τpost = τ`, bounds 0 and 1).
+  (nearest-spike interaction of Pfister & Gerstner 2006) instead of adding 1 (all-to-all) (`test/syn/stdp_triplet.jl`, with a dense
+  reference).
 - Voltage-based STDP on dendrites: a `SpikingSynapse` onto a compartment of a `Tripod` or `BallAndStick` (`:d1`, `:d2`, `:d`) filters and
-  thresholds the potential of that compartment; documented in `vSTDPParameter` and `bono_vstdp`, tested in `test/syn/vstdp_tripod.jl`
-  (prescribed dendritic potentials against the update of the Tripod code, and a simulated Tripod with one `SynapseNormalization` per
-  dendritic synapse).
+  thresholds the potential of that compartment (`test/syn/vstdp_tripod.jl`, with a simulated Tripod and one `SynapseNormalization`
+  per dendritic synapse). The `vSTDPParameter` docstring gives the visual-cortex fit of Clopath et al. 2010, the
+  `STDPWeightDependent` docstring the parameters of the NLTAH rule of Gütig et al. 2003.
+- Conventions and implementation notes of the plasticity rules (units, amplitude convention, update order, trace integration,
+  voltage read, bounds, constraints) are collected in the documentation page
+  [Plasticity: conventions and implementation notes](https://juliasnn.github.io/SpikingNeuralNetworks.jl/dev/catalogue/plasticity_conventions/).
 
 ## 2.2.0
 

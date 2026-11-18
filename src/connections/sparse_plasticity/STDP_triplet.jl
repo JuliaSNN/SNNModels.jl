@@ -31,8 +31,6 @@ These equal Auryn's `MinimalTripletConnection` with `eta = 1`. With `A3_minus = 
 `τ_x` is unused; its default (946 ms) is the all-to-all full-model value of Table 4.
 Weights are in the same units as `W`; rescale the amplitudes to the weight scale.
 
-Presets of the visual-cortex fits (four variants): [`pfister_visualcortex`](@ref).
-
 Fields: `A2_plus`, `A3_plus`, `A2_minus`, `A3_minus` (amplitudes, all used with the signs
 shown above), `τ_plus`, `τ_minus`, `τ_x`, `τ_y` (trace time constants, ms), `Wmax = 30pF`,
 `Wmin = 0pF`, `nearest = false` (interaction of the traces). State: `STDPTripletVariables`. Event-driven with the ordering of `STDP_kernels.jl`
@@ -48,6 +46,8 @@ rule = SNN.STDPTriplet(A2_plus = 5.3e-3 * 10, A3_plus = 8e-3 * 10, A2_minus = 3.
 syn = SNN.SpikingSynapse(pre, post, :ge; conn = (p = 0.1, μ = 10.0), LTPParam = rule)
 SNN.train!(model = SNN.compose(; pre, post, syn), duration = 500ms)
 ```
+
+See also: [Plasticity: conventions and implementation notes](https://juliasnn.github.io/SpikingNeuralNetworks.jl/dev/catalogue/plasticity_conventions/).
 """
 STDPTriplet
 

@@ -102,8 +102,9 @@ Per step O(`Npost`); per presynaptic spike O(fan-out); once per epoch O(nnz). Se
 ``V_i`` is the membrane potential of the compartment the synapse targets: for a `Tripod` or
 `BallAndStick` target `SpikingSynapse(pre, post, :glu, :d1; ...)` reads `post.v_d1`, so the rule
 acts on the local dendritic potential (Bono & Clopath 2017); one synapse object has one pair of
-filters ``u``, ``v`` per postsynaptic neuron. Presets: [`lkd_vstdp`](@ref),
-[`clopath_vstdp_visualcortex`](@ref), [`bono_vstdp`](@ref).
+filters ``u``, ``v`` per postsynaptic neuron. The visual-cortex fit of Clopath et al. (2010) is
+`vSTDPParameter(A_LTD = 14e-5, A_LTP = 8e-5, θ_LTD = -70.6mV, θ_LTP = -45.3mV, τu = 10ms, τv = 7ms)` (values of
+the NEST `clopath_synapse` example).
 
 # References
 Clopath, C., Büsing, L., Vasilaki, E. & Gerstner, W. (2010). Connectivity reflects coding: a
@@ -120,6 +121,8 @@ syn = SNN.SpikingSynapse(E, P, :ge; conn = (p = 0.2, μ = 1.0), LTPParam = SNN.v
 SNN.train!(model = SNN.compose(; E, P, syn), duration = 200ms)
 SNN.plasticity_value(syn, :W)      # current weights (syn.W is lazy)
 ```
+
+See also: [Plasticity: conventions and implementation notes](https://juliasnn.github.io/SpikingNeuralNetworks.jl/dev/catalogue/plasticity_conventions/).
 """
 vSTDPParameter
 
@@ -433,6 +436,8 @@ P = SNN.AdEx(N = 10, param = SNN.AdExParameter())
 syn = SNN.SpikingSynapse(E, P, :ge; conn = (p = 0.2, μ = 1.0), LTPParam = SNN.vSTDPDenseParameter())
 SNN.train!(model = SNN.compose(; E, P, syn), duration = 200ms)
 ```
+
+See also: [Plasticity: conventions and implementation notes](https://juliasnn.github.io/SpikingNeuralNetworks.jl/dev/catalogue/plasticity_conventions/).
 """
 vSTDPDenseParameter
 
