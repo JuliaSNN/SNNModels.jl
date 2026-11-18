@@ -126,6 +126,28 @@ end
 end
 
 """
+    _spike_set!(x, last, spikes, t, a)
+
+Set the trace of every neuron that fired this step to `a` (nearest-spike traces) and store its spike time.
+"""
+@inline function _spike_set!(x, last, fire, t::Real, a::Real)
+    @inbounds for k in eachindex(fire)
+        if fire[k]
+            x[k] = a
+            last[k] = t
+        end
+    end
+end
+
+# same, for the index list of the neurons that fired
+@inline function _spike_set!(x, last, spikes::AbstractVector{Int32}, t::Real, a::Real)
+    @inbounds for k in spikes
+        x[k] = a
+        last[k] = t
+    end
+end
+
+"""
     _initial_clamp!(W, initialized, Wmin, Wmax)
 
 Clamp all weights once, on the first plasticity step after the variables were

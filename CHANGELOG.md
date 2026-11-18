@@ -1,5 +1,37 @@
 # SNNModels changelog
 
+## 2.3.0
+
+New model `Multipod` (a soma with 1 to 64 dendrites, the field names of `Tripod`), the voltage delay of the vSTDP filters and the nearest-spike
+option of the triplet rule. Additive: existing models and rules are unchanged (results identical).
+
+### Improved
+
+- **`Multipod`**: AdEx soma (same `AdExParameter`, `PostSpike` and `Vspike` as `Tripod`) with `N_d` passive dendrites `d1..dN` (`1 <= N_d <= 64`) attached to the soma,
+  each with its own length (and optionally diameter; `ds = [400um, 150um => 3um, ...]`); cable constants from `create_dendrite`. It is `Tripod` with
+  the axial coupling taken over `N_d` dendrites: same equations, synapse machinery (`ReceptorSynapse`, `MultiReceptorSynapse`, or any five-argument synapse model; targets
+  `:s`, `:d1..:dN` in `SpikingNeuralNetworks.SpikingSynapse`), spike, backpropagation and refractory rules, both schemes (`HeunScheme` default, `PaperScheme` with
+  `ReceptorSynapse` only), Float32 and Float64. For `N_d = 2` it equals `Tripod` and `TripodPaper` bit for bit (`test/pop/multipod_tripod_equivalence.jl`,
+  `test/pop/multipod_multireceptor.jl`). Constructors: `Multipod(; param = MultipodParameter(ds = [...]), ...)`, `Multipod{D}(; ...)`,
+  `MultipodPaper(; N, lengths, physiology, d)`; `ndendrites(p)`. `DendNeuronParameter` accepts 1 to 64 dendrites (`Tripod` and `BallAndStick` raise an `ArgumentError`
+  for more than 2).
+- **Layout**: one concrete type per number of dendrites with named fields `d1..dN`, `v_d1..v_dN`, `synvars_d1..`, `receptors_d1..`; `SNNModels.Multipod1` to `Multipod8`
+  exist at load, `declare_multipod(D)` (exported, `1 <= D <= 64`) defines more. `load_model`, `load_data` and `SNNload` declare the types stored in a file before reading
+  it (needs JLD2 >= 0.6); other readers need `declare_multipod(D)` first, and `check_loaded_model` says so. Save/load in a fresh process, `monitor!`/`record`, threaded chunks,
+  Float32/Float64, `change_plasticity` onto `:d<k>` are tested (`test/pop/multipod*.jl`). Per neuron cost: 1.035 x `Tripod` at `N_d = 2` (1 thread), about 3.4 ns per extra dendrite.
+- **Dendrites switched off**: a dendrite of length 0 is isolated from the soma (`g_ax = 0`) and still integrated; `set_dendrite_length!(p, k, l; neurons, d)` sets it per neuron
+  (`Tripod`, `Multipod`, `BallAndStick`); connecting a synapse to a compartment disconnected in some neurons logs a warning. To save time use a population with fewer dendrites.
+- `vSTDPParameter` and `vSTDPDenseParameter` have the field `delay_uv` (default `0ms`): the low-pass filters `u` and `v` are driven by the postsynaptic potential `round(delay_uv / dt)`
+  steps earlier (delayed filtering of the Clopath et al. 2010 reference implementation and of NEST `delay_u_bars`); the potentiation keeps the current potential
+  (`test/syn/vstdp_delay.jl`).
+- `STDPTriplet` has the field `nearest::Bool = false`: with `nearest = true` a spike sets the traces to 1 (nearest-spike interaction of Pfister & Gerstner 2006) instead of adding 1
+  (`test/syn/stdp_triplet.jl`).
+- Voltage-based rules on a dendrite: a `SpikingSynapse` onto a compartment of a `Tripod`, `Multipod` or `BallAndStick` filters and thresholds the potential of that compartment
+  (documented in `vSTDPParameter`, tested in `test/syn/vstdp_tripod.jl`).
+- Conventions and implementation notes of the plasticity rules (units, trace scaling, update order, bounds, fragilities) are collected in the documentation page *Plasticity: conventions and implementation notes*
+  (https://juliasnn.github.io/SpikingNeuralNetworks.jl/dev/catalogue/plasticity_conventions/).
+- JLD2 compat is `0.6`.
+
 ## 2.2.0
 
 Receptor kinetics now integrated exactly (peak conductance = g0 at any dt; RESULTS CHANGE, migration rule below), plus the fixes

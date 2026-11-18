@@ -28,7 +28,7 @@ integrate!(p::AbstractPopulation, param::AbstractPopulationParameter, dt::Abstra
         "populations with Float64 state: $(_FLOAT64_POPULATIONS))"))
 
 # populations that have a Float64 model (`VFT = Vector{Float64}`); the error messages list them
-const _FLOAT64_POPULATIONS = "Identity, IF, AdEx, ExtendedIF, HH, IZ, MorrisLecar, Rate, WilsonCowan, Tripod, BallAndStick, " *
+const _FLOAT64_POPULATIONS = "Identity, IF, AdEx, ExtendedIF, HH, IZ, MorrisLecar, Rate, WilsonCowan, Tripod, BallAndStick, Multipod, " *
                              "Poisson, VariablePoisson, InhomogeneousPoisson"
 
 # Copy of a parametric parameter struct with its floating-point fields and type parameters converted to `T` (the methods of
@@ -147,7 +147,7 @@ include("wilsoncowan.jl")
     AbstractDendriteIF <: AbstractGeneralizedIF
 
 Supertype of the multicompartment populations (an adaptive exponential soma coupled to
-passive dendritic compartments): `Tripod` and `BallAndStick`. Connections to these
+passive dendritic compartments): `Tripod`, `BallAndStick` and `Multipod`. Connections to these
 populations select the compartment with the `target` argument of `synaptic_target`
 (e.g. `:s` for the soma, `:d` or `:d1`/`:d2` for the dendrites).
 """
@@ -157,10 +157,12 @@ include("multicompartment/dendneuron_parameter.jl")
 include("multicompartment/tripod.jl")
 include("multicompartment/tripod_paper.jl")
 include("multicompartment/ballandstick.jl")
+include("multicompartment/multipod.jl")
+include("multicompartment/multipod_paper.jl")
 
 ## Spike lists owned by the integrate-and-fire family (see `spike_index`)
 # A population type not listed here falls back to a new list per connection (correct, slower).
-const _OWNED_LIST_POPULATIONS = Union{IF,AdEx,ExtendedIF,HetRec,Tripod,BallAndStick,HH,IZ,MorrisLecar}
+const _OWNED_LIST_POPULATIONS = Union{IF,AdEx,ExtendedIF,HetRec,Tripod,BallAndStick,Multipod,HH,IZ,MorrisLecar}
 
 spike_index(p::_OWNED_LIST_POPULATIONS) = getfield(p, :spikes)
 

@@ -145,7 +145,7 @@ attach_driver!(::AbstractPopulation) = nothing
     spike_index(pop::AbstractPopulation)
 
 `SpikeIndex` used by a connection that reads the spikes of `pop`: a new scratch list by default, else the list `pop` keeps:
-- the integrate-and-fire family (`IF`, `AdEx`, `ExtendedIF`, `HetRec`, `Tripod`, `BallAndStick`, `HH`, `IZ`, `MorrisLecar`)
+- the integrate-and-fire family (`IF`, `AdEx`, `ExtendedIF`, `HetRec`, `Tripod`, `BallAndStick`, `Multipod`, `HH`, `IZ`, `MorrisLecar`)
   owns one list (`pop.spikes`). `sim!`/`train!` open it after `integrate!` and close it at the end of the step; inside
   this window the first consumer scans `fire` and later consumers reuse the list. Contract: nothing may write `pop.fire`
   between `integrate!` of `pop` and the end of the step. Outside the window every call rescans `fire`. A failed step is

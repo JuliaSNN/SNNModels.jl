@@ -81,6 +81,10 @@ end
     _ts("multicompartment_numerics", "pop/multicompartment_numerics.jl")
     _ts("tripod_21",     "pop/tripod_21.jl")
     _ts("tripod_parameter_real", "pop/tripod_parameter_real.jl")
+    _ts("multipod",      "pop/multipod.jl")
+    _ts("multipod_tripod_equivalence", "pop/multipod_tripod_equivalence.jl")
+    _ts("multipod_io",   "pop/multipod_io.jl")
+    _ts("multipod_multireceptor", "pop/multipod_multireceptor.jl")
 end
 
 # ── Stimuli ───────────────────────────────────────────────────────────────────
@@ -111,6 +115,9 @@ end
     _ts("lazy_traces",       "syn/lazy_traces.jl")
     _ts("lazy_traces_euler", "syn/lazy_traces_euler.jl")
     _ts("vstdp",       "syn/vstdp.jl")
+    _ts("vstdp_tripod", "syn/vstdp_tripod.jl")
+    _ts("vstdp_delay", "syn/vstdp_delay.jl")
+    _ts("stdp_triplet", "syn/stdp_triplet.jl")
     _ts("lazy_weights", "syn/lazy_weights.jl")
     _ts("precision",   "syn/precision.jl")
     _ts("precision_populations", "pop/precision_populations.jl")
