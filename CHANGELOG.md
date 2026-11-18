@@ -29,7 +29,7 @@ nearest-spike options of the vSTDP and triplet rules. Additive: existing models 
 New model `Multipod` (soma + N dendrites); no results change for the existing models.
 
 - **New population `Multipod`**: an AdEx soma (same `AdExParameter`, `PostSpike` and `Vspike` as `Tripod`) with `N_d` passive
-  dendrites `d1`, ..., `dN` (`1 <= N_d <= 8`) attached to the soma in a star. Each dendrite has its own length and optionally its own
+  dendrites `d1`, ..., `dN` (`1 <= N_d <= 64`; the types for 1 to 8 are defined at load, more with `declare_multipod`) attached to the soma in a star. Each dendrite has its own length and optionally its own
   diameter; `g_ax`, `g_m` and `C` come from `create_dendrite`, the derivation used by `Tripod`. It is `Tripod` with the sum of the
   axial currents taken over `N_d` dendrites: same equations (exponential term `+g_L ΔT exp((V_s - θ)/ΔT)`, as in `Tripod`), same
   synapse machinery (`ReceptorSynapse`/`MultiReceptorSynapse`, or any five-argument synapse model, on the soma and on each dendrite;
@@ -44,7 +44,7 @@ New model `Multipod` (soma + N dendrites); no results change for the existing mo
   `ds` entries are lengths, `(min, max)` ranges or `length => diameter`; `d` is one diameter or one per dendrite; only the star
   geometry is accepted. `MultipodPaper(; N, lengths, physiology = :human | :mouse, d = 4um, VFT, kwargs...)` is the preset with the
   parameters of `TripodPaper` and fixed lengths; with two lengths it equals `TripodPaper` with these lengths.
-- `DendNeuronParameter` accepts 1 to 8 dendrites (it raised an error above 2): 3 to 8 give `type = MultipodNeuron()` and the star
+- `DendNeuronParameter` accepts 1 to 64 dendrites (it raised an error above 2): 3 to 64 give `type = MultipodNeuron()` and the star
   `geometry`, and `Population(param)` builds a `Multipod`; 1 and 2 dendrites keep `BallAndStickNeuron()` / `TripodNeuron()` and their
   previous `geometry` default. `Tripod` and `BallAndStick` raise an `ArgumentError` for a parameter with more than two dendrites (the
   error that `DendNeuronParameter` raised before). `DendLength` also admits `Pair` (`length => diameter`); existing saved Tripod and
@@ -61,11 +61,46 @@ New model `Multipod` (soma + N dendrites); no results change for the existing mo
   of Poisson input on every compartment) gives for `Multipod` with 2 dendrites 1.035x (1 thread) and 1.029x (4 threads) the time of
   `Tripod` per neuron-step (`integrate!` alone: 0.99x, PaperScheme 1.05x), about 3.4 ns per compartment and neuron-step for 2, 4 and 6
   dendrites, and 8-10 % less than an array layout with the same arithmetic (1 thread).
+- **More than 8 dendrites.** `declare_multipod(D)` (exported, `1 <= D <= 64`, idempotent, thread-safe) defines the concrete type
+  `SNNModels.Multipod<D>` at run time with the same generation as the preloaded 1 to 8. `Multipod(; param)` and `Multipod{D}(; ...)`
+  call it themselves. `load_model`, `load_data` and `SNNload` list the type names stored in the JLD2 file (its type table, JLD2
+  >= 0.6) and declare every `Multipod<D>` found before reading, in the latest world (`invokelatest`), so a file with a
+  `Multipod12` loads in a fresh process with only `using SNNModels`. With a JLD2 that cannot list the types (0.5), the
+  placeholders of a first read are declared and the file is read again. Other readers (`JLD2.load`, `DrWatson.load`) still need the
+  declaration: `check_loaded_model` then says "The file contains a Multipod with 12 dendrites whose type is not defined in this
+  session; call SNNModels.declare_multipod(12) before loading, then load again." (a placeholder of a preloaded type keeps the
+  older-layout message). Tested in fresh processes for D = 12: automatic load, the fallback, and the message followed by
+  `declare_multipod` and `JLD2.load`; D <= 8 loads with nothing.
+- **Disconnected dendrites.** A dendrite of length 0 (in `ds`, or per neuron with the new `set_dendrite_length!(p, k, l; neurons, d)`,
+  exported, for `Tripod`, `BallAndStick` and `Multipod`; it recomputes the cable constants of dendrite `k` of the given neurons
+  with `create_dendrite`) has `g_ax = 0`, `g_m = 1` nS, `C = 1` pF: it is still integrated, isolated from the soma (1 ms leak to its
+  `El`), keeps its receptors, and its inputs move only that dendrite. A `SpikingSynapse` onto a compartment that is disconnected in
+  some neurons now logs a warning with their number (Tripod and BallAndStick included; nothing else changes for them). The soma
+  and the other dendrites follow exactly the population without that dendrite: `[400um, 150um, 0um, 0um]` gives Tripod bit for
+  bit, and in a heterogeneous population each neuron equals the one-neuron population with its configuration (tested with
+  HeunScheme and PaperScheme). A disconnected dendrite costs the same time as a connected one, and a per-neuron mask cannot
+  save it: `bench/multipod_inactive_bench.jl` (N = 2000, Float32, 1 thread, `integrate!`, ns per neuron-step) gives 22.99 /
+  23.37 / 22.75 for 6 dendrites with 0 / 2 / 4 disconnected in all neurons and 23.42 with 4 disconnected in half of the neurons,
+  against 16.40 for `Multipod{4}` and 9.88 for `Multipod{2}`; a prototype that skips the block of a disconnected dendrite per
+  neuron breaks the vectorisation of the neuron loop and takes 59.58 (all connected, 2.6x) to 37.74 (4 disconnected). Populations
+  with fewer dendrites (e.g. `Multipod{2}` for interneurons) are the way to save the time; the library has no mask.
+- **MultiReceptorSynapse on the compartments.** `synaptic_target` of the dendritic populations raises an `ArgumentError` that lists
+  the inputs of the compartment for a receptor group it does not have (it was a field error). Tested
+  (`test/pop/multipod_multireceptor.jl`): with `MultiReceptorSynapse` on soma (AMPA, GABAa groups) and dendrites (AMPA, NMDA, GABAa,
+  GABAb groups) `Multipod` with two dendrites equals `Tripod` bit for bit on the audit protocols (HeunScheme, Float32 and Float64,
+  maximum difference 0); a `MultiReceptorSynapse` whose receptors are those of `TripodSomaSynapse`/`TripodDendSynapse` with
+  targets `:glu`/`:gaba` gives the trajectories of the `ReceptorSynapse` (`exact = true`, same NMDA block) bit for bit, in `Tripod`
+  and `Multipod` (both apply the same exact one-step update per receptor and the same current; `ReceptorSynapse` with
+  `exact = false`, the legacy update with `decay`, has no `MultiReceptorSynapse` counterpart, and `PaperScheme` therefore
+  accepts `ReceptorSynapse` only); with 3 and 5 dendrites, receptor-group targets deliver to their compartment and receptor only,
+  `monitor!(M, [:g], variables = :synvars_d<k>)` records each dendrite, threaded `sim!`/`train!` equal the serial runs, Float64 runs,
+  save/load works in the same session and in a fresh process, and `change_plasticity` adds vSTDP to a synapse onto `:NMDA` of `:d1`.
 - Tests: `test/pop/multipod.jl` (construction for 1 to 6 dendrites, parameter validation, cable constants against the formulas,
   receptor targets, disconnected extra dendrites leave Tripod unchanged bit for bit, PaperScheme spike sequence, precision, vSTDP onto
-  `:d3`, threading invariance, balanced networks with 3 and 5 dendrites), `test/pop/multipod_tripod_equivalence.jl`,
-  `test/pop/multipod_io.jl`.
-- Text for the model catalogue of the SpikingNeuralNetworks documentation: "`Multipod`: AdEx soma with 1 to 8 passive dendrites in a
+  `:d3`, threading invariance, balanced networks with 3 and 5 dendrites, `declare_multipod`, disconnected dendrites and
+  heterogeneous populations), `test/pop/multipod_tripod_equivalence.jl`, `test/pop/multipod_io.jl` (with the D = 12 fresh-process
+  loads), `test/pop/multipod_multireceptor.jl`.
+- Text for the model catalogue of the SpikingNeuralNetworks documentation: "`Multipod`: AdEx soma with 1 to 64 passive dendrites in a
   star (`d1`, ..., `dN`), each with its own length and diameter; the Tripod equations, synapses, spike rules and schemes for any
   number of dendrites (`Multipod` with two dendrites is `Tripod`, bit for bit). `MultipodParameter` sets the morphology,
   `MultipodPaper` the parameters of the published Tripod code (Quaresima et al. 2023). Connections target `:s`, `:d1`, ..., `:dN`."

@@ -12,8 +12,10 @@ Tag of a `DendNeuronParameter` (field `type`) that `Population(param)` builds as
 """
 struct MultipodNeuron <: AbstractDendriticTree end
 
-# Largest number of dendrites of a `Multipod` (one concrete type per number, generated at load time).
-const MULTIPOD_MAX_DENDRITES = 8
+# Largest number of dendrites of a `Multipod` (one concrete type per number of dendrites, see `declare_multipod`), and the
+# numbers whose types are defined when SNNModels is loaded.
+const MULTIPOD_MAX_DENDRITES = 64
+const MULTIPOD_PRELOADED = 8
 
 """
     DendNeuronParameter(; ds = [(200um, 400um), (200um, 400um)], physiology = human_dend, d = 4um, El_dend = nothing,
@@ -174,8 +176,10 @@ end
 Target the receptor buffer `post.receptors_<target>.<sym>` of compartment `target` (`:s`,
 `:d1`, `:d2` for `Tripod`; `:s`, `:d` for `BallAndStick`; `:s`, `:d1`, ..., `:dN` for `Multipod`); `sym` is mapped with
 `get_synapse_symbol` (`:ge`/`:he` -> `:glu`, `:gi`/`:hi` -> `:gaba`). Returns the buffer and
-`post.v_<target>`. Records `:sym => "<sym>_<target>"` in `targets`. An unknown `target`
-raises an `ArgumentError`.
+`post.v_<target>`. Records `:sym => "<sym>_<target>"` in `targets`. An unknown `target`, or a receptor input that the synapse
+model of that compartment does not have (e.g. `:AMPA` with a `ReceptorSynapse`), raises an `ArgumentError`. A dendrite of
+length 0 (disconnected, see `set_dendrite_length!`) in some or all neurons gives a warning: the inputs of these neurons on that
+dendrite do not reach the soma.
 """
 function synaptic_target(
     targets::Dict,
@@ -190,12 +194,25 @@ function synaptic_target(
         throw(ArgumentError("unknown compartment `$target` for $(nameof(typeof(post))); valid targets: $(comps)"))
     end
     sym = get_synapse_symbol(post.soma_syn, sym)
-    g = getfield(getfield(post, receps), sym)
+    buffers = getfield(post, receps)
+    hasproperty(buffers, sym) ||
+        throw(ArgumentError("compartment `$target` of $(nameof(typeof(post))) has no receptor input `$sym`; inputs: $(keys(buffers))"))
+    g = getfield(buffers, sym)
     v_post = getfield(post, v)
+    _warn_disconnected(post, target)
     push!(targets, :sym => "$(sym)_$target")
     push!(targets, :g => post.id)
     return g, v_post
 end
 
+# Warning for a connection onto a dendrite that is disconnected (length 0, `g_ax = 0`) in some neurons.
+function _warn_disconnected(post, target::Symbol)
+    (hasfield(typeof(post), target) && getfield(post, target) isa Dendrite) || return nothing
+    n_off = count(<=(0), getfield(post, target).l)
+    n_off == 0 && return nothing
+    @warn "$n_off of $(post.N) neurons of $(post.name) have dendrite `$target` disconnected (length 0): their inputs on " *
+          "`$target` change the potential of that dendrite only and do not reach the soma"
+    return nothing
+end
 
 export BallAndStickParameter, TripodParameter, DendNeuronParameter

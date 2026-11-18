@@ -12,6 +12,8 @@
 #      an array-layout variant of Multipod (dendrites in Vectors, number of dendrites known at run time only; the layout that
 #      was the fallback of the design). The array variant is checked to give the same state bit for bit before it is timed.
 # With -t 4 the populations run in threaded chunks (`neurons_per_thread = 250`); with -t 1 on the serial path.
+# Disconnected (length-0) dendrites and the per-neuron mask prototype: bench/multipod_inactive_bench.jl (separate process: it
+# redefines library methods).
 
 using SNNModels
 using Random

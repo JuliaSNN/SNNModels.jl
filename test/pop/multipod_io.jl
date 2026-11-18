@@ -161,3 +161,69 @@ _mpio_digest(M) = string(hash((M.v_s, M.w_s, M.v_d1, M.v_d2, M.v_d3, M.v_d4, M.t
     m2 = compose(model, (; extra = IF(N = 3, name = "extra")); silent = true)
     @test m2.pop.M === model.pop.M
 end
+
+# ---------------------------------------------------------------------------------------------------------------------------------
+# Multipods with more than 8 dendrites: types declared at run time (declare_multipod)
+# ---------------------------------------------------------------------------------------------------------------------------------
+
+# run `script` in a fresh Julia process with the test environment; returns its standard output
+_mpio_fresh(script) = read(pipeline(`$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) -t 1 -e $script`;
+                                    stderr = devnull), String)
+
+@testset "Multipod with 12 dendrites: save here, load in a fresh process" begin
+    dir = mktempdir()
+    info = (case = "multipod12",)
+    M = Multipod(N = 6, name = "M", param = MultipodParameter(ds = [Float32((100 + 25k) * um) for k in 1:12]))   # declares Multipod12
+    M.I .= 700f0
+    M.receptors_d12.glu .= 3f0
+    for _ in 1:200
+        SNNModels.integrate!(M, M.param, 0.1f0)
+    end
+    model = compose(; M, silent = true)
+    save_model(; model, path = dir, name = "m12", info)
+    file = SNNpath(dir, "m12", info, :model, 0)
+    expected = string(hash((M.v_s, M.v_d12, M.w_s)))
+    load_expr = "SNNModels.load_model($(repr(dir)), \"m12\", $(repr(info))).model.pop.M"
+    digest = "hash((M.v_s, M.v_d12, M.w_s))"
+
+    # (1) load_model reads the type table of the file and declares Multipod12 itself
+    out = _mpio_fresh("""
+        using SNNModels
+        M = $load_expr
+        print("RESULT ", nameof(typeof(M)), " ", ndendrites(M), " ", $digest)
+        """)
+    @test strip(last(split(out, "RESULT "))) == "Multipod12 12 $expected"
+
+    # (2) without a readable type table (JLD2 < 0.6) the placeholders of a first read are declared and the file is read again
+    out = _mpio_fresh("""
+        using SNNModels
+        @eval SNNModels _file_multipods(file::AbstractString) = nothing
+        M = $load_expr
+        print("RESULT ", nameof(typeof(M)), " ", $digest)
+        """)
+    @test strip(last(split(out, "RESULT "))) == "Multipod12 $expected"
+
+    # (3) another reader (JLD2.load) gets a placeholder; check_loaded_model names the declaration; after it the file loads
+    out = _mpio_fresh("""
+        using SNNModels, JLD2
+        x = JLD2.load($(repr(file)))
+        msg = try; check_loaded_model(x; what = "file"); "no error"; catch e; e.msg; end
+        println("MESSAGE ", msg)
+        declare_multipod(12)
+        M = JLD2.load($(repr(file)))["model"].pop.M
+        print("RESULT ", nameof(typeof(M)), " ", $digest)
+        """)
+    msg = strip(match(r"MESSAGE (.*)", out).captures[1])
+    @test msg == "The file contains a Multipod with 12 dendrites whose type is not defined in this session; " *
+                 "call SNNModels.declare_multipod(12) before loading, then load again."
+    @test strip(last(split(out, "RESULT "))) == "Multipod12 $expected"
+
+    # in this session: the message for an undeclared number of dendrites, the generic one for a preloaded type
+    ph(name) = SNNModels.JLD2.ReconstructedMutable{name,(:a,),Tuple{Int}}(Any[1])
+    nested = (; model = (; pop = (; M = ph(Symbol("Multipod40{Vector{Float32}}")))))
+    err = try; check_loaded_model(nested); nothing; catch e; e; end
+    @test err isa ArgumentError && occursin("Multipod with 40 dendrites", err.msg) && occursin("declare_multipod(40)", err.msg)
+    err = try; check_loaded_model(ph(:Multipod4)); nothing; catch e; e; end
+    @test err isa ArgumentError && occursin("1.9.1", err.msg) && !occursin("declare_multipod", err.msg)
+    @test SNNModels._file_multipods(file) == [12]
+end
