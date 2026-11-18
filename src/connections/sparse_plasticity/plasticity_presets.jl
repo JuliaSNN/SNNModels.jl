@@ -27,10 +27,10 @@ const _BONO_VSTDP = (a_ltd = 5.0e-4 / 2.5, a_ltp = 1.5e-3 / 2.5, θ_ltd = -69.0,
     _vstdp_preset(set; convention, dt, dense, kwargs...)
 
 Build `vSTDPParameter` (or `vSTDPDenseParameter` with `dense = true`) from a parameter set of the Tripod code.
-`convention = :tripod` converts the amplitudes so that the library rule computes the update of the Tripod code
-at time step `dt` (see `lkd_vstdp`); `convention = :verbatim` copies them. Keyword arguments override fields.
+`convention = :verbatim` (default) copies the amplitudes; `convention = :tripod` converts them so that the library rule
+computes the update of the Tripod code at time step `dt` (see `lkd_vstdp`). Keyword arguments override fields.
 """
-function _vstdp_preset(set::NamedTuple; convention::Symbol = :tripod, dt::Real = 0.1ms, dense::Bool = false, kwargs...)
+function _vstdp_preset(set::NamedTuple; convention::Symbol = :verbatim, dt::Real = 0.1ms, dense::Bool = false, kwargs...)
     # amplitudes in the convention of the library rule
     if convention === :tripod
         dt > 0 || throw(ArgumentError("the :tripod convention needs dt > 0"))
@@ -50,22 +50,23 @@ end
 
 const _VSTDP_PRESET_CONVENTION = raw"""
 # Convention
-The values are those of the Tripod plasticity code (Quaresima et al., `STDP_params.jl`). That code integrates
-the rule of [`vSTDPParameter`](@ref) with two other scalings, both converted by `convention = :tripod`
-(default) at the time step `dt` (default 0.1 ms, the step of the Tripod code):
+The values are those of the Tripod plasticity code (Quaresima et al., `STDP_params.jl`). By default
+(`convention = :verbatim`) the amplitudes are copied (`A_LTD = a⁻`, `A_LTP = a⁺`), the convention of
+Clopath et al. (2010) and Litwin-Kumar & Doiron (2014): per-spike depression without `dt`, trace jump
+``1/τ_x``. The Tripod code integrates the rule with two other scalings; `convention = :tripod` converts the
+amplitudes to the library rule at the time step `dt` (default 0.1 ms, the step of the Tripod code):
 - the presynaptic trace jumps by 1 and decays in the step of the spike, ``x^{T} = (τ_x - dt)\, x``, so
   `A_LTP = a⁺ (τx - dt)`;
 - the depression at a presynaptic spike is ``dt\, a^-\, [u - θ_{LTD}]_+``, so `A_LTD = dt a⁻`.
-With these values and the same `dt` the library rule computes the update of the Tripod code. With
-`convention = :verbatim` the amplitudes are copied (`A_LTD = a⁻`, `A_LTP = a⁺`), the convention of
-Clopath et al. (2010) and Litwin-Kumar & Doiron (2014): per-spike depression without `dt`, trace jump
-``1/τ_x``. In both conventions `delay_uv` is the delay ``ε`` of the parameter set.
+With these values and the same `dt` the library rule computes the update of the Tripod code: running the
+numbers of the Tripod code needs `convention = :tripod`. In both conventions
+`delay_uv` is the delay ``ε`` of the parameter set.
 
 `dense = true` returns [`vSTDPDenseParameter`](@ref); keyword arguments override any field (e.g. `Wmax`, `FT`).
 """
 
 @doc """
-    lkd_vstdp(; convention = :tripod, dt = 0.1ms, dense = false, kwargs...)
+    lkd_vstdp(; convention = :verbatim, dt = 0.1ms, dense = false, kwargs...)
 
 Voltage-based STDP (Clopath et al. 2010) with the amplitudes, thresholds and time constants of the
 excitatory synapses of Litwin-Kumar & Doiron (2014) and the weight bounds of the Tripod code:
@@ -95,7 +96,7 @@ syn = SNN.SpikingSynapse(E, P, :ge; conn = (p = 0.2, μ = 2.0), LTPParam = SNN.l
 lkd_vstdp(; kwargs...) = _vstdp_preset(_LKD_VSTDP; kwargs...)
 
 @doc """
-    clopath_vstdp_visualcortex(; convention = :tripod, dt = 0.1ms, dense = false, kwargs...)
+    clopath_vstdp_visualcortex(; convention = :verbatim, dt = 0.1ms, dense = false, kwargs...)
 
 Voltage-based STDP (Clopath et al. 2010) with the visual-cortex parameter set of the Tripod code:
 `a⁻ = 14e-5/2.5` pA/mV, `a⁺ = 8e-5/2.5` pA/mV², `θ_LTD = -70.6` mV, `θ_LTP = +25.3` mV, `τu = 10` ms,
@@ -113,7 +114,7 @@ voltage-based STDP with homeostasis. Nature Neuroscience 13, 344-352.
 clopath_vstdp_visualcortex(; kwargs...) = _vstdp_preset(_CLOPATH_VC_VSTDP; kwargs...)
 
 @doc """
-    bono_vstdp(; convention = :tripod, dt = 0.1ms, dense = false, kwargs...)
+    bono_vstdp(; convention = :verbatim, dt = 0.1ms, dense = false, kwargs...)
 
 Voltage-based STDP (Clopath et al. 2010) for dendritic synapses, the parameter set of the Tripod
 dendrite simulations after Bono & Clopath (2017): `a⁻ = 5e-4/2.5` pA/mV, `a⁺ = 1.5e-3/2.5` pA/mV²,

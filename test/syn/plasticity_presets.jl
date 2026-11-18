@@ -34,9 +34,18 @@ include(joinpath(@__DIR__, "plasticity_presets_ref.jl"))
     @test p.A_LTD ≈ 2.0f-4 && p.A_LTP ≈ 6.0f-4
     @test (p.θ_LTD, p.θ_LTP, p.τu, p.τv, p.τx, p.delay_uv) == (-69.0f0, -15.0f0, 35.0f0, 35.0f0, 15.0f0, 1.0f0)
 
+    # default convention: the amplitudes are copied
+    for (f, set) in _PRESETS
+        p = f()
+        @test p.A_LTD == Float32(set.a_ltd) && p.A_LTP == Float32(set.a_ltp)
+        @test p.delay_uv == Float32(set.ε)
+        @test f(dense = true).A_LTD == p.A_LTD
+    end
+    @test lkd_vstdp().A_LTD == 8.0f-4 && lkd_vstdp().A_LTP == 1.4f-3
+
     # :tripod conversion at dt: A_LTD = dt a⁻, A_LTP = a⁺ (τx - dt)
     for (f, set) in _PRESETS, dt in (0.1, 0.05)
-        p = f(dt = dt)
+        p = f(convention = :tripod, dt = dt)
         @test p isa vSTDPParameter
         @test p.A_LTD ≈ Float32(dt * set.a_ltd) rtol = 1.0e-6
         @test p.A_LTP ≈ Float32(set.a_ltp * (set.τx - dt)) rtol = 1.0e-6
@@ -94,7 +103,7 @@ end
     @test count(>(25.3f0), V) > 100                   # every θ_LTP is crossed
     for (f, set) in _PRESETS, dense in (false, true)
         # far bounds: the Tripod code clamps after the whole step, the library after LTD and after LTP
-        rule = f(; dense, Wmin = -100.0, Wmax = 100.0)
+        rule = f(; convention = :tripod, dense, Wmin = -100.0, Wmax = 100.0)
         D = round(Int, set.ε / _PDT)
         pre, post = IF(N = npre), IF(N = npost)
         syn = SpikingSynapse(pre, post, :ge; conn = fill(1.0f0, npost, npre), LTPParam = rule)
