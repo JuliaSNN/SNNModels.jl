@@ -111,7 +111,7 @@ is `TripodPaper` with these lengths (bit for bit; `lengths = [400um, 150um]`, th
 `:distal_proximal`). Use `dt = 0.1ms` in `sim!`/`train!` (other steps give a warning, once).
 
 # Keywords
-- `lengths`: dendrite lengths (cm, e.g. `[400um, 250um, 150um]`), `1 <= length(lengths) <= 8`; `0um` gives a disconnected
+- `lengths`: dendrite lengths (cm, e.g. `[400um, 250um, 150um]`), `1 <= length(lengths) <= 64`; `0um` gives a disconnected
   dendrite (as `soma_only` of `TripodPaper`).
 - `physiology::Symbol = :human`: `:human` (`human_dend`, `TripodDendSynapsePaper`) or `:mouse` (`mouse_dend`,
   `TripodDendSynapsePaperMouse`).

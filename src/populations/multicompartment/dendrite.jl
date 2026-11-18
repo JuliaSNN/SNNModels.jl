@@ -312,3 +312,59 @@ export create_dendrite,
     all_lengths
 
 export G_axial, G_mem, C_mem
+
+# ---------------------------------------------------------------------------------------------------------------------------------
+# Per-neuron dendrite geometry of an existing population
+# ---------------------------------------------------------------------------------------------------------------------------------
+
+"""
+    set_dendrite_length!(p, k::Integer, l; neurons = 1:p.N, d = nothing) -> p
+
+Set the length of dendrite `k` (`d1`, `d2`, ... of `Tripod` and `Multipod`; `k = 1` is `d` of `BallAndStick`) of the neurons
+`neurons` of population `p` to `l` (cm, e.g. `250um`, or a `(min, max)` range drawn per neuron), and recompute its cable constants
+with `create_dendrite` (the physiology of `p.param`, the diameter `d`, by default the current diameter of each neuron). The leak
+reversal `El` and the state are not changed. `p.param.ds` keeps the lengths given at construction.
+
+`l = 0` disconnects the dendrite of these neurons: `g_ax = 0`, `g_m = 1` nS, `C = 1` pF and `l = -1` (the values of
+`create_dendrite` for `l <= 0`). Such a dendrite is still integrated, isolated from the soma: it relaxes to its leak reversal
+with a time constant of 1 ms, its synaptic inputs and `I_d` change its potential but do not reach the soma, and the soma does
+not see it (its axial current is 0). The cost per neuron-step is the one of a connected dendrite; a population without these
+dendrites (`Multipod` with fewer dendrites, e.g. `Multipod{2}` for interneurons) is the way to save it.
+
+# Example
+```julia
+using SpikingNeuralNetworks
+SNN.@load_units
+M = SNN.Multipod(N = 100, param = SNN.MultipodParameter(ds = [400um, 300um, 200um, 150um]))
+SNN.set_dendrite_length!(M, 4, 0um; neurons = 51:100)     # neurons 51-100: three dendrites
+```
+"""
+function set_dendrite_length!(p::AbstractDendriteIF, k::Integer, l; neurons = 1:Int(p.N), d = nothing)
+    dend = getfield(p, _dendrite_field(p, k))
+    FT = eltype(dend.gax)
+    physiology = p.param.physiology
+    for i in neurons
+        di = d === nothing ? _stored_diameter(dend.d[i]) : d
+        geo = FT === Float32 ? create_dendrite(l; d = di, physiology) : _create_dendrite_decimal(l; d = di, physiology)
+        dend.l[i] = geo.l
+        dend.d[i] = geo.d
+        dend.C[i] = geo.C
+        dend.gax[i] = geo.gax
+        dend.gm[i] = geo.gm
+    end
+    return p
+end
+
+# the diameter stored in a Dendrite, in the Float32 units of the arguments of `create_dendrite`
+_stored_diameter(x::Float32) = x
+_stored_diameter(x::Real) = Float32(x)
+
+# Name of the field of dendrite `k` (`:d1`, `:d2`, ...; `:d` for a population with a single dendrite field `d`).
+function _dendrite_field(p, k::Integer)
+    name = Symbol(:d, k)
+    hasfield(typeof(p), name) && getfield(p, name) isa Dendrite && return name
+    k == 1 && hasfield(typeof(p), :d) && getfield(p, :d) isa Dendrite && return :d
+    throw(ArgumentError("$(nameof(typeof(p))) has no dendrite $k"))
+end
+
+export set_dendrite_length!

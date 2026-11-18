@@ -62,15 +62,42 @@ end
     @test ndendrites(Multipod(N = 2)) == 3                                 # the default: three dendrites of 200-400 um
     @test Multipod(N = 2).d3.l[1] >= 200um - 1f-6
     @test Population(DendNeuronParameter(ds = [300um, 300um, 300um, 300um]); N = 2) isa Multipod{4}
-    @test SNNModels.MULTIPOD_MAX_DENDRITES == 8 && Multipod{8}(N = 1) isa Multipod{8}
+    @test SNNModels.MULTIPOD_PRELOADED == 8 && Multipod{8}(N = 1) isa Multipod{8}
+end
+
+@testset "Multipod with more than 8 dendrites: declare_multipod" begin
+    @test SNNModels.MULTIPOD_MAX_DENDRITES == 64
+    # declared on demand by the constructors, idempotent
+    M = Multipod(N = 3, param = MultipodParameter(ds = fill(300um, 12)))
+    @test M isa Multipod{12} && nameof(typeof(M)) === :Multipod12 && hasfield(typeof(M), :v_d12)
+    @test declare_multipod(12) === typeof(M).name.wrapper
+    @test declare_multipod(12) === declare_multipod(12)
+    @test declare_multipod(3) === SNNModels.Multipod3                         # a preloaded type is returned as it is
+    T20 = declare_multipod(20)
+    @test invokelatest(T20; N = 2, param = MultipodParameter(ds = fill(200um, 20))) isa Multipod{20}
+    @test Multipod{9}(N = 1) isa Multipod{9}
+    @test Population(DendNeuronParameter(ds = fill(300um, 10)); N = 2) isa Multipod{10}
+    @test_throws ArgumentError declare_multipod(0)
+    @test_throws ArgumentError declare_multipod(65)
+    # it integrates and connects like the others
+    M.I .= 800f0
+    M.receptors_d12.glu .= 5f0
+    for _ in 1:300
+        SNNModels.integrate!(M, M.param, 0.1f0)
+    end
+    @test all(isfinite, M.v_s) && maximum(M.v_d12) > maximum(M.v_d11) - 1f-3
+    @test SpikingSynapse(IF(N = 2), M, :glu, :d12; conn = (p = 1.0, μ = 1.0)).g === M.receptors_d12.glu
+    # concurrent declarations of the same type give one type
+    Ts = fetch.([Threads.@spawn declare_multipod(30) for _ in 1:8])
+    @test all(T -> T === Ts[1], Ts)
 end
 
 @testset "Multipod parameters: validation and backward compatibility" begin
     # number of dendrites
     @test_throws ArgumentError MultipodParameter(ds = [])
-    @test_throws ArgumentError MultipodParameter(ds = fill(200um, 9))
-    @test_throws ErrorException DendNeuronParameter(ds = fill(200um, 9))
-    @test_throws ArgumentError Multipod{9}(N = 1)
+    @test_throws ArgumentError MultipodParameter(ds = fill(200um, 65))
+    @test_throws ErrorException DendNeuronParameter(ds = fill(200um, 65))
+    @test_throws ArgumentError Multipod{65}(N = 1)
     # star topology only
     @test_throws ArgumentError MultipodParameter(ds = [200um, 200um, 200um], geometry = [(:s => :d1), (:d1 => :d2), (:s => :d3)])
     @test_throws ArgumentError MultipodParameter(ds = [200um, 200um, 200um], geometry = [(:s => :d1), (:s => :d2)])
@@ -166,6 +193,102 @@ end
             @test T.v_s == M.v_s && T.v_d1 == M.v_d1 && T.v_d2 == M.v_d2 && T.w_s == M.w_s && T.fire == M.fire
         end
     end
+end
+
+@testset "Disconnected dendrites (length 0): semantics" begin
+    M = Multipod(N = 2, param = MultipodParameter(ds = [300um, 300um, 0um]))
+    @test all(==(0), M.d3.gax) && all(==(1), M.d3.gm) && all(==(1), M.d3.C) && all(==(-1), M.d3.l)
+    _mp_rest!(M)
+    # the isolated dendrite is integrated: from -40 mV it relaxes to El with τ = C / gm = 1 ms
+    M.v_d3 .= -40f0
+    SNNModels.integrate!(M, M.param, 0.1f0)
+    @test M.v_d3[1] ≈ -70.6 + 30.6 * exp(-0.1) rtol = 1e-3
+    # a synapse onto it is accepted with a warning; its input moves d3 only
+    pre = IF(N = 2)
+    @test_logs (:warn, r"2 of 2 neurons .* dendrite `d3` disconnected") SpikingSynapse(pre, M, :glu, :d3; conn = (p = 1.0, μ = 1.0))
+    @test_logs SpikingSynapse(pre, M, :glu, :d2; conn = (p = 1.0, μ = 1.0))      # connected dendrite: no warning
+    A = Multipod(N = 2, param = MultipodParameter(ds = [300um, 300um, 0um])); _mp_rest!(A)
+    B = deepcopy(A)
+    A.receptors_d3.glu .= 50f0
+    for _ in 1:500
+        SNNModels.integrate!(A, A.param, 0.1f0)
+        SNNModels.integrate!(B, B.param, 0.1f0)
+    end
+    @test A.v_s == B.v_s && A.v_d1 == B.v_d1 && A.v_d2 == B.v_d2 && A.v_d3 != B.v_d3
+    # set_dendrite_length!: the values of create_dendrite, in both precisions, and back
+    for VFT in (Vector{Float32}, Vector{Float64})
+        FT = eltype(VFT)
+        P = Multipod(N = 4, VFT = VFT, param = MultipodParameter(ds = [400um, 300um, 200um]))
+        ref = Multipod(N = 4, VFT = VFT, param = MultipodParameter(ds = [400um, 250um, 0um]))
+        set_dendrite_length!(P, 2, 250um)
+        set_dendrite_length!(P, 3, 0um; neurons = 2:3)
+        @test P.d2.gax == ref.d2.gax && P.d2.C == ref.d2.C && P.d2.gm == ref.d2.gm && P.d2.l == ref.d2.l
+        @test P.d3.gax[2:3] == ref.d3.gax[2:3] && P.d3.l[2:3] == ref.d3.l[2:3] && P.d3.gax[1] > 0
+        set_dendrite_length!(P, 3, 200um; neurons = 2:3)
+        @test all(==(P.d3.gax[1]), P.d3.gax)
+        set_dendrite_length!(P, 1, 400um; d = 3um)
+        @test P.d1.gax[1] ≈ (3 / 4)^2 * ref.d1.gax[1] rtol = 1e-5
+    end
+    @test_throws ArgumentError set_dendrite_length!(M, 4, 100um)
+    T = Tripod(N = 2); set_dendrite_length!(T, 2, 0um; neurons = 1:1)
+    @test T.d2.gax[1] == 0 && T.d2.gax[2] > 0
+    B1 = BallAndStick(N = 2); set_dendrite_length!(B1, 1, 0um)
+    @test all(==(0), B1.d.gax)
+end
+
+# Each neuron of a heterogeneous population follows the population of one neuron with its configuration (bit for bit); the
+# neurons with d3, d4 disconnected follow Tripod.
+@testset "Heterogeneous population: per-neuron disconnected dendrites ($scheme)" for scheme in (:heun, :paper)
+    N = 12
+    lengths = [400um, 150um, 300um, 250um]
+    configs = [isodd(i) ? (3, 4) : (i % 4 == 0 ? (2,) : ()) for i in 1:N]       # dendrites off, per neuron
+    build(n) = scheme === :paper ? MultipodPaper(N = n, lengths = lengths) : Multipod(N = n, param = MultipodParameter(ds = lengths))
+    P = build(N)
+    for i in 1:N, k in configs[i]
+        set_dendrite_length!(P, k, 0um; neurons = i:i)
+    end
+    _mp_rest!(P)
+    singles = map(1:N) do i
+        Q = build(1)
+        foreach(k -> set_dendrite_length!(Q, k, 0um), configs[i])
+        _mp_rest!(Q)
+    end
+    tripods = [scheme === :paper ? TripodPaper(N = 1, config = :distal_proximal) :
+               Tripod(N = 1, param = TripodParameter(ds = [400um, 150um])) for i in 1:N if isodd(i)]
+    foreach(_mp_rest!, tripods)
+    # per-neuron inputs: Poisson events on soma, d1, d3 and a current step
+    rng = Xoshiro(17)
+    X = [rand(rng) < 0.03 ? 3f0 * rand(rng, Float32) : 0f0 for _ in 1:3, _ in 1:N, _ in 1:4000]
+    current(tt, i) = 50 <= tt * 0.1 < 250 ? 300f0 + 60f0 * i : 0f0
+    ok = true
+    for tt in 1:4000
+        for i in 1:N
+            P.receptors_s.glu[i] = X[1, i, tt]; P.receptors_d1.glu[i] = X[2, i, tt]; P.receptors_d3.glu[i] = X[3, i, tt]
+            P.I[i] = current(tt, i)
+            Q = singles[i]
+            Q.receptors_s.glu[1] = X[1, i, tt]; Q.receptors_d1.glu[1] = X[2, i, tt]; Q.receptors_d3.glu[1] = X[3, i, tt]
+            Q.I[1] = current(tt, i)
+            SNNModels.integrate!(Q, Q.param, 0.1f0)
+        end
+        for (j, i) in enumerate(1:2:N)
+            Tr = tripods[j]
+            Tr.receptors_s.glu[1] = X[1, i, tt]; Tr.receptors_d1.glu[1] = X[2, i, tt]   # d3 is off: its input is not seen
+            Tr.I[1] = current(tt, i)
+            SNNModels.integrate!(Tr, Tr.param, 0.1f0)
+        end
+        SNNModels.integrate!(P, P.param, 0.1f0)
+        for i in 1:N
+            Q = singles[i]
+            ok &= P.v_s[i] == Q.v_s[1] && P.w_s[i] == Q.w_s[1] && P.tabs[i] == Q.tabs[1] && P.fire[i] == Q.fire[1]
+            ok &= all(getfield(P, Symbol(:v_d, k))[i] == getfield(Q, Symbol(:v_d, k))[1] for k in 1:4)
+        end
+        for (j, i) in enumerate(1:2:N)
+            ok &= P.v_s[i] == tripods[j].v_s[1] && P.v_d1[i] == tripods[j].v_d1[1] && P.v_d2[i] == tripods[j].v_d2[1] &&
+                  P.w_s[i] == tripods[j].w_s[1]
+        end
+    end
+    @test ok
+    @test any(P.w_s .> 0)                                     # the run contains spikes
 end
 
 @testset "Multipod: symmetric dendrites with the same input stay equal" begin

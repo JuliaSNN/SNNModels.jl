@@ -84,6 +84,7 @@ end
     _ts("multipod",      "pop/multipod.jl")
     _ts("multipod_tripod_equivalence", "pop/multipod_tripod_equivalence.jl")
     _ts("multipod_io",   "pop/multipod_io.jl")
+    _ts("multipod_multireceptor", "pop/multipod_multireceptor.jl")
 end
 
 # ── Stimuli ───────────────────────────────────────────────────────────────────
