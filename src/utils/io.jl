@@ -57,11 +57,106 @@ a `JLD2.ReconstructedMutable` or `JLD2.ReconstructedStatic` placeholder, searchi
 through tuples, dictionaries, arrays of non-bits elements and struct fields. JLD2 builds such
 placeholders when the file holds a type whose layout no longer exists, e.g. a `model` saved with SNNModels <= 1.9.1;
 such a model loads without error and then fails later with an unrelated message. No migration is attempted. Returns `x`.
+
+A placeholder of a `Multipod` with more than $(MULTIPOD_PRELOADED) dendrites whose type is not defined in this session (see
+`declare_multipod`) gives the message: "The <what> contains a Multipod with D dendrites whose type is not defined in this
+session; call SNNModels.declare_multipod(D) before loading, then load again." (`load_model`, `load_data` and `SNNload` declare
+these types themselves; the message concerns other readers, e.g. `JLD2.load`.)
 """
 function check_loaded_model(x; what::AbstractString = "file")
+    _check_undeclared_multipods(x, what)
     seen = Base.IdSet{Any}()
     _check_reconstructed(x, seen, what, "")
     return x
+end
+
+# ---- Multipod types missing from the session ----------------------------------------------------------------------------------
+
+# Type name of a JLD2 placeholder (`Multipod12{...}` for a parametric type).
+_placeholder_name(x) = string(typeof(x).parameters[1])
+
+# Every JLD2 placeholder below `x` (placeholders inside placeholders included).
+function _find_placeholders(x, found = Any[], seen = Base.IdSet{Any}())
+    if x isa JLD2.ReconstructedMutable || x isa JLD2.ReconstructedStatic
+        push!(found, x)
+        for v in getfield(x, :fields)
+            _find_placeholders(v, found, seen)
+        end
+        return found
+    end
+    (x === nothing || x isa Union{Number,AbstractString,Symbol,Function,Type,Module}) && return found
+    x isa AbstractArray && isbitstype(eltype(x)) && return found
+    if ismutable(x)
+        x in seen && return found
+        push!(seen, x)
+    end
+    if x isa AbstractDict
+        foreach(v -> _find_placeholders(v, found, seen), values(x))
+    elseif x isa AbstractArray || x isa Tuple
+        foreach(v -> _find_placeholders(v, found, seen), x)
+    elseif isstructtype(typeof(x))
+        for f in fieldnames(typeof(x))
+            isdefined(x, f) && _find_placeholders(getfield(x, f), found, seen)
+        end
+    end
+    return found
+end
+
+# Numbers of dendrites of the Multipod placeholders below `x` whose type is not defined in this session.
+function _undeclared_multipods(x)
+    Ds = Set{Int}()
+    for ph in _find_placeholders(x)
+        m = match(r"^(?:SNNModels\.)?Multipod(\d+)(?:\{|$)", _placeholder_name(ph))
+        m === nothing && continue
+        D = parse(Int, m.captures[1])
+        defined = invokelatest(isdefined, @__MODULE__, Symbol(:Multipod, D))
+        (D > MULTIPOD_PRELOADED && !defined) && push!(Ds, D)
+    end
+    return sort!(collect(Ds))
+end
+
+function _check_undeclared_multipods(x, what)
+    Ds = _undeclared_multipods(x)
+    isempty(Ds) && return nothing
+    msg = join(("The $what contains a Multipod with $D dendrites whose type is not defined in this session; " *
+                "call SNNModels.declare_multipod($D) before loading, then load again." for D in Ds), "\n")
+    throw(ArgumentError(msg))
+end
+
+# Numbers of dendrites (above the preloaded ones) of the Multipod types named in the type table of a JLD2 file. Needs the type
+# introspection of JLD2 >= 0.6; with older versions, or if the table cannot be read, it returns nothing and `_load_jld2` falls
+# back on the placeholders of a first load.
+function _file_multipods(file::AbstractString)
+    isdefined(JLD2, :stringify_h5datatype) || return nothing
+    Ds = Set{Int}()
+    try
+        JLD2.jldopen(file, "r") do f
+            for cdt in values(f.datatype_locations)
+                typename = string(first(JLD2.stringify_h5datatype(f, cdt)))
+                for m in eachmatch(r"SNNModels\.Multipod(\d+)\{", typename)
+                    push!(Ds, parse(Int, m.captures[1]))
+                end
+            end
+        end
+    catch
+        return nothing
+    end
+    return sort!([D for D in Ds if D > MULTIPOD_PRELOADED])
+end
+
+# Load a JLD2 file (`loader(file)`, e.g. `JLD2.load`) with the Multipod types it needs: the types named in its type table are
+# declared before reading; without a readable type table, Multipod placeholders of a first read are declared and the file is
+# read again. Called in the latest world, so that the types declared here are visible to JLD2.
+function _load_jld2(loader, file::AbstractString)
+    Ds = _file_multipods(file)
+    Ds === nothing || foreach(declare_multipod, Ds)
+    data = invokelatest(loader, file)
+    missing_Ds = filter(D -> D <= MULTIPOD_MAX_DENDRITES, _undeclared_multipods(data))
+    if !isempty(missing_Ds)
+        foreach(declare_multipod, missing_Ds)
+        data = invokelatest(loader, file)
+    end
+    return data
 end
 
 # the deepest placeholder below `x`: names the layout that changed rather than its container
@@ -124,6 +219,11 @@ If `path` is a file, it is loaded directly. Otherwise the file
 - The stored dictionary as a `NamedTuple` (`(model = ..., config = ..., extra keys...)`), or
   `nothing` (with an `@error` message) if the file does not exist.
 
+`Multipod` populations with more than 8 dendrites: their types (`Multipod12`, ...) are defined at run time. Before reading, the
+type names stored in the file are listed and the Multipod types found are declared (`declare_multipod`); with a JLD2 version
+that cannot list them (< 0.6) the file is read, the Multipod placeholders are declared and the file is read again. `load_model`
+and `load_data` call `SNNload`.
+
 # Throws
 - `ArgumentError` if `path` is not a file and `name` or `info` is missing.
 
@@ -150,7 +250,7 @@ function SNNload(;
     ## Check if path is a directory
     if isfile(path)
         @info "Loading $(path)"
-        return dict2ntuple(check_loaded_model(DrWatson.load(path); what = "file $(path)"))
+        return dict2ntuple(check_loaded_model(_load_jld2(DrWatson.load, path); what = "file $(path)"))
     else
         if isempty(name) || isnothing(info)
             throw(
@@ -171,7 +271,7 @@ function SNNload(;
 
 
     tic = time()
-    DATA = JLD2.load(file)
+    DATA = _load_jld2(JLD2.load, file)
     @info "$type $(name)"
     @info "Loading time:  $(round(time()-tic, digits=2)) seconds"
     check_loaded_model(DATA; what = "$type file $(file)")

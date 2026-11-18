@@ -63,6 +63,8 @@ I = SNN.Poisson(N = 20, param = SNN.PoissonParameter(20Hz))
 IE = SNN.SpikingSynapse(I, E, :gi; conn = (p = 0.2, μ = 5.0), LTPParam = SNN.iSTDPRate(r = 5Hz))
 SNN.train!(model = SNN.compose(; E, I, IE), duration = 500ms)   # plasticity needs train!
 ```
+
+See also: [Plasticity: conventions and implementation notes](https://juliasnn.github.io/SpikingNeuralNetworks.jl/dev/catalogue/plasticity_conventions/).
 """
 iSTDPRate
 
@@ -110,6 +112,8 @@ trace of `v_post`):
 Plasticity is applied only under `train!`. This rule was not affected by the `iSTDPRate` bug
 fixed in SNNModels 1.8.2 (its postsynaptic loop never used `@turbo`); it now uses the same plain
 `@simd` loops.
+
+See also: [Plasticity: conventions and implementation notes](https://juliasnn.github.io/SpikingNeuralNetworks.jl/dev/catalogue/plasticity_conventions/).
 """
 iSTDPPotential
 

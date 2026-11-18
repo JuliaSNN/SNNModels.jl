@@ -23,7 +23,9 @@ factors ``\\tilde W^{1-μ}`` make the update scale with the weight range):
 ``-η α \\tilde W`` (LTD); `μ = 1` is multiplicative STDP, LTD ``= -η α (w - W_{min}) x_{post}``
 and LTP ``= η (W_{max} - w) x_{pre}``. With `Wmin = 0` this is
 exactly Auryn's `STDPwdConnection` (`learning_rate = η`, `param_alpha = α`,
-`param_mu_plus`, `param_mu_minus`).
+`param_mu_plus`, `param_mu_minus`). The NLTAH rule of Gütig et al. (2003) with time constant `τ`, rate `λ`,
+exponent `μ` and asymmetry `α` is `STDPWeightDependent(η = λ, α = α, μ_plus = μ, μ_minus = μ, τpre = τ,
+τpost = τ, Wmin = 0, Wmax = 1)`.
 
 Fields: `η = 1e-3` (relative learning rate), `α = 1` (LTD/LTP asymmetry), `μ_plus = 1`,
 `μ_minus = 1` (weight-dependence exponents), `τpre = τpost = 20ms`, `Wmax = 30pF`,
@@ -40,6 +42,8 @@ rule = SNN.STDPWeightDependent(η = 1e-3, α = 1.05, μ_plus = 0.0, μ_minus = 1
 syn = SNN.SpikingSynapse(pre, post, :ge; conn = (p = 0.1, μ = 10.0), LTPParam = rule)
 SNN.train!(model = SNN.compose(; pre, post, syn), duration = 500ms)
 ```
+
+See also: [Plasticity: conventions and implementation notes](https://juliasnn.github.io/SpikingNeuralNetworks.jl/dev/catalogue/plasticity_conventions/).
 """
 STDPWeightDependent
 

@@ -7,7 +7,8 @@ Voltage-based STDP (Clopath et al. 2010), two implementations of the same rule:
 
 @doc raw"""
     vSTDPParameter(; A_LTD = 8e-4, A_LTP = 1.4e-3, θ_LTD = -70mV, θ_LTP = -49mV,
-                     τu = 20ms, τv = 7ms, τx = 15ms, Wmax = 30pF, Wmin = 0.1pF, epoch = 10)
+                     τu = 20ms, τv = 7ms, τx = 15ms, Wmax = 30pF, Wmin = 0.1pF, epoch = 10,
+                     delay_uv = 0ms)
 
 Voltage-based STDP of Clopath et al. (2010), event-driven. Depression is triggered by a presynaptic spike and
 depends on a low-pass filtered postsynaptic potential; potentiation depends on a presynaptic trace, on the
@@ -25,14 +26,20 @@ With ``V_i`` the postsynaptic potential (`v_post`), ``u_i``, ``v_i`` its low-pas
 ```math
 \begin{aligned}
 τ_x \frac{dx_j}{dt} &= -x_j + \sum_k δ(t - t_j^k), \qquad
-τ_u \frac{du_i}{dt} = -u_i + V_i, \qquad
-τ_v \frac{dv_i}{dt} = -v_i + V_i,\\
+τ_u \frac{du_i}{dt} = -u_i + V_i(t - ε), \qquad
+τ_v \frac{dv_i}{dt} = -v_i + V_i(t - ε),\\
 Δw_{ij}^{LTD} &= -A_{LTD}\,[u_i - θ_{LTD}]_+ \quad \text{at each presynaptic spike of } j,\\
 \frac{dw_{ij}^{LTP}}{dt} &= A_{LTP}\, x_j\, [v_i - θ_{LTD}]_+\, [V_i - θ_{LTP}]_+ .
 \end{aligned}
 ```
 A presynaptic spike increases ``x_j`` by ``1/τ_x`` (units 1/ms) and potentiation is a rate, integrated over
 `dt`. The filtered potential ``v`` is compared with `θ_LTD`, the instantaneous one with `θ_LTP`.
+The filters are driven by the potential delayed by ``ε`` = `delay_uv` (the delayed processing of the filtered
+potentials of the ModelDB reference implementation of Clopath et al. 2010 and of NEST `delay_u_bars`; it is not
+in the paper): ``D`` =
+`round(delay_uv / dt)` steps (at least one when `delay_uv > 0`), the potential of step ``n - D`` drives the
+update of step ``n``, and the delay buffer is filled with the current potential at the first step (or when
+``D`` changes). `delay_uv = 0` drives the filters with the current potential.
 Per step (the order of the dense rule): (1) forward Euler for ``x`` (this step's spikes included), (2) forward Euler
 for ``u`` and ``v``, (3) LTD at the presynaptic spikes of the step, clamped at `Wmin`, then (4) the LTP increment
 `dt * A_LTP * x * ...` on all outgoing synapses, clamped at `Wmax`. At the first call ``u`` and ``v`` are set to
@@ -79,6 +86,7 @@ directly (`save_model` does this). The trace `x` is stored as the amplitude ``a_
 - `τu::FT = 20ms`, `τv::FT = 7ms`, `τx::FT = 15ms`: time constants of ``u``, ``v``, ``x`` (`dt < τx` is required).
 - `Wmax::FT = 30pF`, `Wmin::FT = 0.1pF`: weight bounds.
 - `epoch::FT = 10`: restart interval of the accumulator in units of `τx` (`0 < epoch <= 25`).
+- `delay_uv::FT = 0ms`: delay ``ε`` of the potential that drives ``u`` and ``v``.
 - `active::VBT = [true]`: present in the parameter type; activation is controlled by the `active` field of
   `vSTDPVariables` (see `set_LTP!`).
 
@@ -89,6 +97,14 @@ with `Float32` fields keeps the `Float32` values: use `vSTDPParameter(FT = Float
 
 # Cost
 Per step O(`Npost`); per presynaptic spike O(fan-out); once per epoch O(nnz). Serial.
+
+# Postsynaptic potential
+``V_i`` is the membrane potential of the compartment the synapse targets: for a `Tripod` or
+`BallAndStick` target `SpikingSynapse(pre, post, :glu, :d1; ...)` reads `post.v_d1`, so the rule
+acts on the local dendritic potential (Bono & Clopath 2017); one synapse object has one pair of
+filters ``u``, ``v`` per postsynaptic neuron. The visual-cortex fit of Clopath et al. (2010) is
+`vSTDPParameter(A_LTD = 14e-5, A_LTP = 8e-5, θ_LTD = -70.6mV, θ_LTP = -45.3mV, τu = 10ms, τv = 7ms)` (values of
+the NEST `clopath_synapse` example).
 
 # References
 Clopath, C., Büsing, L., Vasilaki, E. & Gerstner, W. (2010). Connectivity reflects coding: a
@@ -105,6 +121,8 @@ syn = SNN.SpikingSynapse(E, P, :ge; conn = (p = 0.2, μ = 1.0), LTPParam = SNN.v
 SNN.train!(model = SNN.compose(; E, P, syn), duration = 200ms)
 SNN.plasticity_value(syn, :W)      # current weights (syn.W is lazy)
 ```
+
+See also: [Plasticity: conventions and implementation notes](https://juliasnn.github.io/SpikingNeuralNetworks.jl/dev/catalogue/plasticity_conventions/).
 """
 vSTDPParameter
 
@@ -119,6 +137,7 @@ vSTDPParameter
     Wmax::FT = 30.0pF
     Wmin::FT = 0.1pF
     epoch::FT = 10.0f0
+    delay_uv::FT = 0ms
     active::VBT = [true]
 end
 needs_transpose(::vSTDPParameter) = false   # event vSTDP reads colptr, I, W only
@@ -128,8 +147,9 @@ needs_transpose(::vSTDPParameter) = false   # event vSTDP reads colptr, I, W onl
 
 State of `vSTDPParameter`: `u`, `v` (filters of the postsynaptic potential), `x` (stored amplitudes ``a_j``, value
 ``a_j q^n``: read it with `plasticity_value`), `K` (accumulator per postsynaptic neuron), `snap` (snapshot of `K`
-per synapse), the scratch `Wcur` of `plasticity_value(syn, :W)`, and step counters and cached constants (`steps`,
-`tick`, `matstep`, `pw`, `cache`). Lists `:x` and `:W` in `lazy_variables`.
+per synapse), the scratch `Wcur` of `plasticity_value(syn, :W)`, the delay buffer of `delay_uv` (`vbuf`, `vslot`),
+and step counters and cached constants (`steps`, `tick`, `matstep`, `pw`, `cache`). Lists `:x` and `:W` in
+`lazy_variables`.
 """
 vSTDPVariables
 
@@ -147,6 +167,8 @@ vSTDPVariables
     tick::VIT = [0]                       # steps since the start (counted at the end of plasticity!)
     matstep::VIT = [-1]                   # tick at which the presynaptic spikes were materialised
     cache::VDT = fill(NaN, 9)             # dt, τx, A_LTP, Wmax, epoch, q, dt*A_LTP, epoch steps, 1/q
+    vbuf::VFT = zeros(0)                  # delayed potential (delay_uv): D slots of Npost values
+    vslot::VIT = [1, 0]                   # next slot of vbuf, number of slots D it was filled for
     active::VBT = [true]
     initialized::VBT = [false]
 end
@@ -251,6 +273,29 @@ function _ev_spikes!(c, vars::vSTDPVariables, param::vSTDPParameter, spikes)
     return nothing
 end
 
+# number of steps of the delay `delay_uv` of the potential that drives u and v
+@inline _uv_delay_steps(param, dt) = param.delay_uv > 0 ? max(1, round(Int, param.delay_uv / dt)) : 0
+
+# Ring buffer of the delayed potential: D slots of Npost values. Returns the offset of the slot of
+# this step (it holds the potential of D steps ago; the caller overwrites it with the current one)
+# and advances the slot. At the first use, or when D changes (new dt or delay_uv), every slot is
+# filled with the current potential.
+function _uv_delay_slot!(vars, v_post, D::Int)
+    @unpack vbuf, vslot = vars
+    N = length(v_post)
+    if vslot[2] != D || length(vbuf) != D * N
+        resize!(vbuf, D * N)
+        for k in 1:D
+            copyto!(vbuf, (k - 1) * N + 1, v_post, 1, N)
+        end
+        vslot[1] = 1
+        vslot[2] = D
+    end
+    k = vslot[1]
+    vslot[1] = k == D ? 1 : k + 1
+    return (k - 1) * N
+end
+
 function update_traces!(
     c::PT,
     param::vSTDPParameter,
@@ -293,11 +338,27 @@ function plasticity!(
     pq = pw[1] * q
     pw[1] = pq
     pw[2] = pw[2] * qi
-    @inbounds @fastmath for i in eachindex(u)
-        u[i] += dt * (-u[i] + v_post[i]) / τu
-        v[i] += dt * (-v[i] + v_post[i]) / τv
-        g = max(v[i] - θ_LTD, z) * max(v_post[i] - θ_LTP, z)
-        K[i] += pq * Float64(g)
+    D = _uv_delay_steps(param, dt)
+    if D == 0
+        # u and v driven by the current potential
+        @inbounds @fastmath for i in eachindex(u)
+            u[i] += dt * (-u[i] + v_post[i]) / τu
+            v[i] += dt * (-v[i] + v_post[i]) / τv
+            g = max(v[i] - θ_LTD, z) * max(v_post[i] - θ_LTP, z)
+            K[i] += pq * Float64(g)
+        end
+    else
+        # u and v driven by the potential of D steps ago; the LTP drive keeps the current one
+        off = _uv_delay_slot!(vars, v_post, D)
+        @unpack vbuf = vars
+        @inbounds @fastmath for i in eachindex(u)
+            Vd = vbuf[off+i]
+            vbuf[off+i] = v_post[i]
+            u[i] += dt * (-u[i] + Vd) / τu
+            v[i] += dt * (-v[i] + Vd) / τv
+            g = max(v[i] - θ_LTD, z) * max(v_post[i] - θ_LTP, z)
+            K[i] += pq * Float64(g)
+        end
     end
     @inbounds for j in spikes
         @simd for s in colptr[j]:(colptr[j+1]-1)
@@ -315,7 +376,8 @@ export vSTDPParameter, vSTDPVariables, plasticityvariables, plasticity!
 
 @doc raw"""
     vSTDPDenseParameter(; A_LTD = 8e-4, A_LTP = 1.4e-3, θ_LTD = -70mV, θ_LTP = -49mV,
-                          τu = 20ms, τv = 7ms, τx = 15ms, Wmax = 30pF, Wmin = 0.1pF, active = [true])
+                          τu = 20ms, τv = 7ms, τx = 15ms, Wmax = 30pF, Wmin = 0.1pF, delay_uv = 0ms,
+                          active = [true])
 
 Clock-driven voltage-based STDP (Clopath et al. 2010): the rule of [`vSTDPParameter`](@ref) evaluated on every
 synapse at every step (O(nnz) per step). Same equations, update order, fields (without `epoch`) and precision, but
@@ -327,15 +389,16 @@ With ``V_i`` the postsynaptic potential (`v_post`), ``u_i``, ``v_i`` its low-pas
 ```math
 \begin{aligned}
 τ_x \frac{dx_j}{dt} &= -x_j + \sum_k δ(t - t_j^k), \qquad
-τ_u \frac{du_i}{dt} = -u_i + V_i, \qquad
-τ_v \frac{dv_i}{dt} = -v_i + V_i,\\
+τ_u \frac{du_i}{dt} = -u_i + V_i(t - ε), \qquad
+τ_v \frac{dv_i}{dt} = -v_i + V_i(t - ε),\\
 Δw_{ij}^{LTD} &= -A_{LTD}\,[u_i - θ_{LTD}]_+ \quad \text{at each presynaptic spike of } j,\\
 \frac{dw_{ij}^{LTP}}{dt} &= A_{LTP}\, x_j\, [v_i - θ_{LTD}]_+\, [V_i - θ_{LTP}]_+ .
 \end{aligned}
 ```
 A presynaptic spike increases ``x_j`` by ``1/τ_x`` (units 1/ms) and potentiation is a rate,
 integrated over `dt`. The filtered potential ``v`` is compared with `θ_LTD`, the instantaneous
-one with `θ_LTP`.
+one with `θ_LTP`. ``ε`` = `delay_uv` delays the potential that drives ``u`` and ``v`` as in
+[`vSTDPParameter`](@ref).
 
 # Integration
 `plasticity!` (only under `train!`), per step: (1) forward Euler for ``x`` (all presynaptic
@@ -355,6 +418,7 @@ set to the current postsynaptic potential.
 - `τv::FT = 7ms`: time constant of ``v`` (LTP filter).
 - `τx::FT = 15ms`: time constant of the presynaptic trace ``x``.
 - `Wmax::FT = 30pF`, `Wmin::FT = 0.1pF`: weight bounds.
+- `delay_uv::FT = 0ms`: delay ``ε`` of the potential that drives ``u`` and ``v``.
 - `active::VBT = [true]`: present in the parameter type; activation is controlled by the
   `active` field of `vSTDPDenseVariables` (see `set_LTP!`).
 
@@ -372,6 +436,8 @@ P = SNN.AdEx(N = 10, param = SNN.AdExParameter())
 syn = SNN.SpikingSynapse(E, P, :ge; conn = (p = 0.2, μ = 1.0), LTPParam = SNN.vSTDPDenseParameter())
 SNN.train!(model = SNN.compose(; E, P, syn), duration = 200ms)
 ```
+
+See also: [Plasticity: conventions and implementation notes](https://juliasnn.github.io/SpikingNeuralNetworks.jl/dev/catalogue/plasticity_conventions/).
 """
 vSTDPDenseParameter
 
@@ -385,28 +451,32 @@ vSTDPDenseParameter
     τx::FT = 15ms
     Wmax::FT = 30.0pF
     Wmin::FT = 0.1pF
+    delay_uv::FT = 0ms
     active::VBT = [true]
 end
 needs_transpose(::vSTDPDenseParameter) = false
 
 """
-    vSTDPDenseVariables(; Npre, Npost, u = zeros(Npost), v = zeros(Npost), x = zeros(Npre), active = [true],
-                          initialized = [false])
+    vSTDPDenseVariables(; Npre, Npost, u = zeros(Npost), v = zeros(Npost), x = zeros(Npre), vbuf = zeros(0),
+                          vslot = [1, 0], active = [true], initialized = [false])
 
 State of `vSTDPDenseParameter`: `u`, `v` (low-pass filters of the postsynaptic potential with
 time constants `τu`, `τv`, length `Npost`, mV), `x` (presynaptic spike trace, length `Npre`,
-1/ms), the `active` flag and `initialized`: while `initialized[1]` is false, the first
+1/ms), the delay buffer of `delay_uv` (`vbuf`: `D` slots of `Npost` values, `vslot`: next slot and `D`),
+the `active` flag and `initialized`: while `initialized[1]` is false, the first
 `plasticity!` call sets `u` and `v` to the postsynaptic potential.
 """
 vSTDPDenseVariables
 
-@snn_kw struct vSTDPDenseVariables{VFT = Vector{Float32},IT = Int} <: LTPVariables
+@snn_kw struct vSTDPDenseVariables{VFT = Vector{Float32},VIT = Vector{Int},IT = Int} <: LTPVariables
     ## Plasticity variables
     Npost::IT
     Npre::IT
     u::VFT = zeros(Npost) # postsynaptic potential filtered with τu (LTD)
     v::VFT = zeros(Npost) # postsynaptic potential filtered with τv (LTP)
     x::VFT = zeros(Npre) # presynaptic spike trace
+    vbuf::VFT = zeros(0) # delayed potential (delay_uv): D slots of Npost values
+    vslot::VIT = [1, 0]  # next slot of vbuf, number of slots D it was filled for
     active::VBT = [true]
     initialized::VBT = [false] # u, v are set to v_post at the first plasticity! call
 end
@@ -447,9 +517,22 @@ function plasticity!(
         end
 
         Is = 1:(length(rowptr)-1)
-        @turbo for i in eachindex(Is) # Iterate over postsynaptic neurons
-            u[i] += dt * (-u[i] + v_post[i]) / τu # postsynaptic neuron
-            v[i] += dt * (-v[i] + v_post[i]) / τv # postsynaptic neuron
+        D = _uv_delay_steps(param, dt)
+        if D == 0
+            @turbo for i in eachindex(Is) # Iterate over postsynaptic neurons
+                u[i] += dt * (-u[i] + v_post[i]) / τu # postsynaptic neuron
+                v[i] += dt * (-v[i] + v_post[i]) / τv # postsynaptic neuron
+            end
+        else
+            # u and v driven by the potential of D steps ago (`delay_uv`)
+            off = _uv_delay_slot!(plasticity, v_post, D)
+            vbuf = plasticity.vbuf
+            for i in eachindex(Is)
+                Vd = vbuf[off+i]
+                vbuf[off+i] = v_post[i]
+                u[i] += dt * (-u[i] + Vd) / τu
+                v[i] += dt * (-v[i] + Vd) / τv
+            end
         end
         for j in eachindex(fireJ) # Iterate over presynaptic neurons
             if fireJ[j]

@@ -1,17 +1,20 @@
 @doc """
     STDPTriplet(; A2_plus = 5.3e-3, A3_plus = 8e-3, A2_minus = 3.5e-3, A3_minus = 0,
                   τ_plus = 16.8ms, τ_minus = 33.7ms, τ_x = 946ms, τ_y = 40ms,
-                  Wmax = 30pF, Wmin = 0pF)
+                  Wmax = 30pF, Wmin = 0pF, nearest = false)
 
-Triplet STDP, all-to-all interaction, event-driven
+Triplet STDP, all-to-all (default) or nearest-spike interaction, event-driven
 (Pfister, J.-P., & Gerstner, W. (2006). Triplets of spikes in a model of spike
 timing-dependent plasticity. J. Neurosci., 26(38), 9673–9682.
 https://doi.org/10.1523/JNEUROSCI.1425-06.2006; implementation as Auryn
 `MinimalTripletConnection` / `TripletConnection`).
 
 Presynaptic traces ``r_1`` (`τ_plus`), ``r_2`` (`τ_x`); postsynaptic traces
-``o_1`` (`τ_minus`), ``o_2`` (`τ_y`). All jump by 1 at a spike and decay
-exponentially. Weight updates (amplitudes positive, signs explicit), with every
+``o_1`` (`τ_minus`), ``o_2`` (`τ_y`), decaying exponentially. All-to-all interaction
+(`nearest = false`): a spike adds 1 to the traces of its neuron, so every earlier spike
+contributes. Nearest-spike interaction (`nearest = true`, the "nearest spike" model of
+Pfister & Gerstner 2006): a spike sets the traces of its neuron to 1, so only the most recent
+spike contributes. Weight updates (amplitudes positive, signs explicit), with every
 trace read before this step's spikes are added (the ``t - ε`` of the paper):
 
 - presynaptic spike of j, for each target i:
@@ -30,7 +33,7 @@ Weights are in the same units as `W`; rescale the amplitudes to the weight scale
 
 Fields: `A2_plus`, `A3_plus`, `A2_minus`, `A3_minus` (amplitudes, all used with the signs
 shown above), `τ_plus`, `τ_minus`, `τ_x`, `τ_y` (trace time constants, ms), `Wmax = 30pF`,
-`Wmin = 0pF`. State: `STDPTripletVariables`. Event-driven with the ordering of `STDP_kernels.jl`
+`Wmin = 0pF`, `nearest = false` (interaction of the traces). State: `STDPTripletVariables`. Event-driven with the ordering of `STDP_kernels.jl`
 (same-step pre/post spikes do not interact), applied only under `train!`.
 
 # Example
@@ -43,6 +46,8 @@ rule = SNN.STDPTriplet(A2_plus = 5.3e-3 * 10, A3_plus = 8e-3 * 10, A2_minus = 3.
 syn = SNN.SpikingSynapse(pre, post, :ge; conn = (p = 0.1, μ = 10.0), LTPParam = rule)
 SNN.train!(model = SNN.compose(; pre, post, syn), duration = 500ms)
 ```
+
+See also: [Plasticity: conventions and implementation notes](https://juliasnn.github.io/SpikingNeuralNetworks.jl/dev/catalogue/plasticity_conventions/).
 """
 STDPTriplet
 
@@ -57,6 +62,7 @@ STDPTriplet
     τ_y::FT = 40ms           # post trace o2 (triplet LTP)
     Wmax::FT = 30.0pF        # Max weight
     Wmin::FT = 0.0pF         # Min weight
+    nearest::Bool = false    # nearest-spike traces (set to 1 at a spike) instead of all-to-all (+1)
 end
 
 @doc """
@@ -124,7 +130,7 @@ function plasticity!(
 ) where {PT<:AbstractSparseSynapse}
     @unpack rowptr, colptr, I, J, index, W = c
     @unpack r1, r2, o1, o2, last_pre, last_post, initialized, scale, decay = variables
-    @unpack A2_plus, A3_plus, A2_minus, A3_minus, τ_plus, τ_minus, τ_x, τ_y, Wmax, Wmin = param
+    @unpack A2_plus, A3_plus, A2_minus, A3_minus, τ_plus, τ_minus, τ_x, τ_y, Wmax, Wmin, nearest = param
     t = get_time(T)
     # a new dt or τ: bring the stored traces to their values before the factors change
     _decay_stale(decay, dt, τ_plus, τ_x, τ_minus, τ_y) && sync_traces!(variables)
@@ -140,14 +146,16 @@ function plasticity!(
     f_post = (w, i, j) -> (r1[j] * s_r1) * (A2_plus + A3_plus * (o2[i] * s_o2))
     _stdp_passes!(c, f_pre, f_post, spikes_pre, spikes_post, Wmin, Wmax)
 
-    # 3. trace increments (last spike time stored once per neuron)
+    # 3. trace increments (last spike time stored once per neuron): all-to-all adds 1 to the value,
+    #    nearest-spike sets the value to 1 (stored value 1/scale in both cases)
+    spike! = nearest ? _spike_set! : _spike_increment!
     if !isempty(spikes_pre)
-        _spike_increment!(r1, last_pre, spikes_pre, t, _write_inc(scale, 1, r1))
-        _spike_increment!(r2, last_pre, spikes_pre, t, _write_inc(scale, 2, r2))
+        spike!(r1, last_pre, spikes_pre, t, _write_inc(scale, 1, r1))
+        spike!(r2, last_pre, spikes_pre, t, _write_inc(scale, 2, r2))
     end
     if !isempty(spikes_post)
-        _spike_increment!(o1, last_post, spikes_post, t, _write_inc(scale, 3, o1))
-        _spike_increment!(o2, last_post, spikes_post, t, _write_inc(scale, 4, o2))
+        spike!(o1, last_post, spikes_post, t, _write_inc(scale, 3, o1))
+        spike!(o2, last_post, spikes_post, t, _write_inc(scale, 4, o2))
     end
     # 4. exact decay over one step
     _advance_scale!(scale, 1, r1, f_r1)
