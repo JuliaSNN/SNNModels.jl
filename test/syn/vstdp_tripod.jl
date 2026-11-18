@@ -1,73 +1,32 @@
 #=
-Voltage-based STDP on the dendrites of a Tripod
-===============================================
-
-A `SpikingSynapse` onto a compartment of a `Tripod` (or `BallAndStick`) reads the potential of that
-compartment as `v_post`, so `vSTDPParameter` / `vSTDPDenseParameter` act on the local dendritic potential
-(Bono & Clopath 2017; the Tripod plasticity code). Tests:
-  - `v_post` is the potential of the targeted compartment;
-  - with prescribed compartment potentials, the `bono_vstdp` preset on :d1 and :d2 equals the update of
-    the Tripod code computed on the potential of that dendrite (the soma potential plays no role);
-  - a simulated Tripod with Poisson inputs on both dendrites, `bono_vstdp` and one multiplicative
-    normalisation per dendritic synapse: event-driven and dense rules give the same weights.
+Voltage-based STDP on the dendrites of a Tripod: a `SpikingSynapse` onto a compartment reads that
+compartment's potential as `v_post`; a simulated Tripod with voltage STDP on both dendrites and one
+multiplicative normalisation per dendritic synapse gives the same weights with the event-driven and
+the dense rule.
 =#
 
 using SNNModels
 using Test
 using Random
-using Statistics
 @load_units
 
-include(joinpath(@__DIR__, "plasticity_presets_ref.jl"))
+# voltage STDP with dendritic thresholds: potentiation above -15 mV (dendritic depolarisation), bounds 0.5-1.5
+const _DEND_VSTDP = (A_LTD = 2.0e-4, A_LTP = 6.0e-4, θ_LTD = -69.0, θ_LTP = -15.0, τu = 35.0, τv = 35.0, delay_uv = 1.0,
+                     Wmin = 0.5, Wmax = 1.5)
 
 @testset "vSTDP on Tripod dendrites: the synapse reads the compartment potential" begin
     T = Tripod(N = 2)
     pre = IF(N = 4)
     for comp in (:s, :d1, :d2)
-        syn = SpikingSynapse(pre, T, :glu, comp; conn = fill(1.0f0, 2, 4), LTPParam = bono_vstdp())
+        syn = SpikingSynapse(pre, T, :glu, comp; conn = fill(1.0f0, 2, 4), LTPParam = vSTDPParameter(; _DEND_VSTDP...))
         @test syn.v_post === getfield(T, Symbol("v_", comp))
     end
     B = BallAndStick(N = 2)
-    syn = SpikingSynapse(pre, B, :glu, :d; conn = fill(1.0f0, 2, 4), LTPParam = bono_vstdp(dense = true))
+    syn = SpikingSynapse(pre, B, :glu, :d; conn = fill(1.0f0, 2, 4), LTPParam = vSTDPDenseParameter(; _DEND_VSTDP...))
     @test syn.v_post === B.v_d
 end
 
-@testset "vSTDP on Tripod dendrites: prescribed potentials, equal to the Tripod code" begin
-    npre, npost = 20, 3
-    spikes, V1 = _pp_inputs(; npre, npost, seed = 21)
-    _, V2 = _pp_inputs(; npre, npost, seed = 22)
-    set = SNNModels._BONO_VSTDP
-    D = round(Int, set.ε / _PDT)
-
-    for dense in (false, true)
-        T = Tripod(N = npost)
-        pre = IF(N = npre)
-        rule = bono_vstdp(; convention = :tripod, dense, Wmin = -100.0, Wmax = 100.0)
-        s1 = SpikingSynapse(pre, T, :glu, :d1; conn = fill(1.0f0, npost, npre), LTPParam = rule)
-        s2 = SpikingSynapse(pre, T, :glu, :d2; conn = fill(1.0f0, npost, npre), LTPParam = rule)
-        ss = SpikingSynapse(pre, T, :glu, :s; conn = fill(1.0f0, npost, npre), LTPParam = rule)
-
-        # the soma sits above every threshold: a rule reading it would potentiate at every step
-        T.v_s .= 20.0f0
-        _pp_run!(s1, pre, T.v_d1, spikes, V1)
-        _pp_run!(s2, pre, T.v_d2, spikes, V2)
-        @test all(==(20.0f0), T.v_s)
-
-        R1 = _tripod_code_vstdp(spikes, V1, set; D, w0 = 1.0, npre)
-        R2 = _tripod_code_vstdp(spikes, V2, set; D, w0 = 1.0, npre)
-        W1, W2 = _pp_mat(s1), _pp_mat(s2)
-        @test maximum(abs.(R1 .- 1)) > 1.0e-3 && maximum(abs.(R2 .- 1)) > 1.0e-3
-        @test maximum(abs.(W1 .- R1)) < 1.0e-4 * maximum(abs.(R1 .- 1)) + 1.0e-6
-        @test maximum(abs.(W2 .- R2)) < 1.0e-4 * maximum(abs.(R2 .- 1)) + 1.0e-6
-        @test maximum(abs.(W1 .- W2)) > 1.0e-3     # each dendrite has its own filters
-
-        # the same rule on the soma synapse reads the somatic potential (constant +20 mV): only potentiation
-        _pp_run!(ss, pre, T.v_s, spikes, fill(20.0f0, npost, length(spikes)))
-        @test minimum(_pp_mat(ss)) > 1.0
-    end
-end
-
-@testset "vSTDP on Tripod dendrites: simulated Tripod, bono_vstdp, normalisation per dendrite" begin
+@testset "vSTDP on Tripod dendrites: simulated Tripod, normalisation per dendrite" begin
     # 50 Poisson inputs at 10 Hz on each dendrite: the dendrites reach the LTP threshold (-15 mV) and the
     # soma fires. On d1 an event-driven and a dense synapse receive the same spikes and read the same
     # potential (they both drive the dendrite, with equal weights).
@@ -76,10 +35,9 @@ end
     T = Tripod(N = 1)
     E1 = SNNModels.Poisson(N = N, param = SNNModels.PoissonParameter(10Hz))   # qualified: Distributions.Poisson may be loaded
     E2 = SNNModels.Poisson(N = N, param = SNNModels.PoissonParameter(10Hz))
-    # amplitudes of the Tripod code (convention = :tripod), the regime of its dendritic simulations
-    s1e = SpikingSynapse(E1, T, :glu, :d1; conn = fill(1.0f0, 1, N), LTPParam = bono_vstdp(convention = :tripod))
-    s1d = SpikingSynapse(E1, T, :glu, :d1; conn = fill(1.0f0, 1, N), LTPParam = bono_vstdp(convention = :tripod, dense = true))
-    s2 = SpikingSynapse(E2, T, :glu, :d2; conn = fill(1.0f0, 1, N), LTPParam = bono_vstdp(convention = :tripod))
+    s1e = SpikingSynapse(E1, T, :glu, :d1; conn = fill(1.0f0, 1, N), LTPParam = vSTDPParameter(; _DEND_VSTDP...))
+    s1d = SpikingSynapse(E1, T, :glu, :d1; conn = fill(1.0f0, 1, N), LTPParam = vSTDPDenseParameter(; _DEND_VSTDP...))
+    s2 = SpikingSynapse(E2, T, :glu, :d2; conn = fill(1.0f0, 1, N), LTPParam = vSTDPParameter(; _DEND_VSTDP...))
 
     # one multiplicative normalisation per dendritic synapse, every 20 ms (the Tripod code: every 200 steps)
     n1e = SynapseNormalization([s1e]; param = MultiplicativeNorm(τ = 20ms))

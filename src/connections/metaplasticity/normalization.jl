@@ -26,6 +26,8 @@ using SpikingNeuralNetworks
 SNN.@load_units
 norm = SNN.MultiplicativeNorm(τ = 20ms)
 ```
+
+See also: [Plasticity: conventions and implementation notes](https://juliasnn.github.io/SpikingNeuralNetworks.jl/dev/catalogue/plasticity_conventions/).
 """
 MultiplicativeNorm
 
@@ -46,6 +48,8 @@ postsynaptic neuron so that their sum returns to its value at construction time 
 - `τ::Float32`: interval between two normalizations (ms). Required, no default.
 - `operator::Function = +`: kept for compatibility, not used (the update is selected by the
   type).
+
+See also: [Plasticity: conventions and implementation notes](https://juliasnn.github.io/SpikingNeuralNetworks.jl/dev/catalogue/plasticity_conventions/).
 """
 AdditiveNorm
 
@@ -95,6 +99,8 @@ The normalization runs at its position in the connection list, after the `forwar
 
 # References
 Reference not given in the code.
+
+See also: [Plasticity: conventions and implementation notes](https://juliasnn.github.io/SpikingNeuralNetworks.jl/dev/catalogue/plasticity_conventions/).
 """
 SynapseNormalization
 
