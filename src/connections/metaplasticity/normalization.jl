@@ -214,16 +214,17 @@ function plasticity!(c::SynapseNormalization, param::NormParam)
     @unpack W1, W0, μ, synapses = c
     additive = param isa AdditiveNorm
     foreach(sync_weights!, synapses)   # the rescaling acts on the current weights (deferred updates are materialised)
-    foreach(ensure_transpose!, synapses)
     fill!(W1, zero(eltype(W1)))
-    nsyn = zeros(Int, length(W1))
     # `c.synapses` has an abstract element type: every loop runs in a kernel called through a
     # function barrier, so that it is compiled for the concrete synapse type.
-    for syn in synapses
-        _count_inputs!(nsyn, syn.rowptr)
+    if additive
+        nsyn = zeros(Int, length(W1))
+        for syn in synapses
+            _count_inputs!(nsyn, syn.rowptr)
+        end
     end
     for syn in synapses
-        _sum_inputs!(W1, syn.rowptr, syn.W, syn.index)
+        _sum_inputs!(W1, syn.W, syn.I)
     end
     # normalize
     @inbounds for i in eachindex(μ)
@@ -235,7 +236,7 @@ function plasticity!(c::SynapseNormalization, param::NormParam)
     end
     # apply
     for syn in synapses
-        _apply_norm!(syn.W, syn.rowptr, syn.index, μ, additive)
+        _apply_norm!(syn.W, syn.I, μ, additive)
     end
 end
 
@@ -246,29 +247,25 @@ function _count_inputs!(nsyn, rowptr)
     return nsyn
 end
 
-# Sequential (in-order) accumulation, as the weight sums are compared exactly in the tests.
-function _sum_inputs!(W1, rowptr, W, index)
-    @inbounds for i = 1:(length(rowptr)-1) # all postsynaptic neurons
-        s = W1[i]
-        for j = rowptr[i]:(rowptr[i+1]-1) # all presynaptic neurons of i
-            s += W[index[j]]
-        end
-        W1[i] = s
+# Row sums in CSC order: a sequential pass over the weights instead of a gather through the transposed
+# index. The inputs of a row are visited in increasing CSC position (the order of `index`, see
+# `_transpose_index!`), so every `W1[i]` receives the same additions in the same order: same bits.
+function _sum_inputs!(W1, W, I)
+    @inbounds for s in eachindex(W)
+        W1[I[s]] += W[s]
     end
     return W1
 end
 
-function _apply_norm!(W, rowptr, index, μ, additive::Bool)
-    @inbounds for i = 1:(length(rowptr)-1)
-        m = μ[i]
-        if additive
-            for j = rowptr[i]:(rowptr[i+1]-1)
-                W[index[j]] += m
-            end
-        else
-            for j = rowptr[i]:(rowptr[i+1]-1)
-                W[index[j]] *= m
-            end
+# Per-synapse update, independent of the order.
+function _apply_norm!(W, I, μ, additive::Bool)
+    if additive
+        @inbounds for s in eachindex(W)
+            W[s] += μ[I[s]]
+        end
+    else
+        @inbounds for s in eachindex(W)
+            W[s] *= μ[I[s]]
         end
     end
     return W

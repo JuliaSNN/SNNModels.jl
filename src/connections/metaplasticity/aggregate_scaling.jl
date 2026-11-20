@@ -217,38 +217,35 @@ function plasticity!(c::AggregateScaling, param::AggregateScalingParameter)
     @unpack Wt, WT, μ, synapses, y = c
     @unpack τe, Y, Wmin = param
     foreach(sync_weights!, synapses)   # the rescaling acts on the current weights (deferred updates are materialised)
-    foreach(ensure_transpose!, synapses)
     fill!(Wt, zero(eltype(Wt)))
+    # `c.synapses` has an abstract element type: the loops run in kernels behind a function barrier
+    # (`_count_inputs!`, `_sum_inputs!`: see `SynapseNormalization`, same CSC-order sums).
     nsyn = zeros(Int, length(Wt))
     for syn in synapses
-        @unpack rowptr = syn
-        for i = 1:(length(rowptr)-1)
-            nsyn[i] += rowptr[i+1] - rowptr[i]
-        end
+        _count_inputs!(nsyn, syn.rowptr)
     end
     for syn in synapses
-        @unpack rowptr, W, index = syn
-        for i = 1:(length(rowptr)-1) # Iterate over all postsynaptic neuron
-            @inbounds @fastmath @simd for j = rowptr[i]:(rowptr[i+1]-1) # all presynaptic neurons of i
-                Wt[i] += W[index[j]]
-            end
-        end
+        _sum_inputs!(Wt, syn.W, syn.I)
     end
     # normalize
-
     @inbounds for i in eachindex(μ)
         # neurons without input weight cannot be rescaled
         μ[i] = Wt[i] > 0 ? max(WT[i] - nsyn[i] * Wmin, zero(eltype(Wt))) / Wt[i] : one(eltype(μ))
     end
     # apply
     for syn in synapses
-        @unpack rowptr, W, index = syn
-        for i = 1:(length(rowptr)-1) # Iterate over all postsynaptic neuron
-            @inbounds @fastmath @simd for j = rowptr[i]:(rowptr[i+1]-1) # all presynaptic neurons connected to neuron i
-                Wt[i] > 0 && (W[index[j]] = W[index[j]] * μ[i] + Wmin)
-            end
-        end
+        _apply_scaling!(syn.W, syn.I, μ, Wt, Wmin)
     end
+end
+
+# Per-synapse rescaling in CSC order. Product and sum are rounded separately (no `@fastmath`, which would let the
+# compiler fuse them into one fma and change the last bit).
+function _apply_scaling!(W, I, μ, Wt, Wmin)
+    @inbounds for s in eachindex(W)
+        i = I[s]
+        Wt[i] > 0 && (W[s] = W[s] * μ[i] + Wmin)
+    end
+    return W
 end
 
 export AggregateScaling, AggregateScalingParameter
