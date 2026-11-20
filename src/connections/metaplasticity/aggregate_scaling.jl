@@ -225,7 +225,7 @@ function plasticity!(c::AggregateScaling, param::AggregateScalingParameter)
         _count_inputs!(nsyn, syn.rowptr)
     end
     for syn in synapses
-        _sum_inputs!(Wt, syn.W, syn.I)
+        _sum_inputs!(Wt, syn.W, syn.I, nothing)
     end
     # normalize
     @inbounds for i in eachindex(μ)

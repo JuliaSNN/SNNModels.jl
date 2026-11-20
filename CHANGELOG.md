@@ -1,5 +1,20 @@
 # SNNModels changelog
 
+## 2.3.1
+
+Faster synaptic normalization. Results identical.
+
+### Improved
+
+- `SynapseNormalization` (`MultiplicativeNorm`, `AdditiveNorm`) and `AggregateScaling` sum and update the weights in storage (CSC) order, without the
+  transposed index. A `SynapseNormalization` step costs 1.3 to 1.5 ns per synapse on one thread, 3.6 times less than the row-wise gather through the
+  transposed index at 4.6e6 synapses and 5.5 times less at 2.5e7 (`bench/normalisation_bench.jl`). Every sum receives its terms in the same order as
+  the row-wise kernels: the weights are bit-identical (`test/syn/normalization_csc.jl` compares them with a copy of those kernels).
+- `SynapseNormalization` is threaded with `neurons_per_thread > 0`: the sums are partitioned by postsynaptic range (sub-row pointers cached in
+  `SpikingSynapse.chunkptr`, shared with the threaded `forward!`), the update by blocks of synapses; bit-identical for every thread count and
+  setting. With 4 threads and `neurons_per_thread = 512` a step costs 0.7 ns per synapse, 1.8 to 2.2 times less than one thread; 2 threads gain
+  nothing at 4.6e6 synapses. Off by default.
+
 ## 2.3.0
 
 New model `Multipod` (a soma with 1 to 64 dendrites, the field names of `Tripod`), the voltage delay of the vSTDP filters and the nearest-spike

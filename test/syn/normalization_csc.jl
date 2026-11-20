@@ -32,6 +32,7 @@ function _one_step_pair(param, synapses)
     copies = deepcopy(synapses)
     new = SynapseNormalization(synapses; param)
     old = SynapseNormalization(copies; param)
+    Random.seed!(21)
     for (a, b) in zip(synapses, copies)
         FT = eltype(a.W)
         f = FT(0.7) .+ FT(0.6) .* rand(FT, length(a.W))
@@ -176,5 +177,86 @@ end
         @test new.Wt == old.Wt && new.μ == old.μ
         @test EE.W == copies[1].W && PE.W == copies[2].W
         @test any(!=(one(FT)), new.μ) && any(iszero, new.Wt)
+    end
+end
+
+# ── Threaded passes (neurons_per_thread > 0): same bits for every setting ─────
+# Meaningful with several threads (`julia -t 4`); with one thread the serial passes run and the comparisons are trivial.
+
+@testset "threaded: every neurons_per_thread == serial == old kernels (nthreads = $(Threads.nthreads()))" begin
+    old_min = SNNModels.SYN_MIN_OPS[]
+    SNNModels.SYN_MIN_OPS[] = 0          # thread even the small synapses of the test
+    try
+        for FT in (Float32, Float64), param in (MultiplicativeNorm(τ = 10ms), AdditiveNorm(τ = 10ms))
+            E, P, EE, PE = _norm_synapses(FT; N = 1500, Npre = 400, seed = 5)
+            serial_new, old = _one_step_pair(param, deepcopy([EE, PE]))
+            for npt in (128, 256, 512, 1024)
+                syns = deepcopy([EE, PE])
+                new = SynapseNormalization(syns; param)
+                with_neurons_per_thread(npt) do
+                    # the same perturbation as in `_one_step_pair`, from its seed
+                    Random.seed!(21)
+                    for a in syns
+                        a.W .*= FT(0.7) .+ FT(0.6) .* rand(FT, length(a.W))
+                    end
+                    if Threads.nthreads() > 1
+                        @test SNNModels._norm_chunk_ptr(syns[1], Int(E.N)) isa Matrix{Int32}   # the threaded passes run
+                    end
+                    SNNModels.plasticity!(new, param)
+                end
+                @test _same(new, serial_new) && _same(new, old)
+            end
+        end
+    finally
+        SNNModels.SYN_MIN_OPS[] = old_min
+    end
+end
+
+@testset "threaded train!: STDP + normalisation == old kernels, serial run" begin
+    old_min = SNNModels.SYN_MIN_OPS[]
+    SNNModels.SYN_MIN_OPS[] = 0
+    try
+        for additive in (false, true)
+            _, EEo, PEo, no = _trained_net(Float32, OldNorm(τ = 2ms, additive = additive))
+            for npt in (128, 512)
+                new_param = additive ? AdditiveNorm(τ = 2ms) : MultiplicativeNorm(τ = 2ms)
+                _, EEn, PEn, nn = with_neurons_per_thread(() -> _trained_net(Float32, new_param), npt)
+                @test EEn.W == EEo.W && PEn.W == PEo.W && nn.W1 == no.W1 && nn.μ == no.μ
+            end
+        end
+    finally
+        SNNModels.SYN_MIN_OPS[] = old_min
+    end
+end
+
+@testset "threading off: serial passes, no pointer table" begin
+    E, P, EE, PE = _norm_synapses(Float32; N = 1500, Npre = 400, seed = 5)
+    norm = SynapseNormalization([EE, PE]; param = MultiplicativeNorm(τ = 10ms))
+    builds = EE.chunkptr.builds
+    with_neurons_per_thread(0) do
+        @test SNNModels._norm_chunk_ptr(EE, Int(E.N)) === nothing
+        SNNModels.plasticity!(norm, norm.param)
+    end
+    @test EE.chunkptr.builds == builds
+end
+
+@testset "threaded after rewiring: the cached pointer table follows the connectivity" begin
+    old_min = SNNModels.SYN_MIN_OPS[]
+    SNNModels.SYN_MIN_OPS[] = 0
+    try
+        E, P, EE, PE = _norm_synapses(Float32; N = 1500, Npre = 400, seed = 6)
+        norm = SynapseNormalization([EE]; param = MultiplicativeNorm(τ = 10ms))
+        with_neurons_per_thread(256) do
+            SNNModels.plasticity!(norm, norm.param)             # builds the table
+            Random.seed!(4)
+            synaptic_turnover!(EE; p_rewire = 0.2)
+            twin = deepcopy(norm)
+            EE.W .*= 1.3f0; twin.synapses[1].W .*= 1.3f0
+            SNNModels.plasticity!(norm, norm.param)
+            old_norm_step!(twin, false)
+            @test _same(norm, twin)
+        end
+    finally
+        SNNModels.SYN_MIN_OPS[] = old_min
     end
 end
