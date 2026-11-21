@@ -117,6 +117,7 @@ end
     _ts("vstdp",       "syn/vstdp.jl")
     _ts("vstdp_tripod", "syn/vstdp_tripod.jl")
     _ts("vstdp_delay", "syn/vstdp_delay.jl")
+    _ts("vstdp_rebase", "syn/vstdp_rebase.jl")
     _ts("stdp_triplet", "syn/stdp_triplet.jl")
     _ts("lazy_weights", "syn/lazy_weights.jl")
     _ts("precision",   "syn/precision.jl")

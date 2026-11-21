@@ -195,20 +195,29 @@ sync_weights!(c, v::vSTDPVariables) = (isnan(v.cache[1]) || _ev_rebase!(c, v); n
 function _ev_rebase!(c, vars::vSTDPVariables)
     @unpack colptr, I, W = c
     @unpack x, K, snap, pw, steps, cache = vars
-    T = eltype(W)
-    dtA, Wmax, qp = cache[7], cache[4], pw[1]
-    @inbounds for j in 1:length(colptr)-1
-        a = dtA * x[j]
-        @simd for s in colptr[j]:(colptr[j+1]-1)
-            W[s] = T(min(Float64(W[s]) + a * (K[I[s]] - snap[s]), Wmax))
-        end
-        x[j] = x[j] * qp
-    end
+    nnz = Int(colptr[end]) - 1
+    _ev_rebase_cols!(W, I, colptr, x, K, snap, cache[7], cache[4], pw[1], 1:length(colptr)-1)
+    length(snap) > nnz && fill!(view(snap, nnz+1:length(snap)), 0.0)   # stale tail (resized at the next step)
     fill!(K, 0.0)
-    fill!(snap, 0.0)
     steps[1] = 0
     pw[1] = 1.0
     pw[2] = 1.0
+    return nothing
+end
+
+# Rebase of the columns `cols`: materialise their synapses and zero their snapshots in the same pass, rescale their
+# amplitudes by q^n. W, snap and K are distinct arrays (`ivdep`): the loop vectorises with a gather of K, and every
+# weight gets the same operations in the same order (no contraction), so the bits do not depend on the vectorisation.
+function _ev_rebase_cols!(W, I, colptr, x, K, snap, dtA::Float64, Wmax::Float64, qp::Float64, cols)
+    T = eltype(W)
+    @inbounds for j in cols
+        a = dtA * x[j]
+        @simd ivdep for s in colptr[j]:(colptr[j+1]-1)
+            W[s] = T(min(Float64(W[s]) + a * (K[I[s]] - snap[s]), Wmax))
+            snap[s] = 0.0
+        end
+        x[j] = x[j] * qp
+    end
     return nothing
 end
 
