@@ -154,3 +154,65 @@ end
         rm(dir; recursive = true, force = true)
     end
 end
+
+# ── Threaded rebase (neurons_per_thread > 0): same bits for every setting ─────
+# Meaningful with several threads (`julia -t 4`); with one thread the serial pass runs and the comparisons are trivial.
+
+@testset "column blocks: every column exactly once, about nnz/nc synapses each" begin
+    for colptr in (Int32[1, 5, 9, 9, 9], Int32[1, 1, 1, 4, 4, 10, 10], Int32[1, 1, 1, 1], _rb_random(Float32).colptr)
+        ncol, nnz = length(colptr) - 1, Int(colptr[end]) - 1
+        for nc in 1:8
+            blocks = [SNNModels._col_chunk(colptr, nc, k) for k in 1:nc]
+            @test reduce(vcat, collect.(blocks)) == 1:ncol
+            nnz > 100 && @test all(abs(colptr[last(b)+1] - colptr[first(b)] - nnz / nc) <= nnz / 20 for b in blocks)
+        end
+    end
+end
+
+@testset "threaded: every neurons_per_thread == serial == old rebase (nthreads = $(Threads.nthreads()))" begin
+    old_min = SNNModels.SYN_MIN_OPS[]
+    SNNModels.SYN_MIN_OPS[] = 0          # thread even the small synapses of the test
+    try
+        for FT in (Float32, Float64), Wmax in (1.2, 1e3)
+            syn = _rb_random(FT; Npre = 1500, Npost = 300, Wmax)
+            serial, old = with_neurons_per_thread(() -> _rb_pair(syn), 0)
+            @test _rb_same(serial, old)
+            for npt in (128, 256, 512, 1024)
+                new, _ = with_neurons_per_thread(() -> _rb_pair(syn), npt)
+                if Threads.nthreads() > 1
+                    @test with_neurons_per_thread(() -> SNNModels._col_nchunks(1500, length(syn.W)), npt) > 1   # threaded pass
+                end
+                @test _rb_same(new, serial)
+            end
+        end
+    finally
+        SNNModels.SYN_MIN_OPS[] = old_min
+    end
+end
+
+@testset "threaded train!: epoch restarts and normalisation == serial == old rebase" begin
+    old_min = SNNModels.SYN_MIN_OPS[]
+    SNNModels.SYN_MIN_OPS[] = 0
+    try
+        _, EEo, PEo = _rb_net(Float32, OldRebaseNorm(τ = 2ms))
+        _, EEs, PEs = with_neurons_per_thread(() -> _rb_net(Float32, nothing), 0)      # epoch restarts of the rule only
+        for npt in (128, 512)
+            _, EEn, PEn = with_neurons_per_thread(() -> _rb_net(Float32, MultiplicativeNorm(τ = 2ms)), npt)
+            @test _rb_same(_rb_state(EEn), _rb_state(EEo)) && _rb_same(_rb_state(PEn), _rb_state(PEo))
+            _, EEe, PEe = with_neurons_per_thread(() -> _rb_net(Float32, nothing), npt)
+            @test _rb_same(_rb_state(EEe), _rb_state(EEs)) && _rb_same(_rb_state(PEe), _rb_state(PEs))
+        end
+    finally
+        SNNModels.SYN_MIN_OPS[] = old_min
+    end
+end
+
+@testset "serial pass: threading off, below SYN_MIN_OPS" begin
+    with_neurons_per_thread(0) do
+        @test SNNModels._col_nchunks(1500, 10^7) == 1
+    end
+    with_neurons_per_thread(512) do
+        @test SNNModels._col_nchunks(1500, SNNModels.SYN_MIN_OPS[] - 1) == 1
+        @test SNNModels._col_nchunks(1500, 10^7) == (Threads.nthreads() == 1 ? 1 : 3)
+    end
+end

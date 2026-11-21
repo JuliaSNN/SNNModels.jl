@@ -96,7 +96,14 @@ with `Float32` fields keeps the `Float32` values: use `vSTDPParameter(FT = Float
 `Float64` values.
 
 # Cost
-Per step O(`Npost`); per presynaptic spike O(fan-out); once per epoch O(nnz). Serial.
+Per step O(`Npost`); per presynaptic spike O(fan-out); once per epoch and at every `sync_weights!` (e.g. every
+`SynapseNormalization` step) O(nnz).
+
+# Threading
+The per-step updates are serial. The materialisation of all synapses (epoch restart, `sync_weights!`, `sync_traces!`)
+is split in blocks of presynaptic columns with about equal numbers of synapses when `neurons_per_thread > 0` (the
+chunks of the presynaptic population, at most 8; serial for small synapses); the results are the same for every
+setting and thread count.
 
 # Postsynaptic potential
 ``V_i`` is the membrane potential of the compartment the synapse targets: for a `Tripod` or
@@ -196,7 +203,16 @@ function _ev_rebase!(c, vars::vSTDPVariables)
     @unpack colptr, I, W = c
     @unpack x, K, snap, pw, steps, cache = vars
     nnz = Int(colptr[end]) - 1
-    _ev_rebase_cols!(W, I, colptr, x, K, snap, cache[7], cache[4], pw[1], 1:length(colptr)-1)
+    dtA, Wmax, qp = cache[7], cache[4], pw[1]
+    # blocks of columns (neurons_per_thread > 0): every weight, snapshot and amplitude has one writer, K is only read
+    nc = _col_nchunks(length(colptr) - 1, nnz)
+    if nc == 1
+        _ev_rebase_cols!(W, I, colptr, x, K, snap, dtA, Wmax, qp, 1:length(colptr)-1)
+    else
+        @batch for k in 1:nc
+            _ev_rebase_cols!(W, I, colptr, x, K, snap, dtA, Wmax, qp, _col_chunk(colptr, nc, k))
+        end
+    end
     length(snap) > nnz && fill!(view(snap, nnz+1:length(snap)), 0.0)   # stale tail (resized at the next step)
     fill!(K, 0.0)
     steps[1] = 0

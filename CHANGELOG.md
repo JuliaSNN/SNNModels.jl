@@ -2,7 +2,7 @@
 
 ## 2.3.1
 
-Faster synaptic normalization. Results identical.
+Faster synaptic normalization and vSTDP epoch restart. Results identical.
 
 ### Improved
 
@@ -14,6 +14,12 @@ Faster synaptic normalization. Results identical.
   `SpikingSynapse.chunkptr`, shared with the threaded `forward!`), the update by blocks of synapses; bit-identical for every thread count and
   setting. With 4 threads and `neurons_per_thread = 512` a step costs 0.7 ns per synapse, 1.8 to 2.2 times less than one thread; 2 threads gain
   nothing at 4.6e6 synapses. Off by default.
+- `vSTDPParameter`: the materialisation of all synapses (epoch restart, `sync_weights!`, hence every `SynapseNormalization` step on a vSTDP
+  synapse) zeroes the snapshots in the same pass and vectorises: 1.35 ns per synapse on one thread instead of 2.2 (4.6e6 and 1.28e7 synapses,
+  Float32). With `neurons_per_thread > 0` it is split in blocks of presynaptic columns of about equal synapse counts: 0.57 ns per synapse at
+  4.6e6 and 0.65 at 1.28e7 with 4 threads and `neurons_per_thread = 512`. A `MultiplicativeNorm` step on a vSTDP synapse of 4.6e6 synapses
+  takes 12.1 ms instead of 16.5 on one thread and 6.4 ms instead of 14.2 with 4 threads (`bench/vstdp_rebase_bench.jl`). Bit-identical for
+  every thread count and setting (`test/syn/vstdp_rebase.jl` compares with a copy of the old pass).
 
 ## 2.3.0
 
