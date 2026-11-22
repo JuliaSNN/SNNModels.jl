@@ -279,7 +279,7 @@ function _ev_check!(c, vars::vSTDPVariables, param::vSTDPParameter, dt::Abstract
 end
 
 # presynaptic spikes of the step: bring their outgoing weights to step n-1, take the snapshot of K,
-# add the spike to the amplitude (x_j(n) includes it)
+# add the spike to the amplitude (x_j(n) includes it). `ivdep`: writes only at the loop index, K is only read.
 function _ev_spikes!(c, vars::vSTDPVariables, param::vSTDPParameter, spikes)
     @unpack colptr, I, W = c
     @unpack x, K, snap, pw, cache = vars
@@ -288,7 +288,7 @@ function _ev_spikes!(c, vars::vSTDPVariables, param::vSTDPParameter, spikes)
     qn = pw[2] * qi                       # q^-n of the current step
     @inbounds for j in spikes
         a = dtA * x[j]
-        @simd for s in colptr[j]:(colptr[j+1]-1)
+        @simd ivdep for s in colptr[j]:(colptr[j+1]-1)
             k = K[I[s]]
             W[s] = T(min(Float64(W[s]) + a * (k - snap[s]), Wmax))
             snap[s] = k
