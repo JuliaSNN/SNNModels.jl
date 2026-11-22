@@ -45,7 +45,7 @@ option of the triplet rule. Additive: existing models and rules are unchanged (r
 - **Layout**: one concrete type per number of dendrites with named fields `d1..dN`, `v_d1..v_dN`, `synvars_d1..`, `receptors_d1..`; `SNNModels.Multipod1` to `Multipod8`
   exist at load, `declare_multipod(D)` (exported, `1 <= D <= 64`) defines more. `load_model`, `load_data` and `SNNload` declare the types stored in a file before reading
   it (needs JLD2 >= 0.6); other readers need `declare_multipod(D)` first, and `check_loaded_model` says so. Save/load in a fresh process, `monitor!`/`record`, threaded chunks,
-  Float32/Float64, `change_plasticity` onto `:d<k>` are tested (`test/pop/multipod*.jl`). Per neuron cost: 1.035 x `Tripod` at `N_d = 2` (1 thread), about 3.4 ns per extra dendrite.
+  Float32/Float64, `change_plasticity` onto `:d<k>` are tested (`test/pop/multipod*.jl`). Per neuron cost: 1.035 x `Tripod` at `N_d = 2` (1 thread), about 3.4 ns per extra dendrite up to about 6 dendrites.
 - **Dendrites switched off**: a dendrite of length 0 is isolated from the soma (`g_ax = 0`) and still integrated; `set_dendrite_length!(p, k, l; neurons, d)` sets it per neuron
   (`Tripod`, `Multipod`, `BallAndStick`); connecting a synapse to a compartment disconnected in some neurons logs a warning. To save time use a population with fewer dendrites.
 - `vSTDPParameter` and `vSTDPDenseParameter` have the field `delay_uv` (default `0ms`): the low-pass filters `u` and `v` are driven by the postsynaptic potential `round(delay_uv / dt)`
