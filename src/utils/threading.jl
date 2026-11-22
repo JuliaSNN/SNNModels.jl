@@ -241,6 +241,27 @@ end
     return cp.sorted ? ptr : nothing
 end
 
+# ---------------------------------------------------------------------------------------------------------------------------------
+# Passes over all synapses: partition by presynaptic column
+#
+# A pass that touches every synapse once, with per-column state (the vSTDP rebase), is split into `nc` blocks of contiguous columns
+# with about `nnz / nc` synapses each. The boundaries depend on `colptr` and `nc` only; each synapse and column belongs to one block.
+
+# Number of column blocks of a pass over the `nnz` synapses of `ncol` columns: the chunks of `ncol` neurons for the
+# neurons_per_thread setting, 1 (serial) with one thread or below SYN_MIN_OPS synapses.
+@inline _col_nchunks(ncol::Int, nnz::Int) =
+    (Threads.nthreads() == 1 || nnz < SYN_MIN_OPS[]) ? 1 : nchunks(ncol, _BPC[])
+
+# Columns of block `c` of `nc`: from the first column with at least `(c - 1) * nnz ÷ nc` synapses before it up to the
+# column before the start of block `c + 1`; the last block ends at the last column (trailing empty columns included).
+@inline function _col_chunk(colptr, nc::Int, c::Int)
+    ncol = length(colptr) - 1
+    nnz = Int(colptr[end]) - Int(colptr[1])
+    lo = c == 1 ? 1 : searchsortedfirst(colptr, Int(colptr[1]) + (c - 1) * nnz ÷ nc)
+    hi = c == nc ? ncol : searchsortedfirst(colptr, Int(colptr[1]) + c * nnz ÷ nc) - 1
+    return lo:hi
+end
+
 export ChunkPtr, chunk_ptr!, invalidate_chunk_ptr!
 
 export neurons_per_thread, set_neurons_per_thread!, with_neurons_per_thread, foreach_chunk, foreach_chunk_c, @chunks

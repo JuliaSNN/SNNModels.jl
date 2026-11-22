@@ -87,6 +87,13 @@ are left unchanged. The period is `max(1, round(Int, τ / dt))` steps.
 The normalization runs at its position in the connection list, after the `forward!` and
 `plasticity!` of the connections listed before it.
 
+# Threading
+With `neurons_per_thread > 0` (see `set_neurons_per_thread!`) and more than one thread, the sums
+``W^1_i`` are partitioned by postsynaptic range (the chunks of the postsynaptic population) and the
+weight update by contiguous blocks of synapses. Every sum receives its terms in the serial order, so
+results are bit-identical for any number of threads. Synapses with fewer than
+`SNNModels.SYN_MIN_OPS[]` entries run serially.
+
 # Fields
 - `param::NormParam`: `MultiplicativeNorm` or `AdditiveNorm`.
 - `synapses::Vector{<:AbstractSparseSynapse}`: normalized connections.
@@ -214,16 +221,18 @@ function plasticity!(c::SynapseNormalization, param::NormParam)
     @unpack W1, W0, μ, synapses = c
     additive = param isa AdditiveNorm
     foreach(sync_weights!, synapses)   # the rescaling acts on the current weights (deferred updates are materialised)
-    foreach(ensure_transpose!, synapses)
     fill!(W1, zero(eltype(W1)))
-    nsyn = zeros(Int, length(W1))
     # `c.synapses` has an abstract element type: every loop runs in a kernel called through a
     # function barrier, so that it is compiled for the concrete synapse type.
-    for syn in synapses
-        _count_inputs!(nsyn, syn.rowptr)
+    if additive
+        nsyn = zeros(Int, length(W1))
+        for syn in synapses
+            _count_inputs!(nsyn, syn.rowptr)
+        end
     end
+    # the last argument is the sub-row pointer table of the threaded passes, or `nothing` (serial)
     for syn in synapses
-        _sum_inputs!(W1, syn.rowptr, syn.W, syn.index)
+        _sum_inputs!(W1, syn.W, syn.I, _norm_chunk_ptr(syn, length(W1)))
     end
     # normalize
     @inbounds for i in eachindex(μ)
@@ -235,7 +244,7 @@ function plasticity!(c::SynapseNormalization, param::NormParam)
     end
     # apply
     for syn in synapses
-        _apply_norm!(syn.W, syn.rowptr, syn.index, μ, additive)
+        _apply_norm!(syn.W, syn.I, μ, additive, _norm_chunk_ptr(syn, length(W1)))
     end
 end
 
@@ -246,32 +255,58 @@ function _count_inputs!(nsyn, rowptr)
     return nsyn
 end
 
-# Sequential (in-order) accumulation, as the weight sums are compared exactly in the tests.
-function _sum_inputs!(W1, rowptr, W, index)
-    @inbounds for i = 1:(length(rowptr)-1) # all postsynaptic neurons
-        s = W1[i]
-        for j = rowptr[i]:(rowptr[i+1]-1) # all presynaptic neurons of i
-            s += W[index[j]]
-        end
-        W1[i] = s
+# Row sums in CSC order: a sequential pass over the weights instead of a gather through the transposed
+# index. The inputs of a row are visited in increasing CSC position (the order of `index`, see
+# `_transpose_index!`), so every `W1[i]` receives the same additions in the same order: same bits.
+function _sum_inputs!(W1, W, I, ::Nothing)
+    @inbounds for s in eachindex(W)
+        W1[I[s]] += W[s]
     end
     return W1
 end
 
-function _apply_norm!(W, rowptr, index, μ, additive::Bool)
-    @inbounds for i = 1:(length(rowptr)-1)
-        m = μ[i]
-        if additive
-            for j = rowptr[i]:(rowptr[i+1]-1)
-                W[index[j]] += m
-            end
-        else
-            for j = rowptr[i]:(rowptr[i+1]-1)
-                W[index[j]] *= m
+# Threaded row sums, partitioned by postsynaptic range (the chunks of the postsynaptic population): chunk `c` visits,
+# column by column, the entries `ptr[c, j] : ptr[c+1, j] - 1` whose target lies in its range. Every `W1[i]` has one
+# writer and receives its additions in the serial order: same bits for any thread count and chunking.
+function _sum_inputs!(W1, W, I, ptr::Matrix{Int32})
+    foreach_chunk_c(length(W1)) do c, _
+        @inbounds for j in axes(ptr, 2)
+            for s in ptr[c, j]:(ptr[c+1, j]-1)
+                W1[I[s]] += W[s]
             end
         end
     end
+    return W1
+end
+
+# Per-synapse update, independent of the order: threaded over contiguous blocks of synapses when the sums were.
+function _apply_norm!(W, I, μ, additive::Bool, ::Nothing)
+    _apply_norm!(W, I, μ, additive, eachindex(W))
     return W
+end
+function _apply_norm!(W, I, μ, additive::Bool, ::Matrix{Int32})
+    foreach_chunk(rng -> _apply_norm!(W, I, μ, additive, rng), length(W))
+    return W
+end
+function _apply_norm!(W, I, μ, additive::Bool, rng::AbstractUnitRange)
+    if additive
+        @inbounds for s in rng
+            W[s] += μ[I[s]]
+        end
+    else
+        @inbounds for s in rng
+            W[s] *= μ[I[s]]
+        end
+    end
+    return nothing
+end
+
+# `nothing` (serial passes) or the sub-row pointer table of `syn` (`SpikingSynapse.chunkptr`, shared with the threaded
+# `forward!`): threading on, more than one chunk of the postsynaptic population, at least `SYN_MIN_OPS[]` synapses.
+function _norm_chunk_ptr(syn, Npost::Int)
+    cp = _chunkptr(syn)
+    cp === nothing && return nothing
+    return _syn_chunk_ptr(cp, Npost, syn.colptr, syn.I, (), length(syn.W))
 end
 
 export MultiplicativeNorm, AdditiveNorm, SynapseNormalization, NormParam

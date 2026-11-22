@@ -96,7 +96,14 @@ with `Float32` fields keeps the `Float32` values: use `vSTDPParameter(FT = Float
 `Float64` values.
 
 # Cost
-Per step O(`Npost`); per presynaptic spike O(fan-out); once per epoch O(nnz). Serial.
+Per step O(`Npost`); per presynaptic spike O(fan-out); once per epoch and at every `sync_weights!` (e.g. every
+`SynapseNormalization` step) O(nnz).
+
+# Threading
+The per-step updates are serial. The materialisation of all synapses (epoch restart, `sync_weights!`, `sync_traces!`)
+is split in blocks of presynaptic columns with about equal numbers of synapses when `neurons_per_thread > 0` (the
+chunks of the presynaptic population, at most 8; serial for small synapses); the results are the same for every
+setting and thread count.
 
 # Postsynaptic potential
 ``V_i`` is the membrane potential of the compartment the synapse targets: for a `Tripod` or
@@ -195,24 +202,43 @@ sync_weights!(c, v::vSTDPVariables) = (isnan(v.cache[1]) || _ev_rebase!(c, v); n
 function _ev_rebase!(c, vars::vSTDPVariables)
     @unpack colptr, I, W = c
     @unpack x, K, snap, pw, steps, cache = vars
-    T = eltype(W)
+    nnz = Int(colptr[end]) - 1
     dtA, Wmax, qp = cache[7], cache[4], pw[1]
-    @inbounds for j in 1:length(colptr)-1
-        a = dtA * x[j]
-        @simd for s in colptr[j]:(colptr[j+1]-1)
-            W[s] = T(min(Float64(W[s]) + a * (K[I[s]] - snap[s]), Wmax))
+    # blocks of columns (neurons_per_thread > 0): every weight, snapshot and amplitude has one writer, K is only read
+    nc = _col_nchunks(length(colptr) - 1, nnz)
+    if nc == 1
+        _ev_rebase_cols!(W, I, colptr, x, K, snap, dtA, Wmax, qp, 1:length(colptr)-1)
+    else
+        @batch for k in 1:nc
+            _ev_rebase_cols!(W, I, colptr, x, K, snap, dtA, Wmax, qp, _col_chunk(colptr, nc, k))
         end
-        x[j] = x[j] * qp
     end
+    length(snap) > nnz && fill!(view(snap, nnz+1:length(snap)), 0.0)   # stale tail (resized at the next step)
     fill!(K, 0.0)
-    fill!(snap, 0.0)
     steps[1] = 0
     pw[1] = 1.0
     pw[2] = 1.0
     return nothing
 end
 
-# weights of the end of the last step: a scratch vector with the pending potentiation added and clamped
+# Rebase of the columns `cols`: materialise their synapses and zero their snapshots in the same pass, rescale their
+# amplitudes by q^n. W, snap and K are distinct arrays (`ivdep`): the loop vectorises with a gather of K, and every
+# weight gets the same operations in the same order (no contraction), so the bits do not depend on the vectorisation.
+function _ev_rebase_cols!(W, I, colptr, x, K, snap, dtA::Float64, Wmax::Float64, qp::Float64, cols)
+    T = eltype(W)
+    @inbounds for j in cols
+        a = dtA * x[j]
+        @simd ivdep for s in colptr[j]:(colptr[j+1]-1)
+            W[s] = T(min(Float64(W[s]) + a * (K[I[s]] - snap[s]), Wmax))
+            snap[s] = 0.0
+        end
+        x[j] = x[j] * qp
+    end
+    return nothing
+end
+
+# weights of the end of the last step: a scratch vector with the pending potentiation added and clamped (`ivdep`: Wcur,
+# W, snap and K are distinct arrays and K is only read, as in `_ev_rebase_cols!`)
 function current_weights(c, vars::vSTDPVariables)
     isnan(vars.cache[1]) && return c.W
     @unpack colptr, I, W = c
@@ -222,7 +248,7 @@ function current_weights(c, vars::vSTDPVariables)
     dtA, Wmax = cache[7], cache[4]
     @inbounds for j in 1:length(colptr)-1
         a = dtA * x[j]
-        @simd for s in colptr[j]:(colptr[j+1]-1)
+        @simd ivdep for s in colptr[j]:(colptr[j+1]-1)
             Wcur[s] = T(min(Float64(W[s]) + a * (K[I[s]] - snap[s]), Wmax))
         end
     end
@@ -253,7 +279,7 @@ function _ev_check!(c, vars::vSTDPVariables, param::vSTDPParameter, dt::Abstract
 end
 
 # presynaptic spikes of the step: bring their outgoing weights to step n-1, take the snapshot of K,
-# add the spike to the amplitude (x_j(n) includes it)
+# add the spike to the amplitude (x_j(n) includes it). `ivdep`: writes only at the loop index, K is only read.
 function _ev_spikes!(c, vars::vSTDPVariables, param::vSTDPParameter, spikes)
     @unpack colptr, I, W = c
     @unpack x, K, snap, pw, cache = vars
@@ -262,7 +288,7 @@ function _ev_spikes!(c, vars::vSTDPVariables, param::vSTDPParameter, spikes)
     qn = pw[2] * qi                       # q^-n of the current step
     @inbounds for j in spikes
         a = dtA * x[j]
-        @simd for s in colptr[j]:(colptr[j+1]-1)
+        @simd ivdep for s in colptr[j]:(colptr[j+1]-1)
             k = K[I[s]]
             W[s] = T(min(Float64(W[s]) + a * (k - snap[s]), Wmax))
             snap[s] = k
@@ -270,6 +296,18 @@ function _ev_spikes!(c, vars::vSTDPVariables, param::vSTDPParameter, spikes)
         x[j] += qn * itx
     end
     vars.matstep[1] = vars.tick[1]
+    return nothing
+end
+
+# LTD at the presynaptic spikes, clamped at Wmin. `ivdep`: writes only at the loop index, u is only read.
+function _ev_ltd!(W, I, colptr, u, A_LTD, θ_LTD, Wmin, spikes)
+    z = zero(eltype(W))
+    @inbounds for j in spikes
+        @simd ivdep for s in colptr[j]:(colptr[j+1]-1)
+            w = W[s] - A_LTD * max(u[I[s]] - θ_LTD, z)
+            W[s] = w < Wmin ? Wmin : w
+        end
+    end
     return nothing
 end
 
@@ -360,12 +398,7 @@ function plasticity!(
             K[i] += pq * Float64(g)
         end
     end
-    @inbounds for j in spikes
-        @simd for s in colptr[j]:(colptr[j+1]-1)
-            w = W[s] - A_LTD * max(u[I[s]] - θ_LTD, z)
-            W[s] = w < Wmin ? Wmin : w
-        end
-    end
+    _ev_ltd!(W, I, colptr, u, A_LTD, θ_LTD, Wmin, spikes)
     tick[1] += 1
     steps[1] += 1
     steps[1] >= cache[8] && _ev_rebase!(c, vars)
