@@ -1,5 +1,32 @@
 # SNNModels changelog
 
+## 2.3.1
+
+Faster synaptic normalization and event-driven vSTDP (epoch restart, per-synapse loops). Results identical.
+
+### Improved
+
+- `SynapseNormalization` (`MultiplicativeNorm`, `AdditiveNorm`) and `AggregateScaling` sum and update the weights in storage (CSC) order, without the
+  transposed index. A `SynapseNormalization` step costs 1.3 to 1.5 ns per synapse on one thread, 3.6 times less than the row-wise gather through the
+  transposed index at 4.6e6 synapses and 5.5 times less at 2.5e7 (`bench/normalisation_bench.jl`). Every sum receives its terms in the same order as
+  the row-wise kernels: the weights are bit-identical (`test/syn/normalization_csc.jl` compares them with a copy of those kernels).
+- `SynapseNormalization` is threaded with `neurons_per_thread > 0`: the sums are partitioned by postsynaptic range (sub-row pointers cached in
+  `SpikingSynapse.chunkptr`, shared with the threaded `forward!`), the update by blocks of synapses; bit-identical for every thread count and
+  setting. With 4 threads and `neurons_per_thread = 512` a step costs 0.7 ns per synapse, 1.8 to 2.2 times less than one thread; 2 threads gain
+  nothing at 4.6e6 synapses. Off by default.
+- `vSTDPParameter`: the materialisation of all synapses (epoch restart, `sync_weights!`, hence every `SynapseNormalization` step on a vSTDP
+  synapse) zeroes the snapshots in the same pass and vectorises: 1.35 ns per synapse on one thread instead of 2.2 (4.6e6 and 1.28e7 synapses,
+  Float32). With `neurons_per_thread > 0` it is split in blocks of presynaptic columns of about equal synapse counts: 0.57 ns per synapse at
+  4.6e6 and 0.65 at 1.28e7 with 4 threads and `neurons_per_thread = 512`. A `MultiplicativeNorm` step on a vSTDP synapse of 4.6e6 synapses
+  takes 12.1 ms instead of 16.5 on one thread and 6.4 ms instead of 14.2 with 4 threads (`bench/vstdp_rebase_bench.jl`). Bit-identical for
+  every thread count and setting (`test/syn/vstdp_rebase.jl` compares with a copy of the old pass).
+- `vSTDPParameter`: the per-synapse loops of `plasticity_value(syn, :W)` and of the presynaptic spikes (materialisation, depression)
+  vectorise. One thread, 4.6e6 synapses (960 per presynaptic neuron), ns per synapse Float32 / Float64, old -> new: `plasticity_value`
+  1.66 -> 1.37 / 1.92 -> 1.92; at 10 spikes per step, materialisation 1.90 -> 1.25 / 1.86 -> 1.44, depression 0.82 -> 0.47 / 1.01 -> 0.87.
+  A `train!` step of 4800 AdEx neurons with vSTDP on E -> E (p = 0.2, about 4 Hz) takes 50.1 us instead of 51.8 (Float32), 64.6 instead
+  of 65.9 (Float64) (`bench/vstdp_event_bench.jl`). Bit-identical (`test/syn/vstdp_ivdep.jl` compares with copies of the old loops, also
+  over whole `train!` runs).
+
 ## 2.3.0
 
 New model `Multipod` (a soma with 1 to 64 dendrites, the field names of `Tripod`), the voltage delay of the vSTDP filters and the nearest-spike
@@ -18,7 +45,7 @@ option of the triplet rule. Additive: existing models and rules are unchanged (r
 - **Layout**: one concrete type per number of dendrites with named fields `d1..dN`, `v_d1..v_dN`, `synvars_d1..`, `receptors_d1..`; `SNNModels.Multipod1` to `Multipod8`
   exist at load, `declare_multipod(D)` (exported, `1 <= D <= 64`) defines more. `load_model`, `load_data` and `SNNload` declare the types stored in a file before reading
   it (needs JLD2 >= 0.6); other readers need `declare_multipod(D)` first, and `check_loaded_model` says so. Save/load in a fresh process, `monitor!`/`record`, threaded chunks,
-  Float32/Float64, `change_plasticity` onto `:d<k>` are tested (`test/pop/multipod*.jl`). Per neuron cost: 1.035 x `Tripod` at `N_d = 2` (1 thread), about 3.4 ns per extra dendrite.
+  Float32/Float64, `change_plasticity` onto `:d<k>` are tested (`test/pop/multipod*.jl`). Per neuron cost: 1.035 x `Tripod` at `N_d = 2` (1 thread), about 3.4 ns per extra dendrite up to about 6 dendrites.
 - **Dendrites switched off**: a dendrite of length 0 is isolated from the soma (`g_ax = 0`) and still integrated; `set_dendrite_length!(p, k, l; neurons, d)` sets it per neuron
   (`Tripod`, `Multipod`, `BallAndStick`); connecting a synapse to a compartment disconnected in some neurons logs a warning. To save time use a population with fewer dendrites.
 - `vSTDPParameter` and `vSTDPDenseParameter` have the field `delay_uv` (default `0ms`): the low-pass filters `u` and `v` are driven by the postsynaptic potential `round(delay_uv / dt)`
