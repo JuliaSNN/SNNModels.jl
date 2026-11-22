@@ -1,7 +1,8 @@
 # SNNModels bugs that affect SNN2AC_Optim: validation scripts, data and memo figures (2026-10-05)
 
-Side commit of SNNModels.jl, annotated tag `snn2ac-bugs-2026-10-05`, based on the 1.9.0 release commit
-(`e94ddca`, the one carrying the STP-order and Tripod fixes). It is not part of any release and not on `main`:
+Side commit of SNNModels.jl, annotated tag `snn2ac-bugs-2026-10-05-r2`, based on the 1.9.0 release commit
+(`e94ddca`, the one carrying the STP-order and Tripod fixes). It corrects the README of the tag
+`snn2ac-bugs-2026-10-05` (commit `90be97a`, same files), whose paragraph on `779f5a8` was incomplete. It is not part of any release and not on `main`:
 the registered versions are tree-hash bound, so nothing here touches them.
 
 The scripts, small data files (JLD2) and figures document four SNNModels bugs that changed SNN2AC_Optim
@@ -39,10 +40,18 @@ here the folder is `validation/snn2ac_bugs_2026-10-05/`. The scripts are unchang
   `unfixedIs`, `dtonly`, `glonly` (scratch commits listed in the script) and `fixed` = branch `fix/sweep-bugs`.
   These environments are not in this repository: set `ENVS=<dir>` to a folder holding them (the default path in
   `run_all.sh` points to a deleted scratch folder).
-- The scripts record `779f5a8` as having the behaviour of the released 1.8.4. Checked on 2026-11-22: `779f5a8` is an
-  ancestor of v1.9.0, 47 commits after v1.8.1 and not an ancestor of v1.8.4 (`dfe16de`), and `git diff 779f5a8 v1.8.4
-  -- src` is not empty (77 files). The identity of behaviour for the four bugs was asserted when the scripts were
-  written and is not a file-level identity of the sources.
+- `779f5a8` has the code of the released 1.8.4, as the scripts record. Checked on 2026-11-22: `779f5a8` is `bea4269`
+  (the 1.8.4 version bump on `dev`) plus two documentation commits (`cfa3745` docstrings for every public symbol,
+  `779f5a8` sweep inventory and report); v1.8.4 (`dfe16de`) is the merge of `bea4269` into `main` and adds no source
+  change. So `779f5a8` is not an ancestor of v1.8.4 and `git diff 779f5a8 v1.8.4 -- src` lists 77 files, but the
+  differences are documentation only: compared as parsed Julia expressions (docstrings, comments and line numbers
+  removed), the two `src/` trees are identical except for 8 files (`analysis/populations.jl`, `analysis/spikes.jl`,
+  `connections/sparse_plasticity/STP.jl`, `connections/sparse_plasticity/vSTDP.jl`, `populations/generalized_if/adex.jl`,
+  `stimuli/poisson_layer.jl`, `utils/record.jl`, `utils/io.jl`), each differing by one top-level statement that is
+  documentation text (`io.jl`: no executable line differs; the parse step failed on a command literal). The files behind
+  the four bugs are identical: `sparse_plasticity/iSTDP.jl`, `multicompartment/tripod.jl`, `ballandstick.jl`,
+  `utils/sparse_matrix.jl` and, apart from the docstring of `MarkramSTPVariables`, `sparse_plasticity/STP.jl`.
+  Behaviour is therefore that of 1.8.4. The comparison script is not kept here.
 - `istdp_control/istdp_cmp.jl` runs identically in the fixed (registered 1.8.2) and the buggy (library control branch)
   environments; the outputs are `result_fixed.jld2` and `result_buggy.jld2`.
 
