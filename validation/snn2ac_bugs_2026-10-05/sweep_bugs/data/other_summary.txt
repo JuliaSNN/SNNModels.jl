@@ -1,0 +1,46 @@
+== HH (1 s, dt = 0.01 ms): spike flags / upward crossings of -20 mV ==
+unfixed  flags/AP = 60.32 (range 59.91-61.00); rate at 500/1000/1500 pA from flags: 4657/7801/10248; true AP rate: 77/129/171
+fixed    flags/AP = 1.00 (range 1.00-1.00); rate at 500/1000/1500 pA from flags: 77/129/171; true AP rate: 77/129/171
+== MorrisLecar (3 pulses of 100 pA) ==
+unfixed  flags = 1596, action potentials = 3
+fixed    flags = 3, action potentials = 3
+== vSTDP: one pre spike, post clamped at -40 mV for 30 ms ==
+unfixed  dt=0.125  dW = 0.42959   peak x = 0.00833   dW (post at rest) = -0.05565
+unfixed  dt=0.0625 dW = 0.43025   peak x = 0.00417   dW (post at rest) = -0.05582
+unfixed  dt=0.025  dW = 0.43064   peak x = 0.00167   dW (post at rest) = -0.05593
+unfixed  silent AdEx target, 20 Hz input, 50 ms: mean dW = -0.01829
+fixed    dt=0.125  dW = 0.30327   peak x = 0.06667   dW (post at rest) = 0.00000
+fixed    dt=0.0625 dW = 0.30306   peak x = 0.06667   dW (post at rest) = 0.00000
+fixed    dt=0.025  dW = 0.30293   peak x = 0.06667   dW (post at rest) = 0.00000
+fixed    silent AdEx target, 20 Hz input, 50 ms: mean dW = -0.00070
+== AggregateScaling (post at 100 Hz, target 50 Hz, 2 s) ==
+unfixed  dt=0.125 y(end) = 1.8100 /ms   WT(0.5 s) = -9406.911   WT(2 s) = -966885632.000   sum W(2 s) = -966885632.000
+unfixed  dt=0.05  y(end) = 1.1547 /ms   WT(0.5 s) = -7758.926   WT(2 s) = -391548416.000   sum W(2 s) = -391548448.000
+fixed    dt=0.125 y(end) = 0.1050 /ms   WT(0.5 s) = 7.184   WT(2 s) = -7.816   sum W(2 s) = 2.500
+fixed    dt=0.05  y(end) = 0.1051 /ms   WT(0.5 s) = 7.186   WT(2 s) = -7.814   sum W(2 s) = 2.500
+== HetRec (no spikes, 300 ms): adaptive baseline of neuron 1 ==
+unfixed  trace(300 ms) dt=0.125: 4.352  dt=0.05: 4.640  (ratio 0.94); v_s: 4.891 vs 4.870
+fixed    trace(300 ms) dt=0.125: 2.423  dt=0.05: 2.422  (ratio 1.00); v_s: 4.856 vs 4.856
+== Confavreux2025Synapse (spike of weight 1 at rest) ==
+unfixed  dt=0.125 gAMPA after the spike = 0.1250 nS   PSP peak = 0.0285 mV
+unfixed  dt=0.05  gAMPA after the spike = 0.0500 nS   PSP peak = 0.0115 mV
+fixed    dt=0.125 gAMPA after the spike = 1.0000 nS   PSP peak = 0.2277 mV
+fixed    dt=0.05  gAMPA after the spike = 1.0000 nS   PSP peak = 0.2291 mV
+== interpolated_record time axis ==
+unfixed  10 Hz from 2 s: 20 samples, axis 2000.125:105.257:4000.000 ms (true 2100:100:4000)
+unfixed  1 kHz for 10.5 ms: 11 samples, axis 0.000:1.050:10.500 ms (true 0:1:10)
+fixed    10 Hz from 2 s: 20 samples, axis 2100.000:100.000:4000.000 ms (true 2100:100:4000)
+fixed    1 kHz for 10.5 ms: 11 samples, axis 0.000:1.000:10.000 ms (true 0:1:10)
+== stdp_kernel (STDPGerstner, SNNPlots.stdp_test) ==
+unfixed  -50: 9.13e-05  -30: 7.72e-05  -20: 6.27e-05  -10: 3.89e-05  -5: 2.16e-05  -2: 9.06e-06  -1: 4.41e-06  1: 1.95e-04  2: 1.90e-04  5: 1.77e-04  10: 1.60e-04  20: 1.36e-04  30: 1.22e-04  50: 1.08e-04
+fixed    -50: -8.23e-06  -30: -2.23e-05  -20: -3.68e-05  -10: -6.07e-05  -5: -7.79e-05  -2: -9.05e-05  -1: -9.51e-05  1: 9.51e-05  2: 9.05e-05  5: 7.78e-05  10: 6.07e-05  20: 3.68e-05  30: 2.23e-05  50: 8.23e-06
+expected  -50: -8.21e-06  -30: -2.23e-05  -20: -3.68e-05  -10: -6.07e-05  -5: -7.79e-05  -2: -9.05e-05  -1: -9.51e-05  1: 9.51e-05  2: 9.05e-05  5: 7.79e-05  10: 6.07e-05  20: 3.68e-05  30: 2.23e-05  50: 8.21e-06   (pair rule with the STDPGerstner amplitudes and time constants)
+== Rate population under RateSynapse (input g reset each step) ==
+unfixed  mean |x| at 20 ms = 92.625, at 220 ms = 1137.184; fraction |r| > 0.99 at 20 / 220 ms = 0.92 / 1.00
+fixed    mean |x| at 20 ms = 0.021, at 220 ms = 0.000; fraction |r| > 0.99 at 20 / 220 ms = 0.00 / 0.00
+== AdditiveNorm (weights x1.5, one normalisation) ==
+unfixed  mean W0 = 19.20, mean sum after = 25.60, max |sum - W0| = 6.667
+fixed    mean W0 = 19.20, mean sum after = 19.20, max |sum - W0| = 0.000
+== BalancedStimulus default ==
+unfixed  error: UndefVarError: `randcache` not defined in `SNNModels`
+fixed    exc 1.294 /ms, inh 0.507 /ms per neuron, neurons driven 50, same buffer false
