@@ -237,7 +237,8 @@ function _ev_rebase_cols!(W, I, colptr, x, K, snap, dtA::Float64, Wmax::Float64,
     return nothing
 end
 
-# weights of the end of the last step: a scratch vector with the pending potentiation added and clamped
+# weights of the end of the last step: a scratch vector with the pending potentiation added and clamped (`ivdep`: Wcur,
+# W, snap and K are distinct arrays and K is only read, as in `_ev_rebase_cols!`)
 function current_weights(c, vars::vSTDPVariables)
     isnan(vars.cache[1]) && return c.W
     @unpack colptr, I, W = c
@@ -247,7 +248,7 @@ function current_weights(c, vars::vSTDPVariables)
     dtA, Wmax = cache[7], cache[4]
     @inbounds for j in 1:length(colptr)-1
         a = dtA * x[j]
-        @simd for s in colptr[j]:(colptr[j+1]-1)
+        @simd ivdep for s in colptr[j]:(colptr[j+1]-1)
             Wcur[s] = T(min(Float64(W[s]) + a * (K[I[s]] - snap[s]), Wmax))
         end
     end
