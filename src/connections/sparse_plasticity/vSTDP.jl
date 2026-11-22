@@ -299,6 +299,18 @@ function _ev_spikes!(c, vars::vSTDPVariables, param::vSTDPParameter, spikes)
     return nothing
 end
 
+# LTD at the presynaptic spikes, clamped at Wmin. `ivdep`: writes only at the loop index, u is only read.
+function _ev_ltd!(W, I, colptr, u, A_LTD, θ_LTD, Wmin, spikes)
+    z = zero(eltype(W))
+    @inbounds for j in spikes
+        @simd ivdep for s in colptr[j]:(colptr[j+1]-1)
+            w = W[s] - A_LTD * max(u[I[s]] - θ_LTD, z)
+            W[s] = w < Wmin ? Wmin : w
+        end
+    end
+    return nothing
+end
+
 # number of steps of the delay `delay_uv` of the potential that drives u and v
 @inline _uv_delay_steps(param, dt) = param.delay_uv > 0 ? max(1, round(Int, param.delay_uv / dt)) : 0
 
@@ -386,12 +398,7 @@ function plasticity!(
             K[i] += pq * Float64(g)
         end
     end
-    @inbounds for j in spikes
-        @simd for s in colptr[j]:(colptr[j+1]-1)
-            w = W[s] - A_LTD * max(u[I[s]] - θ_LTD, z)
-            W[s] = w < Wmin ? Wmin : w
-        end
-    end
+    _ev_ltd!(W, I, colptr, u, A_LTD, θ_LTD, Wmin, spikes)
     tick[1] += 1
     steps[1] += 1
     steps[1] >= cache[8] && _ev_rebase!(c, vars)

@@ -1,6 +1,6 @@
-# Per-synapse loops of the event-driven vSTDP (`current_weights`, `_ev_spikes!`): the vectorised loops (`@simd ivdep`) are
-# bit-identical to the loops of SNNModels <= 2.3.0 (copied in vstdp_ivdep_old_kernel.jl). The loops write only at the loop
-# index (W, snap, Wcur) and read the postsynaptic arrays through `I` (gathers): repeated postsynaptic indices in a column
+# Per-synapse loops of the event-driven vSTDP (`current_weights`, `_ev_spikes!`, `_ev_ltd!`): the vectorised loops (`@simd
+# ivdep`) are bit-identical to the loops of SNNModels <= 2.3.0 (copied in vstdp_ivdep_old_kernel.jl). The loops write only at the
+# loop index (W, snap, Wcur) and read the postsynaptic arrays through `I` (gathers): repeated postsynaptic indices in a column
 # are harmless, and a test with such a column checks it. Every output and state variable is compared with `==`.
 using SNNModels
 using Test
@@ -142,6 +142,23 @@ end
         @test sn.W != syn.W && sn.snap != syn.LTPVars.snap && sn.x != syn.LTPVars.x   # the pass did something
         ncap = count(==(FT(Wmax)), sn.W)
         Wmax < 2 ? (@test ncap > 0) : (@test ncap == 0)
+    end
+end
+
+# ── Depression at the presynaptic spikes (_ev_ltd!) ───────────────────────────
+
+@testset "_ev_ltd!: Float32/Float64, Wmin clamp active and inactive, empty columns, repeated indices" begin
+    for FT in (Float32, Float64), Wmin in (0.1, -1e3), dup in (false, true)
+        syn = _iv_random(FT; dup)
+        spikes = _iv_spikes(300)
+        u, A_LTD, θ_LTD = syn.LTPVars.u, FT(8e-4), FT(-70)
+        @test any(<(θ_LTD), u) && any(>(θ_LTD), u)                   # depression on some targets only
+        new, old = copy(syn.W), copy(syn.W)
+        SNNModels._ev_ltd!(new, syn.I, syn.colptr, u, A_LTD, θ_LTD, FT(Wmin), spikes)
+        old_ltd!(old, syn.I, syn.colptr, u, A_LTD, θ_LTD, FT(Wmin), spikes)
+        @test eltype(new) == FT && new == old && new != syn.W
+        @test count(==(FT(Wmin)), new) > count(==(FT(Wmin)), syn.W) || Wmin < 0   # the clamp acted, or cannot act
+        @test any(signbit(syn.W[s]) && iszero(syn.W[s]) for j in spikes for s in syn.colptr[j]:syn.colptr[j+1]-1)   # -0 inputs
     end
 end
 

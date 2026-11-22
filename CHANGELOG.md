@@ -2,7 +2,7 @@
 
 ## 2.3.1
 
-Faster synaptic normalization and vSTDP epoch restart. Results identical.
+Faster synaptic normalization and event-driven vSTDP (epoch restart, per-synapse loops). Results identical.
 
 ### Improved
 
@@ -20,10 +20,12 @@ Faster synaptic normalization and vSTDP epoch restart. Results identical.
   4.6e6 and 0.65 at 1.28e7 with 4 threads and `neurons_per_thread = 512`. A `MultiplicativeNorm` step on a vSTDP synapse of 4.6e6 synapses
   takes 12.1 ms instead of 16.5 on one thread and 6.4 ms instead of 14.2 with 4 threads (`bench/vstdp_rebase_bench.jl`). Bit-identical for
   every thread count and setting (`test/syn/vstdp_rebase.jl` compares with a copy of the old pass).
-- `vSTDPParameter`: the per-synapse loops of `plasticity_value(syn, :W)` and of the presynaptic spikes vectorise. One thread, 4.6e6
-  synapses (960 per presynaptic neuron), ns per synapse in Float32 / Float64: `plasticity_value(syn, :W)` 1.41 / 1.83 instead of
-  1.70 / 1.84; materialisation at 10 presynaptic spikes 1.16 / 1.37 instead of 1.87 / 1.83 (`bench/vstdp_event_bench.jl`).
-  Bit-identical (`test/syn/vstdp_ivdep.jl` compares with copies of the old loops, also over whole `train!` runs).
+- `vSTDPParameter`: the per-synapse loops of `plasticity_value(syn, :W)` and of the presynaptic spikes (materialisation, depression)
+  vectorise. One thread, 4.6e6 synapses (960 per presynaptic neuron), ns per synapse Float32 / Float64, old -> new: `plasticity_value`
+  1.66 -> 1.37 / 1.92 -> 1.92; at 10 spikes per step, materialisation 1.90 -> 1.25 / 1.86 -> 1.44, depression 0.82 -> 0.47 / 1.01 -> 0.87.
+  A `train!` step of 4800 AdEx neurons with vSTDP on E -> E (p = 0.2, about 4 Hz) takes 50.1 us instead of 51.8 (Float32), 64.6 instead
+  of 65.9 (Float64) (`bench/vstdp_event_bench.jl`). Bit-identical (`test/syn/vstdp_ivdep.jl` compares with copies of the old loops, also
+  over whole `train!` runs).
 
 ## 2.3.0
 

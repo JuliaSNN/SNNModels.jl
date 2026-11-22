@@ -8,7 +8,8 @@
 # Float32 and Float64:
 #   current_weights   all synapses (plasticity_value(syn, :W))
 #   _ev_spikes!       outgoing synapses of 10 and 100 presynaptic spikes per call (400 different random sets)
-# Step: train! of 4800 AdEx neurons driven by Poisson input (about 5 Hz) with vSTDP on E -> E (p = 0.2), with the library
+#   _ev_ltd!          depression of the same synapses
+# Step: train! of 4800 AdEx neurons driven by Poisson input (4 to 5 Hz) with vSTDP on E -> E (p = 0.2), with the library
 # rule and with `OldKernelvSTDP` (old loops), the two runs alternated.
 #
 # Output: minimum over 7 repetitions; ns per synapse for the loops, us per step for train!; `identical` compares the
@@ -87,6 +88,12 @@ for FT in (Float32, Float64)
         t_new = time_calls(k -> SNNModels._ev_spikes!(b, b.LTPVars, b.LTPParam, sets[k]), 400)
         @printf("  _ev_spikes! %3d    old %6.3f  new %6.3f ns/syn  (%.1f / %.1f us per call)  identical=%s\n", nspk,
                 t_old / nent * 1e9, t_new / nent * 1e9, t_old * 1e6, t_new * 1e6, a.W == b.W && a.LTPVars.snap == b.LTPVars.snap)
+        A_LTD, θ_LTD, Wmin = FT(8e-4), FT(-70), FT(0.1)
+        Wa, Wb = copy(syn.W), copy(syn.W)
+        t_old = time_calls(k -> old_ltd!(Wa, syn.I, syn.colptr, v.u, A_LTD, θ_LTD, Wmin, sets[k]), 400)
+        t_new = time_calls(k -> SNNModels._ev_ltd!(Wb, syn.I, syn.colptr, v.u, A_LTD, θ_LTD, Wmin, sets[k]), 400)
+        @printf("  _ev_ltd!    %3d    old %6.3f  new %6.3f ns/syn  (%.1f / %.1f us per call)  identical=%s\n", nspk,
+                t_old / nent * 1e9, t_new / nent * 1e9, t_old * 1e6, t_new * 1e6, Wa == Wb)
     end
 end
 
